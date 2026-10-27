@@ -201,29 +201,51 @@ class LivingReserveEstimate(unittest.TestCase):
                      (f"{month}-10", "X", amount, category, status))
         conn.commit()
 
-    def test_average_of_verified_daily_spending_only(self):
+    def test_median_of_tidy_months_only(self):
         conn = connect(":memory:")
+        self.tx(conn, "2026-06", "makan", -1_000_000)                          # June: 90% of its money out is uncategorized -> skipped
+        self.tx(conn, "2026-06", None, -9_000_000, status="unverified")
         self.tx(conn, "2026-08", "makan", -2_000_000)
         self.tx(conn, "2026-09", "makan", -2_700_000)
         self.tx(conn, "2026-09", "transport", -300_000)
-        self.tx(conn, "2026-09", "wajib:sekolah", -6_000_000)                  # obligation: excluded
+        self.tx(conn, "2026-09", "wajib:sekolah", -6_000_000)                  # obligation: excluded, but it IS categorized
         self.tx(conn, "2026-09", "transfer_internal", -5_000_000)              # own transfer: excluded
-        self.tx(conn, "2026-09", None, -9_000_000, status="unverified")        # raw mutation row: excluded
         self.tx(conn, "2026-10", "makan", -9_999_000)                          # the current month is not history
-        self.assertEqual(hl.estimate_living_reserve(conn, date(2026, 10, 30)), 2_500_000)    # (2.0M + 3.0M) / 2
+        self.assertEqual(hl.estimate_living_reserve(conn, date(2026, 10, 30)), 2_500_000)    # median of Aug 2.0M and Sep 3.0M
+
+    def test_one_tidy_month_or_untidy_months_give_no_estimate(self):
+        conn = connect(":memory:")
+        self.tx(conn, "2026-09", "makan", -4_000_000)
+        self.assertEqual(hl.estimate_living_reserve(conn, date(2026, 10, 30)), 0)          # one month is not a pattern
+        self.tx(conn, "2026-08", "makan", -1_000_000)
+        self.tx(conn, "2026-08", None, -9_000_000, status="unverified")                    # Aug is only 10% categorized
+        self.assertEqual(hl.estimate_living_reserve(conn, date(2026, 10, 30)), 0)
 
     def test_capped_at_sixty_percent_of_salary_and_zero_without_history(self):
         conn = connect(":memory:")
         self.assertEqual(hl.estimate_living_reserve(conn, date(2026, 10, 30)), 0)
+        self.tx(conn, "2026-08", "makan", -5_000_000)
         self.tx(conn, "2026-09", "makan", -5_000_000)
         self.assertEqual(hl.estimate_living_reserve(conn, date(2026, 10, 30), salary=3_000_000), 1_800_000)
 
     def test_used_by_the_plan_when_not_set_and_labelled(self):
         conn = world(reserve=None)
+        self.tx(conn, "2026-08", "makan", -2_500_000)
         self.tx(conn, "2026-09", "makan", -2_500_000)
         snap = tools.generate_payday_plan(conn, TODAY)
         self.assertEqual((snap["reserve"], snap["reserve_source"]), (2_500_000, "estimasi dari transaksi yang sudah diverifikasi"))
         self.assertIn("Cadangan hidup harian: Rp 2.500.000 (estimasi", tools.summarize_plan(snap))
+
+    def test_untidy_history_never_drives_the_plan(self):
+        """Regression: a Rp 13M reserve estimated from half-categorized months made the plan pay only a card minimum."""
+        conn = world(reserve=None)
+        for m, cash, unknown in (("2026-07", 17_000_000, 27_000_000), ("2026-08", 4_000_000, 60_000_000), ("2026-09", 18_000_000, 45_000_000)):
+            self.tx(conn, m, "makan", -cash)
+            self.tx(conn, m, None, -unknown, status="unverified")
+        snap = tools.generate_payday_plan(conn, TODAY)
+        self.assertEqual((snap["reserve"], snap["reserve_source"]), (0, "belum diset"))
+        self.assertTrue(all("LUNASI" in a for a in snap["advice"]), snap["advice"])          # cards paid in full, not "only the minimum"
+        self.assertTrue(any("Cadangan hidup harian belum diset" in w for w in snap["warnings"]))
 
 
 try:

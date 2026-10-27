@@ -100,17 +100,15 @@ def estimate_living_reserve(conn, before: date, salary: int | None = None) -> in
     owner has categorized (verified) as non-obligation spending. Raw, unreviewed mutation rows would include
     school, loans and card bills and inflate the reserve, so they are left out. 0 when there is no such history.
     Rounded up to Rp 1.000 and capped at 60% of salary."""
-    this_month = f"{before.year}-{before.month:02d}"
-    per: dict[str, int] = {}
-    for r in conn.execute("SELECT substr(txn_date,1,7) m, category, amount FROM transactions WHERE amount < 0"
-                          " AND merged_into IS NULL AND status='verified' AND substr(txn_date,1,7) < ?", (this_month,)):
-        if r["category"] and is_discretionary(r["category"]):
-            per[r["m"]] = per.get(r["m"], 0) - r["amount"]
-    months = sorted(per)[-3:]
-    if not months:
+    from statistics import median
+
+    from .living import MIN_COVERAGE_PCT, monthly   # same coverage rule as living_cost_analysis
+    months = [v["cash"] for _, v in monthly(conn, before).items()
+              if v["total_out"] and v["coverage_pct"] >= MIN_COVERAGE_PCT][-3:]
+    if len(months) < 2:                    # one tidy month is not a pattern; half-categorized months mislead
         return 0
-    avg = -(-(sum(per[m] for m in months) // len(months)) // 1000) * 1000
-    return min(avg, salary * 60 // 100) if salary else avg
+    base = -(-int(median(months)) // 1000) * 1000
+    return min(base, salary * 60 // 100) if salary else base
 
 
 # ---- budgets and pace --------------------------------------------------------------------
