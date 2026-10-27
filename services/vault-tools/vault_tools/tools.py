@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import calendar
 import json
+import os
 import sqlite3
 from dataclasses import asdict
 from datetime import date, datetime, timezone
@@ -14,10 +15,26 @@ from .money import check_idr, format_idr
 from .payday import Obligation, Plan, build_plan, last_working_day, next_payday
 
 
+def _cuti_bersama() -> frozenset[date]:
+    """Joint-leave days from data/cuti_bersama.json (not in python-holidays); owner chose to
+    treat them as non-working days for payday. Years missing from the file add nothing."""
+    def load(path):
+        try:
+            with open(path) as f:
+                return {k: v for k, v in json.load(f).items() if not k.startswith("_")}
+        except FileNotFoundError:
+            return {}
+
+    data = load(os.path.join(os.path.dirname(__file__), "data", "cuti_bersama.json"))
+    # monthly host job (scripts/fetch-cuti.py) writes the override; it wins for years it covers
+    data.update(load(os.environ.get("CUTI_OVERRIDE", "/data/cuti_bersama.json")))
+    return frozenset(date.fromisoformat(d) for v in data.values() for d in v)
+
+
 def id_holidays(year: int) -> frozenset[date]:
-    """Indonesian national holidays (python-holidays). Excludes 'cuti bersama'."""
+    """Indonesian national holidays (python-holidays) plus cuti bersama (local data file)."""
     h = _holidays.country_holidays("ID", years=[year - 1, year, year + 1])
-    return frozenset(h.keys())
+    return frozenset(h.keys()) | _cuti_bersama()
 
 
 def _day_in_month(year: int, month: int, day: int) -> date:

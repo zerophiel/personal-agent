@@ -34,6 +34,21 @@ def seeded(conn):
     conn.commit()
 
 
+class Holidays(unittest.TestCase):
+    def test_cuti_bersama_included(self):
+        h = tools.id_holidays(2026)
+        for d in (date(2026, 3, 20), date(2026, 3, 24), date(2026, 5, 15), date(2026, 12, 24)):
+            self.assertIn(d, h)
+        self.assertIn(date(2026, 3, 19), h)       # national holiday from python-holidays
+        self.assertNotIn(date(2026, 1, 2), h)     # not a joint-leave day
+
+    def test_payday_skips_cuti_bersama(self):
+        from vault_tools.payday import last_working_day
+        # 31 Mar 2026 is a working day; 24 Dec cuti + 25 Dec Natal push Dec payday only if at month end
+        self.assertEqual(last_working_day(2026, 12, tools.id_holidays(2026)), date(2026, 12, 31))
+        self.assertEqual(last_working_day(2026, 5, tools.id_holidays(2026)), date(2026, 5, 29))
+
+
 class Tools(unittest.TestCase):
     def test_due_dates_clamped_and_windowed(self):
         w = tools.due_dates_in_window(31, date(2026, 10, 30), date(2026, 11, 30))
