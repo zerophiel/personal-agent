@@ -9,6 +9,9 @@
 | 5 | Hermes reaches Telegram through the zone proxy from an `internal: true` network | **Pass** | Connected in polling mode via `squid-vault`. |
 | 6 | Plugins are opt-in | Confirmed | Must list under `plugins.enabled`; loaded as source `user`. |
 
+| 7 | MCP over HTTP with bearer from env | **Pass** (2026-10-27) | `mcp_servers.vault_tools.url` + `headers.Authorization: "Bearer ${env:VAULT_TOOLS_MCP_TOKEN}"`; Hermes logged "registered 7 tool(s)" as `mcp__vault_tools__<tool>`. |
+| 8 | Model id `claude-sonnet-5-5` / aux `claude-haiku-5-5` accepted | **Pending live message** | Not in the Hermes docs (only `claude-sonnet-4-6` shown); first Telegram reply will confirm. |
+
 ## Still open
 - Telegram-side copy of the raw message: `cardguard` now calls `deleteMessage` (dm chats only, background thread, failures logged without the token). Implemented and unit-tested with a fake deleter; **live test pending** (needs the container with the vault bot token). `event.message_id` matches Telegram's native id (observed ids 2 and 5 around bot replies 3 and 4).
 - Whether a `skip` plus direct Bot API reply (design for `/rincian`) writes anything to the session store.
