@@ -19,7 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 from .money import check_idr, format_idr
 from .mutations import INTERNAL, cashflow, clean_text, normalize
 
-OBLIGATION_PREFIXES = ("wajib:", "sinking:", "sekali:")
+OBLIGATION_PREFIXES = ("wajib:", "sinking:", "sekali:", "berhenti:")   # berhenti: = a recurring cost that has ended
 DEFAULT_MIN_SAVINGS_BP = 1000      # save at least 10% of income unless the owner sets another figure
 DEFAULT_DSR_MAX_BP = 3000          # monthly debt payments <= 30% of net income
 WATCH_PCT, OVER_PCT, PACE_SLACK = 80, 100, 15

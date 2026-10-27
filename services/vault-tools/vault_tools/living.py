@@ -27,7 +27,7 @@ def _round_up(value: int, step: int = 1000) -> int:
 def monthly(conn, today: date) -> dict[str, dict]:
     """{month: {cash, excluded, uncategorized, total_out, coverage_pct, income_salary}} for complete months only."""
     this_month = f"{today.year}-{today.month:02d}"
-    out: dict[str, dict] = defaultdict(lambda: {"cash": 0, "excluded": 0, "uncategorized": 0, "total_out": 0, "salary_in": 0})
+    out: dict[str, dict] = defaultdict(lambda: {"cash": 0, "excluded": 0, "ended": 0, "uncategorized": 0, "total_out": 0, "salary_in": 0})
     for r in conn.execute("SELECT substr(txn_date,1,7) m, category, amount FROM transactions"
                           " WHERE source IN ('mutation','receipt') AND merged_into IS NULL AND substr(txn_date,1,7) < ?", (this_month,)):
         row = out[r["m"]]
@@ -36,6 +36,8 @@ def monthly(conn, today: date) -> dict[str, dict]:
             row["total_out"] += v
             if r["category"] is None:
                 row["uncategorized"] += v
+            elif r["category"].startswith("berhenti:"):
+                row["ended"] += v         # a recurring cost that no longer exists: out of the forward-looking reserve
             elif is_discretionary(r["category"]):
                 row["cash"] += v
             else:
@@ -102,6 +104,8 @@ def format_analysis(a: dict) -> str:
     for m, v in a["months"].items():
         mark = "dihitung" if m in a["counted"] else f"DILEWATI (baru {v['coverage_pct']}% dikategorikan)"
         sal = f"; gaji masuk {format_idr(v['salary_in'])}" if v["salary_in"] else ""
+        if v["ended"]:
+            sal += f"; biaya yang sudah berhenti {format_idr(v['ended'])} (tidak dihitung)"
         lines.append(f"- {m}: biaya hidup kas {format_idr(v['cash'])}; kewajiban/sekali/antar-rekening {format_idr(v['excluded'])}; "
                      f"belum dikategorikan {format_idr(v['uncategorized'])}{sal}; {mark}")
     if a["skipped"]:

@@ -61,6 +61,22 @@ class Monthly(unittest.TestCase):
         self.assertEqual(m["2026-02"]["salary_in"], 30_000_000)               # the old salary, before the job change
         self.assertNotIn("2026-10", m)                                        # current month is never history
 
+    def test_ended_recurring_costs_are_shown_but_kept_out_of_the_reserve(self):
+        conn = world()
+        for m in ("01", "02", "03"):                                   # the driver was paid early in the year, then stopped
+            tx(conn, 1, f"2026-{m}-05", "TRANSFER KE DARJA", -2_000_000, "berhenti:supir")
+        conn.commit()
+        m = lv.monthly(conn, TODAY)
+        self.assertEqual(m["2026-01"]["ended"], 2_000_000)
+        self.assertEqual(m["2026-01"]["cash"], 10_000_000)             # unchanged: the driver is not day-to-day living
+        self.assertEqual(m["2026-04"]["ended"], 0)
+        a = lv.analyse(conn, TODAY, from_month="2026-01")
+        self.assertEqual((a["tight"], a["recommended"]), (12_000_000, 13_200_000))         # same as without the driver rows
+        text = lv.format_analysis(a)
+        self.assertIn("biaya yang sudah berhenti Rp 2.000.000 (tidak dihitung)", text)
+        from vault_tools import health as hl
+        self.assertFalse(hl.is_discretionary("berhenti:supir"))
+
     def test_coverage_flags_a_poorly_categorized_month(self):
         m = lv.monthly(world(), TODAY)
         self.assertEqual(m["2026-03"]["uncategorized"], 20_000_000)
