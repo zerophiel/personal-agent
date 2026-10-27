@@ -102,7 +102,7 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
     @mcp.tool()
     @locked
     def upsert_sinking_fund(alias: str, target: int, due_date: str, pool_alias: str, pool_pay_to_alias: str,
-                            creditor_pay_to_alias: str | None = None, saved_so_far: int = 0,
+                            creditor_pay_to_alias: str | None = None, saved_so_far: int | None = None,
                             note: str | None = None) -> str:
         """Dana terikat untuk kewajiban sekali bayar (mis. hutang ke teman) yang dikumpulkan di rekening pot.
         pool_alias = rekening pot terdaftar (kind=pool); pool_pay_to_alias = alias nomor rekening pot (dari /rekening);

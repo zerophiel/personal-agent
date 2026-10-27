@@ -110,6 +110,21 @@ class Validation(unittest.TestCase):
             with self.assertRaises(ValueError):
                 fund(conn, **bad)
 
+    def test_attaching_a_creditor_keeps_saved_balance_and_start_date(self):
+        conn = setup()
+        fund(conn, saved_so_far=10_000_000, creditor_pay_to_alias=None, today=date(2026, 10, 1))
+        mu.record_mutations(conn, "pot", "b" * 64, "2026-10-01", "2026-10-31", None, None,
+                            [{"date": "2026-10-15", "description": "SETOR", "amount": 9_000_000}])
+        mu.set_category(conn, 1, "sinking:hutang-teman")
+        before = tools.sinking_saved(conn, row(conn))
+        self.assertEqual(before, 19_000_000)
+        tools.upsert_sinking_fund(conn, "hutang-teman", TARGET, DUE, "pot", "pot-rek", "teman-rek", today=TODAY)   # saved_so_far omitted
+        r = row(conn)
+        self.assertEqual((r["saved_so_far"], r["saved_asof"], r["creditor_pay_to"]), (10_000_000, "2026-10-01", "teman-rek"))
+        self.assertEqual(tools.sinking_saved(conn, r), before)                  # progress intact
+        tools.upsert_sinking_fund(conn, "hutang-teman", TARGET, DUE, "pot", "pot-rek", saved_so_far=50_000_000, today=TODAY)
+        self.assertEqual((row(conn)["saved_so_far"], row(conn)["saved_asof"]), (50_000_000, TODAY.isoformat()))  # explicit restart
+
     def test_upsert_updates_without_losing_creditor(self):
         conn = setup()
         fund(conn)

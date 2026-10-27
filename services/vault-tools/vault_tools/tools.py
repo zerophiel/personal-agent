@@ -195,7 +195,15 @@ def _round_up(value: int, step: int = ROUND_UP_TO) -> int:
 
 def upsert_sinking_fund(conn, alias: str, target: int, due_date: str, pool_alias: str,
                         pool_pay_to_alias: str, creditor_pay_to_alias: str | None = None,
-                        saved_so_far: int = 0, today: date | None = None, note: str | None = None) -> str:
+                        saved_so_far: int | None = None, today: date | None = None, note: str | None = None) -> str:
+    """Create or update a fund. `saved_so_far=None` on an existing fund keeps the tracked balance and
+    its start date (attaching a creditor never resets progress); a number restarts tracking from today."""
+    existing = conn.execute("SELECT saved_so_far, saved_asof FROM sinking_funds WHERE alias=?", (alias,)).fetchone()
+    if saved_so_far is None:
+        saved_so_far = existing["saved_so_far"] if existing else 0
+        keep_asof = existing["saved_asof"] if existing else None
+    else:
+        keep_asof = None
     check_idr(target), check_idr(saved_so_far)
     if target <= 0 or saved_so_far < 0:
         raise ValueError("target harus > 0 dan saved_so_far >= 0")
@@ -212,17 +220,16 @@ def upsert_sinking_fund(conn, alias: str, target: int, due_date: str, pool_alias
         row = conn.execute("SELECT kind FROM payee_secrets WHERE alias=?", (a,)).fetchone()
         if row is None or row["kind"] not in ("account", "va"):
             raise ValueError(f"{label}: {a} belum tersimpan sebagai nomor rekening/VA (kirim dengan /rekening atau /va)")
-    asof = conn.execute("SELECT saved_asof FROM sinking_funds WHERE alias=?", (alias,)).fetchone()
     conn.execute(
         "INSERT INTO sinking_funds(alias,target,due_date,pool_alias,pool_pay_to,creditor_pay_to,saved_so_far,saved_asof,note)"
         " VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(alias) DO UPDATE SET target=excluded.target,"
         "due_date=excluded.due_date,pool_alias=excluded.pool_alias,pool_pay_to=excluded.pool_pay_to,"
         "creditor_pay_to=COALESCE(excluded.creditor_pay_to,sinking_funds.creditor_pay_to),"
-        "saved_so_far=excluded.saved_so_far,saved_asof=excluded.saved_asof,note=excluded.note",
+        "saved_so_far=excluded.saved_so_far,saved_asof=excluded.saved_asof,"
+        "note=COALESCE(excluded.note,sinking_funds.note)",
         (alias, target, due_date, pool_alias, pool_pay_to_alias, creditor_pay_to_alias, saved_so_far,
-         today.isoformat(), note))
+         keep_asof or today.isoformat(), note))
     conn.commit()
-    _ = asof
     return (f"dana terikat {alias}: {format_idr(target)} jatuh tempo {due_date}, terkumpul awal "
             f"{format_idr(saved_so_far)} per {today.isoformat()}")
 
