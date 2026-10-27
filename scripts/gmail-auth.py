@@ -5,6 +5,7 @@ straight to the VPS; nothing secret is printed to the terminal or stored locally
 Usage: gmail-auth.py client_secret.json | ssh vps '... cat > .../gmail_ingest_token'
 Needs: pip install google-auth-oauthlib
 """
+import contextlib
 import json
 import sys
 
@@ -18,10 +19,15 @@ def main() -> int:
         print("usage: gmail-auth.py client_secret.json", file=sys.stderr)
         return 2
     flow = InstalledAppFlow.from_client_secrets_file(sys.argv[1], SCOPES)
-    # access_type=offline + prompt=consent guarantees a refresh token is returned
-    creds = flow.run_local_server(port=0, access_type="offline", prompt="consent",
-                                  authorization_prompt_message="Buka browser untuk menyetujui akses baca Gmail...",
-                                  success_message="Selesai. Boleh menutup tab ini.")
+    # The library print()s its prompt to STDOUT, which is piped into the token file on the VPS.
+    # Send everything it prints to stderr so only the JSON below reaches stdout.
+    with contextlib.redirect_stdout(sys.stderr):
+        # access_type=offline + prompt=consent guarantees a refresh token is returned.
+        # open_browser=False: WSL cannot launch a browser; open the printed URL yourself.
+        creds = flow.run_local_server(
+            port=0, open_browser=False, access_type="offline", prompt="consent",
+            authorization_prompt_message="\nBuka URL ini di browser Anda dan setujui akses baca Gmail:\n{url}\n",
+            success_message="Selesai. Boleh menutup tab ini.")
     if not creds.refresh_token:
         print("Tidak ada refresh token diterima; ulangi (cabut akses lama dulu).", file=sys.stderr)
         return 1
