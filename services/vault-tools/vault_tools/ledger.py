@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 8   # 8: statements.paid_amount; 7: cards.interest_bp_month; 6: transactions.merged_into, net_snapshots; 5: debts.pay_method/pay_to_alias/debit_account_alias; 2: cards.pay_method/pay_to_alias; 3: transaction dedupe, mutation_files, category_rules; 4: sinking_funds
+SCHEMA_VERSION = 9   # 9: card_installments; 8: statements.paid_amount; 7: cards.interest_bp_month; 6: transactions.merged_into, net_snapshots; 5: debts.pay_method/pay_to_alias/debit_account_alias; 2: cards.pay_method/pay_to_alias; 3: transaction dedupe, mutation_files, category_rules; 4: sinking_funds
 
 
 def _money(col: str, nullable: bool = False) -> str:
@@ -74,6 +74,12 @@ CREATE TABLE IF NOT EXISTS ingest_checks (   -- what the PDF itself contains, to
 CREATE TABLE IF NOT EXISTS owner_names (name TEXT PRIMARY KEY);   -- lowercase; a transfer to one of these is the owner's own move
 CREATE TABLE IF NOT EXISTS category_rules (
   pattern TEXT PRIMARY KEY, category TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS card_installments (   -- "03/12" on a card statement: payment 3 of 12
+  card_id INTEGER NOT NULL REFERENCES cards(id), key TEXT NOT NULL, description TEXT NOT NULL,
+  {_money('per_month')} NOT NULL CHECK (per_month > 0),
+  seq INTEGER NOT NULL, total INTEGER NOT NULL CHECK (total >= 2 AND seq BETWEEN 1 AND total),
+  as_of TEXT NOT NULL,                  -- statement date that printed seq/total
+  PRIMARY KEY (card_id, key));
 CREATE TABLE IF NOT EXISTS plans (
   id INTEGER PRIMARY KEY, payday TEXT NOT NULL, snapshot_json TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS thresholds (

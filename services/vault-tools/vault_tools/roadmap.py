@@ -6,6 +6,7 @@ from __future__ import annotations
 import calendar
 from datetime import date
 
+from . import card_installments
 from .money import format_idr
 from .tools import (DEFAULT_CARD_INTEREST_BP, bp_of_idr, get_threshold, id_holidays, next_payday,
                     last_working_day, sinking_required)
@@ -74,6 +75,12 @@ def roadmap(conn, today: date) -> dict:
         if s["per_month"]:
             freed.append((date.fromisoformat(f["due_date"]), s["per_month"], f["alias"]))
 
+    card_inst = card_installments.active(conn)
+    for a in card_inst:
+        items.append({"kind": "cicilan kartu", "alias": f"{a['card']}: {a['description']}", "remaining": a["remaining"],
+                      "ends": a["ends"], "per_month": a["per_month"], "detail": f"{a['seq']}/{a['total']}, {a['left']} bulan lagi"})
+        freed.append((date.fromisoformat(a["ends"]), a["per_month"], a["description"]))
+
     default_rate = get_threshold(conn, "default_card_interest_bp", DEFAULT_CARD_INTEREST_BP)
     cards = [(r["alias"], r["owed"], r["rate"] if r["rate"] is not None else default_rate) for r in conn.execute(
         "SELECT c.alias, s.total_due - s.paid_amount AS owed, c.interest_bp_month AS rate FROM statements s"
@@ -90,7 +97,7 @@ def roadmap(conn, today: date) -> dict:
         if reserve is None:
             from .health import estimate_living_reserve
             reserve = estimate_living_reserve(conn, payday, salary)
-        capacity = salary - fixed - inst - pot - reserve
+        capacity = salary - fixed - inst - pot - reserve - sum(a["per_month"] for a in card_inst)   # next bills already carry them
     card_total = sum(b for _, b, _ in cards)
     card_result = clear_cards(cards, capacity) if cards and capacity is not None else None
     card_end = None

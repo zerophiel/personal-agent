@@ -23,7 +23,7 @@ from starlette.responses import JSONResponse, PlainTextResponse
 
 from pydantic import BaseModel, Field
 
-from . import health, living, mutations, names, roadmap, statement_pdf, statements, suggest, tools
+from . import card_installments, health, living, mutations, names, roadmap, statement_pdf, statements, suggest, tools
 from .ledger import connect
 from .money import format_idr
 from .payee_vault import PayeeVault, has_forbidden_card_data
@@ -36,7 +36,16 @@ MCP_TOOL_NAMES = ("upsert_card", "upsert_debt", "upsert_expense", "set_threshold
                   "list_uncategorized", "cashflow_summary", "recurring_payments", "suggest_salary",
                   "upsert_sinking_fund", "sinking_status", "record_expense", "set_budget", "budget_status",
                   "health_check", "list_statements", "record_card_payment", "debt_free_roadmap",
-                  "add_owner_name", "suggest_categories", "apply_suggestions", "living_cost_analysis")
+                  "add_owner_name", "suggest_categories", "apply_suggestions", "living_cost_analysis",
+                  "record_card_installments", "card_installments_status")
+
+
+class Installment(BaseModel):
+    """One card installment as printed: payment `seq` of `total` months, `amount` charged each month."""
+    description: str = Field(max_length=120)
+    amount: int = Field(description="Rupiah per bulan, bilangan bulat")
+    seq: int = Field(description="x pada x/y")
+    total: int = Field(description="y pada x/y")
 
 
 class Txn(BaseModel):
@@ -278,6 +287,21 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
         (simulasi bunga), perkiraan tanggal bebas utang, dan arus kas yang terbebas tiap kewajiban selesai.
         Dihitung kode dengan asumsi yang tertulis di hasilnya; gunakan untuk menjelaskan tujuan jangka panjang."""
         return roadmap.format_roadmap(roadmap.roadmap(conn, today()))
+
+    @mcp.tool()
+    @locked
+    def record_card_installments(card_alias: str, statement_date: str, items: list[Installment]) -> str:
+        """Catat CICILAN KARTU yang tercetak di tagihan (tanda x/y, mis. 03/12 = cicilan ke-3 dari 12 bulan). Panggil
+        setiap membaca tagihan yang memuat cicilan, dengan statement_date tagihan itu. Cicilan yang tidak muncul lagi
+        di tagihan terbaru dianggap sudah selesai. Jangan tertukar dengan tanggal dd/mm: cicilan biasanya ada di
+        kolom/keterangan 'cicilan' atau 'installment' dan jumlahnya sama tiap bulan."""
+        return card_installments.record(conn, card_alias, statement_date, [i.model_dump() for i in items])
+
+    @mcp.tool()
+    @locked
+    def card_installments_status() -> str:
+        """Daftar cicilan kartu yang masih berjalan: per bulan, ke-x dari y, sisa bulan dan total sisa."""
+        return card_installments.format_list(conn)
 
     @mcp.tool()
     @locked
