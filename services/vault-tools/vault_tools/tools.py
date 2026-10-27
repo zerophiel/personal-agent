@@ -295,8 +295,9 @@ def collect_obligations(conn, payday: date, nxt: date, holidays=()) -> list[Obli
                               method=r["pay_method"], pay_to=r["pay_to_alias"]))
     for r in conn.execute("SELECT alias, installment, due_day, rate_bp FROM debts WHERE tenor_left > 0"):
         for d in due_dates_in_window(r["due_day"], payday, nxt):
+            # rate_bp is the ANNUAL rate; the delay cost estimate is per month
             obs.append(Obligation("debt", r["alias"], d, r["installment"],
-                                  late_cost_bp=r["rate_bp"] or 0))
+                                  late_cost_bp=(r["rate_bp"] or 0) // 12))
     for r in conn.execute("SELECT payee_alias, amount, due_day FROM fixed_expenses"):
         for d in due_dates_in_window(r["due_day"], payday, nxt):
             obs.append(Obligation("fixed", r["payee_alias"], d, r["amount"], pay_to=r["payee_alias"]))

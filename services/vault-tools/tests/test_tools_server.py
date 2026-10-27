@@ -70,6 +70,12 @@ class Tools(unittest.TestCase):
         self.assertEqual(snap["cash_to_hold"], 10_000_000 - 6_500_000)
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM plans").fetchone()[0], 1)
 
+    def test_debt_delay_cost_uses_monthly_share_of_the_annual_rate(self):
+        conn = connect(":memory:")
+        tools.upsert_debt(conn, "mobil", "MTF", 115_220_000, 5_761_000, 20, 2, 1200)   # 12.00% a year
+        ob = [o for o in tools.collect_obligations(conn, date(2026, 10, 30), date(2026, 11, 30)) if o.kind == "debt"][0]
+        self.assertEqual(ob.late_cost_bp, 100)                                          # 1.00% a month
+
     def test_paid_statement_excluded_and_salary_required(self):
         conn = connect(":memory:")
         with self.assertRaises(ValueError):
