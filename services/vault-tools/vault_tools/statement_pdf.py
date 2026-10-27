@@ -184,9 +184,11 @@ def count_signed_lines(parts: list[str]) -> int:
 
 
 def count_transactions(parts: list[str]) -> int:
-    """Transactions in the document: the larger of the date-led count (BCA, Jago) and the signed-amount count
-    (Mandiri). Both agree where both formats apply. 0 means the layout is unknown, so no completeness check."""
-    return max(count_dated_lines(parts), count_signed_lines(parts))
+    """Transactions in the document. Date-led layouts (BCA, Jago) use the dated-line count; layouts where the date
+    stands alone (Mandiri) fall back to the signed-amount count. NOT the maximum of the two: Jago's pocket summary
+    rows ('Main Pocket IDR +1.234,00 -567,00 ...') also look like signed amounts and would inflate it.
+    0 means the layout is unknown, so no completeness check is made."""
+    return count_dated_lines(parts) or count_signed_lines(parts)
 
 
 TEXT_SUFFIXES = (".csv", ".txt")

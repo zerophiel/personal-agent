@@ -61,6 +61,16 @@ class Counting(unittest.TestCase):
         self.assertEqual(sp.count_transactions([BCA_LIKE]), 3)           # BCA-style stays on the date-led count
         self.assertEqual(sp.count_transactions(["tidak ada transaksi"]), 0)
 
+    def test_jago_pocket_summary_rows_do_not_inflate_the_count(self):
+        jago = ("Pocket Name Currency Previous Balance Total Incoming Total Outgoing Closing Balance\n"
+                "Main Pocket IDR 1.234,56 +20.000.000,00 -19.000.000,00 2.234,56\n"
+                "GoPay IDR 0,00 +500.000,00 -499.000,00 1.000,00\n"
+                "02 Jan 2026 Transfer ke teman -1.500.000,00 3.250.000\n"
+                "09 Jan 2026 Pembayaran QR -20.000,00 3.230.000\n")
+        self.assertEqual(sp.count_signed_lines([jago]), 4)               # the two summary rows look like transactions
+        self.assertEqual(sp.count_dated_lines([jago]), 2)
+        self.assertEqual(sp.count_transactions([jago]), 2)               # date-led layout wins
+
     def test_opening_and_closing_balance_lines_never_count(self):
         t = "01/10 Saldo Awal 5,000.00\n31/10 Saldo Akhir 6,000.00\n15/10 Opening Balance\n"
         self.assertEqual(sp.count_dated_lines([t]), 0)
