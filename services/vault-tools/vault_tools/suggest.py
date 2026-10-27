@@ -20,13 +20,18 @@ DEBIT_RULES: list[tuple[str, str]] = [
                     r"kartu kredit/pl|\bbca card\b|credit card payment"),
     ("wajib:spaylater", r"spaylater|shopee ?pay ?later|paylater|kredivo|akulaku"),
     ("wajib:cicilan", r"pendebitan otomatis|auto ?coll|autodebet|autodebit|angsuran|cicilan"),
+    ("wajib:ipl", r"riviera|\bipl\b"),
+    ("wajib:sekolah", r"ipeka|sekolah|\bschool\b"),
+    ("wajib:asuransi", r"avrist|allianz|prudential|manulife|\baxa\b|asuransi|\bpremi\b"),   # debits only; credits are payouts/commission
+    ("liburan", r"traveloka|tiket\.com|agoda|booking\.com|airbnb|garuda|lion air|airasia"),
     ("belanja-online", r"tokopedia|shopee|lazada|bukalapak|blibli|tiktok ?shop"),
-    ("transport", r"\bgrab\b|gojek|go-?jek|pertamina|spbu|\bshell\b|e-?toll|\btol\b|parkir|kai access|transjakarta|\bmrt\b|bluebird"),
+    ("transport", r"\bgrab\b|gojek|go-?jek|pertamina|spbu|\bshell\b|e-?toll|\btol\b|parkir|kai access|transjakarta|\bmrt\b|bluebird|"
+                  r"flazz|e-?money|brizzi|tapcash"),
     ("makan", r"restaurant|restoran|\bresto\b|\bcafe\b|kafe|coffee|kopi|bakmi|warung|gado|mcdonald|\bkfc\b|starbucks|"
               r"yakiniku|sushi|ayam|bakso|pizza|burger|bakery|roti|\bfood\b|kantin|mie "),
     ("langganan", r"netflix|spotify|youtube|disney|apple\.com|google (one|play)|icloud|canva|openai|chatgpt"),
     ("belanja-harian", r"indomaret|alfamart|alfamidi|superindo|hypermart|lotte ?mart|ranch market|farmers"),
-    ("kesehatan", r"apotek|apotik|klinik|rumah sakit|kimia farma|guardian|halodoc"),
+    ("kesehatan", r"apotek|apotik|klinik|rumah sakit|\brs\b|kimia farma|guardian|halodoc"),
     ("utilitas", r"\bpln\b|listrik|pdam|indihome|telkom|biznet|pulsa|paket data"),
 ]
 CREDIT_RULES: list[tuple[str, str]] = [
@@ -51,16 +56,19 @@ def owner_names(conn) -> list[str]:
 
 _FEE = re.compile(r"biaya (transaksi|txn|transfer|admin|adm|layanan|materai)|pajak bunga|admin fee")
 _CARD_WORDS = re.compile(r"kartu kredit|credit card|\bbca card\b|\bcard\b")
-_POCKET_MOVE = re.compile(r"pocket.*(movement|money in|money out|main pocket|between pockets)|main pocket")
+_POCKET_MOVE = re.compile(r"pocket.*(movement|money in|money out|main pocket|between pockets)|main pocket|"
+                          r"top ?up poket|pindahkan poket|\bpoket \d+")
 
 
-def suggest_category(normalized: str, amount: int, owners: list[str]) -> str | None:
+def suggest_category(normalized: str, amount: int, owners: list[str], own_last4: list[str] = ()) -> str | None:
     if _FEE.search(normalized):
         return "biaya-bank"                             # a fee line that mentions a payee is still just a fee
     if any(o in normalized for o in owners) and not _CARD_WORDS.search(normalized):
         return "transfer_internal"                      # money to/from the owner's own name (any channel: trsf, switching, BI-Fast)
     if _POCKET_MOVE.search(normalized):
         return "transfer_internal"                      # moves between the owner's Jago pockets
+    if any(f"****{l4}" in normalized for l4 in own_last4) and re.search(r"transfer|trsf|switching|bi-?fast|kliring", normalized):
+        return "transfer_internal"                      # to/from one of the owner's own accounts, identified by its number
     for cat, rx in (CREDIT_RULES if amount > 0 else DEBIT_RULES):
         if re.search(rx, normalized):
             return cat
@@ -70,6 +78,7 @@ def suggest_category(normalized: str, amount: int, owners: list[str]) -> str | N
 def groups(conn) -> dict[str, dict]:
     """Uncategorized rows grouped by normalized descriptor: count, total in/out, and the suggestion."""
     owners = owner_names(conn)
+    own_last4 = [r[0] for r in conn.execute("SELECT last4 FROM accounts WHERE last4 IS NOT NULL AND kind != 'pool'")]
     out: dict[str, dict] = defaultdict(lambda: {"n": 0, "out": 0, "in": 0, "cats": defaultdict(int)})
     for r in conn.execute("SELECT merchant, amount FROM transactions WHERE source IN ('mutation','receipt')"
                           " AND category IS NULL AND merged_into IS NULL"):
@@ -77,7 +86,7 @@ def groups(conn) -> dict[str, dict]:
         g = out[key]
         g["n"] += 1
         g["out" if r["amount"] < 0 else "in"] += abs(r["amount"])
-        cat = suggest_category(key, r["amount"], owners)
+        cat = suggest_category(key, r["amount"], owners, own_last4)
         if cat:
             g["cats"][cat] += 1
     for g in out.values():

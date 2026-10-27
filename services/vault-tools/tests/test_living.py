@@ -185,12 +185,43 @@ class Suggestions(unittest.TestCase):
             ("bi-fast db biaya txn ke 002 danuarta wiratama", -1, "biaya-bank"),
             ("inka pocket: main pocket pocket money in", 1, "transfer_internal"),
             ("inka pocket pocket money in failed movement between pockets", -1, "transfer_internal"),
-            ("inka pocket: traveloka pos transaction", -1, None),                                # a real purchase: left for the owner
+            ("inka pocket: traveloka pos transaction", -1, "liburan"),                           # a real purchase, not a pocket move
             ("trsf e-banking db vanessa inka", -1, None),                                        # spouse: never guessed
             ("trsf e-banking cr ftscy reza nugraha yulis", 1, None),
         ]
         for desc, sign, want in cases:
             self.assertEqual(sg.suggest_category(desc, sign * 1000, owners), want, desc)
+
+    def test_recurring_obligations_and_own_accounts_seen_in_the_statements(self):
+        owners, mine = ["danuarta wiratama"], ["2941", "2701"]
+        cases = [
+            ("trsf e-banking db ftfva the riviera", -1, "wajib:ipl"),
+            ("trsf e-banking db 62167/the riviera", -1, "wajib:ipl"),
+            ("trsf e-banking db 11192/ipeka", -1, "wajib:sekolah"),
+            ("trsf e-banking db avrist assurance p", -1, "wajib:asuransi"),
+            ("kr otomatis llg-citibank pt avrist assuranc surrp", 1, None),                 # a payout: the owner decides
+            ("kr otomatis llg-deutsche bank pt asuransi allianz commission pay", 1, None),  # commission income: the owner decides
+            ("flazz bca topup", -1, "transport"),
+            ("trsf e-banking db ftsai top up poket fixed expenses", -1, "transfer_internal"),
+            ("poket 4100 gaji pak jaja: pindahkan poket", -1, "transfer_internal"),
+            ("transfer bi fast ke bca ****2941", -1, "transfer_internal"),                  # own account by number
+            ("transfer bi fast ke bca ****9999", -1, None),                                 # someone else's account
+            ("transaksi debit qr rs mandaya", -1, "kesehatan"),
+            ("inka pocket: traveloka pos transaction", -1, "liburan"),
+        ]
+        for desc, sign, want in cases:
+            self.assertEqual(sg.suggest_category(desc, sign * 1000, owners, mine), want, desc)
+
+    def test_account_numbers_come_from_the_registered_accounts(self):
+        conn = connect(":memory:")
+        conn.execute("INSERT INTO accounts(alias,bank,kind,last4) VALUES ('b','BCA','main','2941')")
+        conn.execute("INSERT INTO accounts(alias,bank,kind,last4) VALUES ('pot','Jago','pool','8405')")      # the pot is not "my spending account"
+        conn.execute("INSERT INTO transactions(txn_date,merchant,amount,status,source) VALUES ('2026-09-01','Transfer BI Fast ke BCA ****2941',-100000,'unverified','mutation')")
+        conn.execute("INSERT INTO transactions(txn_date,merchant,amount,status,source) VALUES ('2026-09-02','Transfer BI Fast ke Jago ****8405',-100000,'unverified','mutation')")
+        conn.commit()
+        s = {k: g["suggestion"] for k, g in sg.groups(conn).items()}
+        self.assertEqual(s["transfer bi fast ke bca ****2941"], "transfer_internal")
+        self.assertIsNone(s["transfer bi fast ke jago ****8405"])                  # to the pot: a deliberate decision, not guessed
 
     def test_owner_name_is_needed_and_validated(self):
         conn = connect(":memory:")
