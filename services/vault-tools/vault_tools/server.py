@@ -351,15 +351,20 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
 
     @mcp.tool()
     @locked
-    def list_statements(limit: int = 10) -> list[str]:
-        """Tagihan kartu yang tersimpan (terbaru dulu): tanggal cetak, jatuh tempo, total, minimum, status rekonsiliasi."""
+    def list_statements(limit: int = 10, card_alias: str | None = None) -> list[str]:
+        """Tagihan kartu yang tersimpan (terbaru dulu): tanggal cetak, jatuh tempo, total, minimum, status rekonsiliasi,
+        dan file_ref bila berkasnya masih ada (untuk dibuka lagi dengan ingest_statement). card_alias opsional."""
         rows = conn.execute("SELECT c.alias, s.statement_date, s.due_date, s.total_due, s.minimum_due, s.reconciled, s.paid_at,"
-                            " s.paid_amount"
-                            " FROM statements s JOIN cards c ON c.id = s.card_id ORDER BY s.id DESC LIMIT ?",
-                            (max(1, min(limit, 30)),)).fetchall()
+                            " s.paid_amount, s.file_hash"
+                            " FROM statements s JOIN cards c ON c.id = s.card_id WHERE (? IS NULL OR c.alias = ?)"
+                            " ORDER BY s.id DESC LIMIT ?",
+                            (card_alias, card_alias, max(1, min(limit, 30)))).fetchall()
+        def ref(h: str) -> str:
+            return f" | file_ref {h}.pdf" if os.path.isfile(os.path.join(ingest_dir, h + ".pdf")) else ""
         return [f"{r['alias']} | cetak {r['statement_date']} | jatuh tempo {r['due_date']} | total {format_idr(r['total_due'])} | "
                 f"minimum {format_idr(r['minimum_due'])} | {'cocok' if r['reconciled'] else 'TIDAK COCOK'}"
                 f"{' | LUNAS' if r['paid_at'] else (' | dibayar ' + format_idr(r['paid_amount']) if r['paid_amount'] else '')}"
+                f"{ref(r['file_hash'])}"
                 for r in rows] or ["Belum ada tagihan tersimpan."]
 
     @mcp.tool()

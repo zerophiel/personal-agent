@@ -270,6 +270,14 @@ class ThroughTheTools(unittest.TestCase):
             self.assertIn("makan: Rp 600.000 dari Rp 500.000 (120%) over", json.dumps(call("budget_status")))
             self.assertIn("Penilaian keuangan 2026-11:", json.dumps(call("health_check")))
             self.assertIn("Belum ada tagihan tersimpan", json.dumps(call("list_statements")))
+            call("upsert_card", {"alias": "hsbc-1", "bank": "HSBC", "last4": "5915", "statement_day": 19, "due_day": 5, "credit_limit": 10_000_000})
+            h = "e" * 64
+            call("record_statement", {"card_alias": "hsbc-1", "file_hash": h, "statement_date": "2026-10-19", "due_date": "2026-11-05",
+                                      "previous_balance": 0, "payments": 0, "charges": 1000, "fees": 0, "total_due": 1000, "minimum_due": 100})
+            self.assertNotIn("file_ref", json.dumps(call("list_statements")))              # the file is gone: no dangling reference
+            open(os.path.join(d, h + ".pdf"), "wb").close()
+            self.assertIn(f"file_ref {h}.pdf", json.dumps(call("list_statements", {"card_alias": "hsbc-1"})))
+            self.assertIn("Belum ada tagihan tersimpan", json.dumps(call("list_statements", {"card_alias": "none"})))
 
 
 if __name__ == "__main__":
