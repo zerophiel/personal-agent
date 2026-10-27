@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 4   # 2: cards.pay_method/pay_to_alias; 3: transaction dedupe, mutation_files, category_rules; 4: sinking_funds
+SCHEMA_VERSION = 5   # 5: debts.pay_method/pay_to_alias/debit_account_alias; 2: cards.pay_method/pay_to_alias; 3: transaction dedupe, mutation_files, category_rules; 4: sinking_funds
 
 
 def _money(col: str, nullable: bool = False) -> str:
@@ -25,7 +25,10 @@ CREATE TABLE IF NOT EXISTS cards (
 CREATE TABLE IF NOT EXISTS debts (
   id INTEGER PRIMARY KEY, alias TEXT NOT NULL UNIQUE, lender TEXT NOT NULL,
   {_money('outstanding')} NOT NULL, {_money('installment')} NOT NULL,
-  tenor_left INTEGER NOT NULL, rate_bp INTEGER, due_day INTEGER NOT NULL);
+  tenor_left INTEGER NOT NULL, rate_bp INTEGER, due_day INTEGER NOT NULL,
+  pay_method TEXT NOT NULL DEFAULT 'transfer' CHECK (pay_method IN ('transfer','autodebit')),
+  pay_to_alias TEXT,            -- payee alias to transfer to (pay_method=transfer)
+  debit_account_alias TEXT);    -- accounts.alias that is auto-debited (pay_method=autodebit)
 CREATE TABLE IF NOT EXISTS fixed_expenses (
   id INTEGER PRIMARY KEY, alias TEXT NOT NULL UNIQUE, payee_alias TEXT NOT NULL,
   {_money('amount')} NOT NULL, due_day INTEGER NOT NULL);
@@ -97,6 +100,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
                      " CHECK (pay_method IN ('transfer','app_menu'))")
     if "pay_to_alias" not in cols:
         conn.execute("ALTER TABLE cards ADD COLUMN pay_to_alias TEXT")
+    # v4 -> v5: how a debt is paid (transfer to a payee, or auto-debit from one of the owner's accounts)
+    dcols = {r["name"] for r in conn.execute("PRAGMA table_info(debts)")}
+    if "pay_method" not in dcols:
+        conn.execute("ALTER TABLE debts ADD COLUMN pay_method TEXT NOT NULL DEFAULT 'transfer'"
+                     " CHECK (pay_method IN ('transfer','autodebit'))")
+    for col in ("pay_to_alias", "debit_account_alias"):
+        if col not in dcols:
+            conn.execute(f"ALTER TABLE debts ADD COLUMN {col} TEXT")
     # v2 -> v3: transaction dedupe + provenance (mutation_files/category_rules come from DDL)
     tcols = {r["name"] for r in conn.execute("PRAGMA table_info(transactions)")}
     for col in ("dedupe_key", "file_hash"):

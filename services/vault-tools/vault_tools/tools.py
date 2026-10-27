@@ -112,16 +112,43 @@ def upsert_card(conn: sqlite3.Connection, alias: str, bank: str, last4: str,
 
 
 def upsert_debt(conn, alias: str, lender: str, outstanding: int, installment: int,
-                tenor_left: int, due_day: int, rate_bp: int | None = None) -> str:
+                tenor_left: int, due_day: int, rate_bp: int | None = None,
+                pay_method: str | None = None, pay_to_alias: str | None = None,
+                debit_account_alias: str | None = None) -> str:
+    """pay_method 'autodebit': the creditor debits `debit_account_alias` (an account of the owner) on the due
+    day, so the plan only reminds to keep that balance. 'transfer': pay to `pay_to_alias` (account/VA payee).
+    Fields left out on an existing debt keep their stored value."""
     check_idr(outstanding), check_idr(installment)
+    old = conn.execute("SELECT pay_method, pay_to_alias, debit_account_alias FROM debts WHERE alias=?",
+                       (alias,)).fetchone()
+    method = pay_method or (old["pay_method"] if old else "transfer")
+    if method not in ("transfer", "autodebit"):
+        raise ValueError("pay_method harus transfer atau autodebit")
+    pay_to = pay_to_alias if pay_to_alias is not None else (old["pay_to_alias"] if old else None)
+    debit = debit_account_alias if debit_account_alias is not None else (old["debit_account_alias"] if old else None)
+    if method == "autodebit":
+        if debit is None:
+            raise ValueError("autodebit butuh debit_account_alias (rekening yang didebet)")
+        if conn.execute("SELECT 1 FROM accounts WHERE alias=?", (debit,)).fetchone() is None:
+            raise ValueError(f"rekening {debit} belum terdaftar (upsert_account dulu)")
+        pay_to = None
+    else:
+        debit = None
+        if pay_to is not None:
+            row = conn.execute("SELECT kind FROM payee_secrets WHERE alias=?", (pay_to,)).fetchone()
+            if row is None or row["kind"] not in ("account", "va"):
+                raise ValueError(f"{pay_to} belum tersimpan sebagai nomor rekening/VA (/rekening atau /va)")
     conn.execute(
-        "INSERT INTO debts(alias,lender,outstanding,installment,tenor_left,rate_bp,due_day)"
-        " VALUES (?,?,?,?,?,?,?) ON CONFLICT(alias) DO UPDATE SET lender=excluded.lender,"
+        "INSERT INTO debts(alias,lender,outstanding,installment,tenor_left,rate_bp,due_day,pay_method,pay_to_alias,"
+        "debit_account_alias) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(alias) DO UPDATE SET lender=excluded.lender,"
         "outstanding=excluded.outstanding,installment=excluded.installment,"
-        "tenor_left=excluded.tenor_left,rate_bp=excluded.rate_bp,due_day=excluded.due_day",
-        (alias, lender, outstanding, installment, tenor_left, rate_bp, due_day))
+        "tenor_left=excluded.tenor_left,rate_bp=excluded.rate_bp,due_day=excluded.due_day,"
+        "pay_method=excluded.pay_method,pay_to_alias=excluded.pay_to_alias,"
+        "debit_account_alias=excluded.debit_account_alias",
+        (alias, lender, outstanding, installment, tenor_left, rate_bp, due_day, method, pay_to, debit))
     conn.commit()
-    return f"utang {alias} tersimpan"
+    how = f"autodebet dari {debit}" if method == "autodebit" else "transfer"
+    return f"utang {alias} tersimpan, bayar {how}"
 
 
 def upsert_expense(conn, alias: str, payee_alias: str, amount: int, due_day: int) -> str:
@@ -300,11 +327,15 @@ def collect_obligations(conn, payday: date, nxt: date, holidays=()) -> list[Obli
         obs.append(Obligation("card", r["alias"], date.fromisoformat(r["due_date"]),
                               r["total_due"], r["minimum_due"], late_cost_bp=300,
                               method=r["pay_method"], pay_to=r["pay_to_alias"]))
-    for r in conn.execute("SELECT alias, installment, due_day, rate_bp FROM debts WHERE tenor_left > 0"):
+    for r in conn.execute("SELECT alias, installment, due_day, rate_bp, pay_method, pay_to_alias, debit_account_alias"
+                          " FROM debts WHERE tenor_left > 0"):
+        auto = r["pay_method"] == "autodebit"
         for d in due_dates_in_window(r["due_day"], payday, nxt):
             # rate_bp is the ANNUAL rate; the delay cost estimate is per month
             obs.append(Obligation("debt", r["alias"], d, r["installment"],
-                                  late_cost_bp=(r["rate_bp"] or 0) // 12))
+                                  late_cost_bp=(r["rate_bp"] or 0) // 12,
+                                  method="autodebit" if auto else "transfer",
+                                  pay_to=r["debit_account_alias"] if auto else r["pay_to_alias"]))
     for r in conn.execute("SELECT payee_alias, amount, due_day FROM fixed_expenses"):
         for d in due_dates_in_window(r["due_day"], payday, nxt):
             obs.append(Obligation("fixed", r["payee_alias"], d, r["amount"], pay_to=r["payee_alias"]))
@@ -338,6 +369,11 @@ def generate_payday_plan(conn, today: date, payday: date | None = None,
                       buffer=get_threshold(conn, "cash_buffer", 0))
     snap = plan_to_dict(plan)
     snap["reminders"] = []
+    for t in snap["transfers"]:
+        if t.get("method") == "autodebit":
+            snap["reminders"].append(
+                f"AUTODEBET {t['to_alias']}: pastikan saldo rekening {t.get('pay_to') or '(rekening belum diset)'} "
+                f"minimal {format_idr(t['amount'])} sebelum {t.get('due') or 'jatuh tempo'}; tidak perlu transfer ke kreditur.")
     for f in conn.execute("SELECT * FROM sinking_funds"):
         due = date.fromisoformat(f["due_date"])
         s = sinking_required(conn, f, payday, hol)
@@ -369,7 +405,8 @@ def summarize_plan(snap: dict) -> str:
     lines = [f"Rencana gajian {snap['payday']} (sampai {snap['next_payday']})",
              f"Gaji: {format_idr(snap['salary'])}"]
     for t in snap["transfers"]:
-        how = " via menu aplikasi bank" if t.get("method") == "app_menu" else ""
+        how = {"app_menu": " via menu aplikasi bank",
+               "autodebit": f" autodebet, saldo harus cukup sebelum {t.get('due')}"}.get(t.get("method"), "")
         lines.append(f"- {t['date']} {t['to_alias']}: {format_idr(t['amount'])} ({t['reason']}){how}")
     for u in snap["unfunded"]:
         lines.append(f"! BELUM TERDANAI {u['to_alias']}: {format_idr(u['amount'])} "

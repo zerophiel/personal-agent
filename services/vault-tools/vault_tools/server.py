@@ -131,10 +131,15 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
     @mcp.tool()
     @locked
     def upsert_debt(alias: str, lender: str, outstanding: int, installment: int,
-                    tenor_left: int, due_day: int, rate_bp: int | None = None) -> str:
-        """Simpan/ubah utang. Semua uang dalam Rupiah bulat."""
+                    tenor_left: int, due_day: int, rate_bp: int | None = None,
+                    pay_method: str | None = None, pay_to_alias: str | None = None,
+                    debit_account_alias: str | None = None) -> str:
+        """Simpan/ubah utang. Semua uang dalam Rupiah bulat; rate_bp = bunga TAHUNAN dalam basis poin.
+        pay_method: 'autodebit' (kreditur mendebet rekening pemilik: isi debit_account_alias, rekening
+        terdaftar via upsert_account; rencana hanya mengingatkan menjaga saldo) atau 'transfer' (isi
+        pay_to_alias, alias nomor rekening/VA dari /rekening atau /va)."""
         return tools.upsert_debt(conn, alias, lender, outstanding, installment, tenor_left,
-                                 due_day, rate_bp)
+                                 due_day, rate_bp, pay_method, pay_to_alias, debit_account_alias)
 
     @mcp.tool()
     @locked
@@ -291,6 +296,13 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
                 return PlainTextResponse("Belum ada rencana gajian.")
             snap, lines = json.loads(row["snapshot_json"]), []
             for t in snap["transfers"]:
+                if t.get("method") == "autodebit":
+                    acct = conn.execute("SELECT bank FROM accounts WHERE alias=?", (t.get("pay_to"),)).fetchone()
+                    where = f"{acct['bank'].upper()} ({t['pay_to']})" if acct else "(rekening belum diset)"
+                    lines.append(f"{t['date']} {t['to_alias']}\n  {format_idr(t['amount'])}\n"
+                                 f"  AUTODEBET dari rekening {where} pada {t.get('due')}. "
+                                 f"Pastikan saldo cukup; tidak perlu transfer.")
+                    continue
                 key = t.get("pay_to") or t["to_alias"]
                 meta = conn.execute("SELECT kind, bank FROM payee_secrets WHERE alias=?", (key,)).fetchone()
                 card = conn.execute("SELECT bank FROM cards WHERE alias=?", (t["to_alias"],)).fetchone()

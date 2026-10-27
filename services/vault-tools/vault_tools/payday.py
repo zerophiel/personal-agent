@@ -48,11 +48,12 @@ class Obligation:
     minimum: int = 0          # cards only: minimum due
     from_account: str = "main"
     late_cost_bp: int = 0     # est. monthly interest/penalty on unpaid amount, basis points
-    method: str = "transfer"  # transfer | app_menu (pay from the bank's app menu)
-    pay_to: str | None = None  # vault alias of the number to pay (shown only by /rincian)
+    method: str = "transfer"  # transfer | app_menu (bank app menu) | autodebit (creditor debits the owner's account)
+    pay_to: str | None = None  # transfer/app_menu: vault alias of the number to pay (shown only by /rincian);
+                               # autodebit: accounts.alias of the account that gets debited
 
     def __post_init__(self):
-        if self.method not in ("transfer", "app_menu"):
+        if self.method not in ("transfer", "app_menu", "autodebit"):
             raise ValueError(f"unknown method {self.method}")
         if self.kind not in KINDS:
             raise ValueError(f"unknown kind {self.kind}")
@@ -71,6 +72,7 @@ class Transfer:
     reason: str
     method: str = "transfer"
     pay_to: str | None = None
+    due: date | None = None
 
 
 @dataclass(frozen=True)
@@ -135,7 +137,7 @@ def build_plan(payday: date, salary: int, obligations: Iterable[Obligation],
         remaining -= pay
         if pay:
             tdate = payday if prio == P_OVERDUE else max(payday, due - timedelta(days=3))
-            transfers.append(Transfer(tdate, acct, alias, pay, reason, method, pay_to))
+            transfers.append(Transfer(tdate, acct, alias, pay, reason, method, pay_to, due))
         short = amount - pay
         if short:
             unfunded.append(Unfunded(alias, short, reason, bp_of(short, late_bp)))
