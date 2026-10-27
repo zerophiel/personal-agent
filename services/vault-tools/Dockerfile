@@ -8,4 +8,5 @@ USER 10001
 ENV LEDGER_DB=/data/ledger.db
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD python -c "import socket; socket.create_connection(('127.0.0.1', 8000), 3)"
-CMD ["python", "-I", "-m", "vault_tools.server"]
+# no -I: isolated mode would drop /app from sys.path; only our own code lives there
+CMD ["python", "-m", "vault_tools.server"]
