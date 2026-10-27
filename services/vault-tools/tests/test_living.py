@@ -175,6 +175,23 @@ class Suggestions(unittest.TestCase):
         for desc, sign, want in cases:
             self.assertEqual(sg.suggest_category(desc, sign * 1000, owners), want, desc)
 
+    def test_real_world_descriptors_seen_in_the_owners_statements(self):
+        owners = ["danuarta wiratama"]
+        cases = [
+            ("switching db ke 542 danuarta wiratama", -1, "transfer_internal"),                  # no word "transfer"
+            ("switching db ke 028 danuarta wiratama /m-bca", -1, "transfer_internal"),
+            ("trsf e-banking cr danuarta wiratama", 1, "transfer_internal"),                     # incoming from own name
+            ("kartu kredit/pl bca card danuarta wiratama", -1, "wajib:kartu"),                   # cardholder name != own transfer
+            ("bi-fast db biaya txn ke 002 danuarta wiratama", -1, "biaya-bank"),
+            ("inka pocket: main pocket pocket money in", 1, "transfer_internal"),
+            ("inka pocket pocket money in failed movement between pockets", -1, "transfer_internal"),
+            ("inka pocket: traveloka pos transaction", -1, None),                                # a real purchase: left for the owner
+            ("trsf e-banking db vanessa inka", -1, None),                                        # spouse: never guessed
+            ("trsf e-banking cr ftscy reza nugraha yulis", 1, None),
+        ]
+        for desc, sign, want in cases:
+            self.assertEqual(sg.suggest_category(desc, sign * 1000, owners), want, desc)
+
     def test_owner_name_is_needed_and_validated(self):
         conn = connect(":memory:")
         self.descs(conn, [("Transfer BI Fast Ke BCA DANUARTA WIRATAMA", -5_000_000)])

@@ -15,8 +15,9 @@ from .mutations import normalize, set_category_rule
 # (category, regex on the normalized descriptor). First match wins, so order matters.
 DEBIT_RULES: list[tuple[str, str]] = [
     # bank fees first: "Biaya transaksi bank Pembayaran HSBC" must not be read as a card payment
-    ("biaya-bank", r"biaya (transaksi|transfer|admin|adm|layanan|materai)|pajak bunga|admin fee"),
-    ("wajib:kartu", r"pembayaran (kartu kredit|hsbc|dbs|ex ?- ?anz|anz|mega|cimb|citibank|uob|bni|bri kartu|kartu)\b|bayar kartu"),
+    ("biaya-bank", r"biaya (transaksi|txn|transfer|admin|adm|layanan|materai)|pajak bunga|admin fee"),
+    ("wajib:kartu", r"pembayaran (kartu kredit|hsbc|dbs|ex ?- ?anz|anz|mega|cimb|citibank|uob|bni|bri kartu|kartu)\b|bayar kartu|"
+                    r"kartu kredit/pl|\bbca card\b|credit card payment"),
     ("wajib:spaylater", r"spaylater|shopee ?pay ?later|paylater|kredivo|akulaku"),
     ("wajib:cicilan", r"pendebitan otomatis|auto ?coll|autodebet|autodebit|angsuran|cicilan"),
     ("belanja-online", r"tokopedia|shopee|lazada|bukalapak|blibli|tiktok ?shop"),
@@ -48,9 +49,18 @@ def owner_names(conn) -> list[str]:
     return [r["name"] for r in conn.execute("SELECT name FROM owner_names")]
 
 
+_FEE = re.compile(r"biaya (transaksi|txn|transfer|admin|adm|layanan|materai)|pajak bunga|admin fee")
+_CARD_WORDS = re.compile(r"kartu kredit|credit card|\bbca card\b|\bcard\b")
+_POCKET_MOVE = re.compile(r"pocket.*(movement|money in|money out|main pocket|between pockets)|main pocket")
+
+
 def suggest_category(normalized: str, amount: int, owners: list[str]) -> str | None:
-    if "transfer" in normalized and any(o in normalized for o in owners):
-        return "transfer_internal"                      # sent to the owner's own name
+    if _FEE.search(normalized):
+        return "biaya-bank"                             # a fee line that mentions a payee is still just a fee
+    if any(o in normalized for o in owners) and not _CARD_WORDS.search(normalized):
+        return "transfer_internal"                      # money to/from the owner's own name (any channel: trsf, switching, BI-Fast)
+    if _POCKET_MOVE.search(normalized):
+        return "transfer_internal"                      # moves between the owner's Jago pockets
     for cat, rx in (CREDIT_RULES if amount > 0 else DEBIT_RULES):
         if re.search(rx, normalized):
             return cat
