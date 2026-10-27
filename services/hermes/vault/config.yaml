@@ -42,6 +42,12 @@ memory:
 skills:
   write_approval: true
 
+tools:
+  tool_search:
+    enabled: off     # docs: /user-guide/features/tool-search. With ~28 MCP tools Hermes defers most of them behind
+                     # tool_search ("tier 1: 6 visible, 30 deferred"); the model then said it had no PDF tool.
+                     # Eager tools cost ~5K tokens/turn (prompt-cached) and are reliable.
+
 security:
   allow_lazy_installs: false
 

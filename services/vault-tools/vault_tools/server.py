@@ -23,7 +23,7 @@ from starlette.responses import JSONResponse, PlainTextResponse
 
 from pydantic import BaseModel, Field
 
-from . import health, mutations, names, roadmap, statement_pdf, statements, tools
+from . import health, living, mutations, names, roadmap, statement_pdf, statements, suggest, tools
 from .ledger import connect
 from .money import format_idr
 from .payee_vault import PayeeVault, has_forbidden_card_data
@@ -35,7 +35,8 @@ MCP_TOOL_NAMES = ("upsert_card", "upsert_debt", "upsert_expense", "set_threshold
                   "upsert_account", "record_mutations", "set_category", "set_category_rule",
                   "list_uncategorized", "cashflow_summary", "recurring_payments", "suggest_salary",
                   "upsert_sinking_fund", "sinking_status", "record_expense", "set_budget", "budget_status",
-                  "health_check", "list_statements", "record_card_payment", "debt_free_roadmap")
+                  "health_check", "list_statements", "record_card_payment", "debt_free_roadmap",
+                  "add_owner_name", "suggest_categories", "apply_suggestions", "living_cost_analysis")
 
 
 class Txn(BaseModel):
@@ -228,6 +229,37 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
         selain itu kategori bebas (makan, transport, belanja, hiburan, dst)."""
         return health.record_expense(conn, today(), amount, merchant, txn_date, category, account_alias,
                                      card_alias, allow_duplicate)
+
+    @mcp.tool()
+    @locked
+    def add_owner_name(name: str) -> str:
+        """Tambahkan nama pemilik persis seperti tercetak di mutasi (mis. 'DANUARTA WIRATAMA'). Transfer ke nama ini
+        diusulkan sebagai pindah dana antar rekening sendiri (transfer_internal)."""
+        return suggest.add_owner_name(conn, name)
+
+    @mcp.tool()
+    @locked
+    def suggest_categories(limit: int = 40) -> list[str]:
+        """Usulan kategori otomatis (aturan kata kunci) untuk transaksi yang belum dikategorikan, per kelompok
+        deskripsi. TAMPILKAN ke pemilik; jangan diterapkan sebelum pemilik setuju."""
+        return suggest.suggestions(conn, max(1, min(limit, 100)))
+
+    @mcp.tool()
+    @locked
+    def apply_suggestions(patterns: list[str] | None = None) -> str:
+        """Terapkan usulan kategori untuk deskripsi yang disebut (kosong = semua yang punya usulan). Hanya setelah
+        pemilik melihat daftarnya dan setuju."""
+        return suggest.apply_suggestions(conn, patterns)
+
+    @mcp.tool()
+    @locked
+    def living_cost_analysis(from_month: str | None = None, months: int = 6) -> str:
+        """Hitung biaya hidup harian pemilik dari mutasi semua rekening (hanya bulan penuh yang cukup dikategorikan) dan
+        rekomendasikan living_reserve (ketat/disarankan/longgar), plus sisa bulanan terhadap gaji dan komitmen.
+        from_month (YYYY-MM) mulai dari bulan tertentu, mis. sejak pindah kerja. Dihitung kode."""
+        if from_month and not (len(from_month) == 7 and from_month[4] == "-"):
+            raise ValueError("from_month harus YYYY-MM")
+        return living.format_analysis(living.analyse(conn, today(), from_month, max(1, min(months, 24))))
 
     @mcp.tool()
     @locked

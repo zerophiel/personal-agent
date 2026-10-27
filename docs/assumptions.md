@@ -15,6 +15,8 @@
 | 10 | `deleteMessage` on the owner's incoming message | **Pass** | Log `deleteMessage ok`; owner confirmed the message disappeared. |
 | 11 | `/rincian` via `skip` + direct Bot API send stays out of the session store | **Pass** | Reply text "Belum ada rencana" has 0 hits in the data dir; TTL record written (auto-delete after 24h, sweep every 15 min; first expiry not yet observed). |
 
+| 12 | All vault MCP tools are visible to the model | **Fail by default -> fixed** (2026-10-27) | With 28 tools, Hermes' Tool Search deferred 30 of 36 tools ("tier 1: 6 core/visible tools kept, 30 deferred"); the bot told the owner it had no PDF tool. Fix: `tools.tool_search.enabled: off` in `config.yaml` (doc: /user-guide/features/tool-search; there is no per-server "always visible" key). Also: a long-lived Telegram session keeps stale history (old dummy card/salary questions); `/new` starts a fresh one. |
+
 ## Still open
 - Telegram-side copy of the raw message: `cardguard` now calls `deleteMessage` (dm chats only, background thread, failures logged without the token). Implemented and unit-tested with a fake deleter; **live test pending** (needs the container with the vault bot token). `event.message_id` matches Telegram's native id (observed ids 2 and 5 around bot replies 3 and 4).
 - Whether a `skip` plus direct Bot API reply (design for `/rincian`) writes anything to the session store.

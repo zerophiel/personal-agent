@@ -1,0 +1,133 @@
+"""Living-cost analysis: what the owner really spends day to day, and a `living_reserve` to plan with.
+
+Counts, per complete month and summed across ALL own accounts (the main account moved from BCA to Mandiri), the
+categorized day-to-day outflows. Excluded: obligations ('wajib:'), pot deposits ('sinking:'), one-offs ('sekali:')
+and moves between own accounts ('transfer_internal'). Credit-card spending is not in the account mutations (only its
+repayment is), so it is shown separately from the stored card statements. A month counts only if enough of its money
+out is categorized; otherwise it is listed but left out, and the output says so."""
+from __future__ import annotations
+
+from collections import defaultdict
+from datetime import date
+from statistics import median
+
+from .health import is_discretionary
+from .money import format_idr
+from .tools import get_threshold, id_holidays, last_working_day, sinking_required
+
+MIN_COVERAGE_PCT = 80      # share of a month's money out that must be categorized for the month to count
+MARGIN_PCT = 10            # recommended reserve = median + 10%
+DEFAULT_MONTHS = 6
+
+
+def _round_up(value: int, step: int = 1000) -> int:
+    return -(-value // step) * step
+
+
+def monthly(conn, today: date) -> dict[str, dict]:
+    """{month: {cash, excluded, uncategorized, total_out, coverage_pct, income_salary}} for complete months only."""
+    this_month = f"{today.year}-{today.month:02d}"
+    out: dict[str, dict] = defaultdict(lambda: {"cash": 0, "excluded": 0, "uncategorized": 0, "total_out": 0, "salary_in": 0})
+    for r in conn.execute("SELECT substr(txn_date,1,7) m, category, amount FROM transactions"
+                          " WHERE source IN ('mutation','receipt') AND merged_into IS NULL AND substr(txn_date,1,7) < ?", (this_month,)):
+        row = out[r["m"]]
+        if r["amount"] < 0:
+            v = -r["amount"]
+            row["total_out"] += v
+            if r["category"] is None:
+                row["uncategorized"] += v
+            elif is_discretionary(r["category"]):
+                row["cash"] += v
+            else:
+                row["excluded"] += v
+        elif r["category"] == "gaji":
+            row["salary_in"] += r["amount"]
+    for row in out.values():
+        row["coverage_pct"] = 100 if not row["total_out"] else (row["total_out"] - row["uncategorized"]) * 100 // row["total_out"]
+    return dict(sorted(out.items()))
+
+
+def card_charges(conn) -> dict[str, int]:
+    """New card spending per statement month, from the stored statements (the 'charges' line)."""
+    out: dict[str, int] = defaultdict(int)
+    for r in conn.execute("SELECT substr(statement_date,1,7) m, charges FROM statements"):
+        out[r["m"]] += r["charges"]
+    return dict(sorted(out.items()))
+
+
+def commitments(conn, today: date) -> dict:
+    hol = id_holidays(today.year) | id_holidays(today.year + 1) | id_holidays(today.year + 2)
+    payday = last_working_day(today.year, today.month, hol)
+    fixed = conn.execute("SELECT COALESCE(SUM(amount),0) FROM fixed_expenses").fetchone()[0]
+    inst = conn.execute("SELECT COALESCE(SUM(installment),0) FROM debts WHERE tenor_left > 0").fetchone()[0]
+    pot = sum(sinking_required(conn, f, payday, hol)["per_month"] for f in conn.execute("SELECT * FROM sinking_funds"))
+    return {"fixed": fixed, "installments": inst, "pot": pot, "total": fixed + inst + pot}
+
+
+def analyse(conn, today: date, from_month: str | None = None, months: int = DEFAULT_MONTHS) -> dict:
+    data = monthly(conn, today)
+    if from_month:
+        data = {m: v for m, v in data.items() if m >= from_month}
+    else:
+        data = dict(list(data.items())[-months:])
+    counted = {m: v for m, v in data.items() if v["total_out"] and v["coverage_pct"] >= MIN_COVERAGE_PCT}
+    skipped = {m: v for m, v in data.items() if m not in counted}
+    values = [v["cash"] for v in counted.values()]
+    res = {"months": data, "counted": sorted(counted), "skipped": sorted(skipped), "cards": card_charges(conn),
+           "enough": len(values) >= 2, "tight": None, "recommended": None, "loose": None}
+    if values:
+        base = int(median(values))
+        res.update({"tight": _round_up(base), "recommended": _round_up(base * (100 + MARGIN_PCT) // 100), "loose": _round_up(max(values))})
+    salary = get_threshold(conn, "net_salary")
+    res["salary"] = salary
+    res["commitments"] = commitments(conn, today)
+    card_avg = None
+    recent_cards = [v for m, v in res["cards"].items() if m >= (from_month or "0000")]
+    if recent_cards:
+        card_avg = sum(recent_cards[-DEFAULT_MONTHS:]) // len(recent_cards[-DEFAULT_MONTHS:])
+    res["card_avg"] = card_avg
+    if salary and res["recommended"] is not None:
+        spend = res["recommended"] + (card_avg or 0)
+        res["monthly_free"] = salary - res["commitments"]["total"] - spend
+    else:
+        res["monthly_free"] = None
+    res["current_reserve"] = get_threshold(conn, "living_reserve")
+    return res
+
+
+def format_analysis(a: dict) -> str:
+    lines = ["Analisis biaya hidup (belanja harian dari semua rekening milik sendiri)"]
+    if not a["months"]:
+        return lines[0] + "\nBelum ada mutasi bulan penuh. Unggah mutasi (mis. Januari sampai bulan lalu) lalu kategorikan."
+    for m, v in a["months"].items():
+        mark = "dihitung" if m in a["counted"] else f"DILEWATI (baru {v['coverage_pct']}% dikategorikan)"
+        sal = f"; gaji masuk {format_idr(v['salary_in'])}" if v["salary_in"] else ""
+        lines.append(f"- {m}: biaya hidup kas {format_idr(v['cash'])}; kewajiban/sekali/antar-rekening {format_idr(v['excluded'])}; "
+                     f"belum dikategorikan {format_idr(v['uncategorized'])}{sal}; {mark}")
+    if a["skipped"]:
+        lines.append(f"Catatan: {len(a['skipped'])} bulan belum cukup rapi dikategorikan (minimal {MIN_COVERAGE_PCT}%): "
+                     f"{', '.join(a['skipped'])}. Kategorikan dulu agar hasilnya lebih akurat.")
+    if a["recommended"] is None:
+        lines.append("Belum bisa merekomendasikan living_reserve: belum ada bulan yang cukup dikategorikan.")
+    else:
+        flag = "" if a["enough"] else " (BARU 1 BULAN DATA: anggap sementara)"
+        lines.append(f"Biaya hidup kas per bulan, dari {len(a['counted'])} bulan{flag}: ketat {format_idr(a['tight'])} (median), "
+                     f"disarankan {format_idr(a['recommended'])} (median + {MARGIN_PCT}%), longgar {format_idr(a['loose'])} (bulan tertinggi)")
+    if a["cards"]:
+        lines.append("Belanja kartu per siklus tagihan (tidak ada di mutasi rekening): "
+                     + "; ".join(f"{m} {format_idr(v)}" for m, v in list(a["cards"].items())[-6:])
+                     + (f". Rata-rata {format_idr(a['card_avg'])}." if a["card_avg"] is not None else ""))
+    if a["monthly_free"] is not None:
+        c = a["commitments"]
+        lines.append(f"Hitungan bulanan: gaji {format_idr(a['salary'])} - komitmen tetap {format_idr(c['total'])} "
+                     f"(tetap {format_idr(c['fixed'])}, cicilan {format_idr(c['installments'])}, pot {format_idr(c['pot'])}) "
+                     f"- biaya hidup disarankan {format_idr(a['recommended'])} - belanja kartu {format_idr(a['card_avg'] or 0)} "
+                     f"= sisa {format_idr(a['monthly_free'])}"
+                     + (" (DEFISIT: pengeluaran melebihi gaji, perlu dikurangi)" if a["monthly_free"] < 0 else " untuk tabungan dan pelunasan"))
+    elif a["salary"] is None:
+        lines.append("net_salary belum diset, jadi sisa bulanan belum bisa dihitung.")
+    if a["current_reserve"] is not None:
+        lines.append(f"living_reserve yang berlaku sekarang: {format_idr(a['current_reserve'])}")
+    if a["recommended"] is not None:
+        lines.append("Untuk memakai angka ini, minta persetujuan pemilik lalu set_threshold living_reserve.")
+    return "\n".join(lines)
