@@ -46,6 +46,17 @@ class Installments(unittest.TestCase):
         ci.record(conn, "bca-1", "2026-10-05", [{"description": "TOKOPEDIA CICILAN", "amount": 1_000_000, "seq": 3, "total": 12}])
         self.assertEqual(ci.active(conn)[0]["seq"], 4)             # an older statement never rolls it back
 
+    def test_same_installment_worded_differently_is_one_row(self):
+        """Regression: 'Tokopedia 6/18' and 'Tokopedia 200244 6/18' were stored twice."""
+        conn = world()
+        ci.record(conn, "bca-1", "2026-10-05", [{"description": "Tokopedia", "amount": 200_244, "seq": 6, "total": 18}])
+        ci.record(conn, "bca-1", "2026-10-05", [{"description": "Tokopedia 200244 6/18", "amount": 200_244, "seq": 6, "total": 18}])
+        self.assertEqual(len(ci.active(conn)), 1)
+        self.assertEqual(ci.monthly_total(conn), 200_244)
+        ci.record(conn, "bca-1", "2026-10-05", [{"description": "A", "amount": 500_000, "seq": 1, "total": 6},
+                                                {"description": "B", "amount": 500_000, "seq": 2, "total": 6}])
+        self.assertEqual(ci.monthly_total(conn), 1_200_244)              # two equal installments in one statement stay two
+
     def test_last_payment_is_not_active(self):
         conn = world()
         ci.record(conn, "bca-1", "2026-10-05", [{"description": "X", "amount": 500_000, "seq": 12, "total": 12}])

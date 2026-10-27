@@ -8,7 +8,6 @@ import sqlite3
 from datetime import date, timedelta
 
 from .money import check_idr, format_idr
-from .mutations import normalize
 
 MAX_TENOR = 60
 STALE_DAYS = 5      # an item not refreshed by the card's latest statement (minus this slack) is no longer billed
@@ -29,8 +28,12 @@ def record(conn: sqlite3.Connection, card_alias: str, as_of: str, items: list[di
         if not (2 <= it["total"] <= MAX_TENOR and 1 <= it["seq"] <= it["total"]):
             raise ValueError(f"cicilan {it['seq']}/{it['total']} tidak masuk akal (tenor 2-{MAX_TENOR}, ke-x <= y)")
     stored = 0
+    seen: dict[str, int] = {}
     for it in items:
-        key = f"{normalize(it['description'])[:60]}/{it['total']}"
+        # identity = amount + tenor, never the description: the model words it differently on every statement
+        base = f"{it['amount']}/{it['total']}"
+        seen[base] = seen.get(base, 0) + 1
+        key = base if seen[base] == 1 else f"{base}#{seen[base]}"
         old = conn.execute("SELECT as_of FROM card_installments WHERE card_id=? AND key=?", (card["id"], key)).fetchone()
         if old and old["as_of"] > as_of:
             continue                                  # an older statement never overwrites a newer one
