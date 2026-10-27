@@ -10,7 +10,7 @@
 | 6 | Plugins are opt-in | Confirmed | Must list under `plugins.enabled`; loaded as source `user`. |
 
 ## Still open
-- Telegram-side copy of the raw message: the chat history keeps it until the plugin calls `deleteMessage` (to implement; allowed for incoming messages in private chats within 48 h, to verify).
+- Telegram-side copy of the raw message: `cardguard` now calls `deleteMessage` (dm chats only, background thread, failures logged without the token). Implemented and unit-tested with a fake deleter; **live test pending** (needs the container with the vault bot token). `event.message_id` matches Telegram's native id (observed ids 2 and 5 around bot replies 3 and 4).
 - Whether a `skip` plus direct Bot API reply (design for `/rincian`) writes anything to the session store.
 - Hermes logs "Discovering Telegram API fallback IPs via DNS-over-HTTPS": confirm it cannot bypass the proxy when DoH is blocked (spike worked, but check the fallback path).
 - Hooks are not bounded by `plugins.hook_callback_timeout`: a hung callback blocks that message.

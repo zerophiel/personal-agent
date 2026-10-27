@@ -34,6 +34,41 @@ def _tokenize(text: str):
     return _CANDIDATE.sub(repl, text), hits
 
 
+def _bot_delete(chat_id, message_id) -> None:
+    """Bot API deleteMessage (incoming private-chat messages, within 48h). Uses the vault bot
+    token from this process's environment; honours HTTPS_PROXY (squid-vault)."""
+    import json
+    import os
+    import urllib.parse
+    import urllib.request
+
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    if not token:
+        log.warning("cardguard: no bot token, cannot delete message %s", message_id)
+        return
+    data = urllib.parse.urlencode({"chat_id": chat_id, "message_id": message_id}).encode()
+    try:
+        with urllib.request.urlopen(f"https://api.telegram.org/bot{token}/deleteMessage",
+                                    data, timeout=15) as r:
+            ok = json.load(r).get("ok")
+    except Exception:  # noqa: BLE001 - never log the URL (it contains the token)
+        ok = False
+    log.info("cardguard: deleteMessage %s for message %s", "ok" if ok else "FAILED", message_id)
+
+
+def _delete_async(event, deleter=_bot_delete) -> None:
+    """Delete the owner's raw message in the background; only in private (dm) chats."""
+    import threading
+
+    src = getattr(event, "source", None)
+    if getattr(src, "chat_type", None) != "dm":
+        return
+    chat_id, mid = getattr(src, "chat_id", None), getattr(event, "message_id", None)
+    if chat_id is None or mid is None:
+        return
+    threading.Thread(target=deleter, args=(chat_id, mid), daemon=True).start()
+
+
 def on_inbound(event, **kwargs):
     """Fail closed: Hermes treats a hook exception as "allow", which would leak a raw number
     to the model. Any error here drops the message instead."""
@@ -45,6 +80,7 @@ def on_inbound(event, **kwargs):
         if not hits:
             return None
         log.info("cardguard rewrote %d number(s) in message %s", len(hits), getattr(event, "message_id", "?"))
+        _delete_async(event)
         return {"action": "rewrite", "text": new_text}
     except Exception:  # noqa: BLE001 - deliberately broad, see docstring
         log.error("cardguard failed; dropping message %s", getattr(event, "message_id", "?"))
