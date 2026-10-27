@@ -138,6 +138,9 @@ class Masking(unittest.TestCase):
             self.assertNotIn("41111111", out)
             self.assertIn("****1111", out)
 
+    def test_surrounding_text_preserved(self):
+        self.assertEqual(mask_sensitive("a 4111 1111 1111 1111 b"), "a [[NUM:****1111]] b")
+
     def test_non_luhn_and_short_numbers_untouched(self):
         self.assertEqual(mask_sensitive("ref 4111111111111112"), "ref 4111111111111112")
         self.assertEqual(mask_sensitive("Rp 1234567"), "Rp 1234567")

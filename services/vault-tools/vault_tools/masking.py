@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
-_CANDIDATE = re.compile(r"(?<![\d])(?:\d[ -]?){13,19}(?![\d])")
+_CANDIDATE = re.compile(r"(?<!\d)\d(?:[ -]?\d){12,18}(?!\d)")
 
 
 def luhn_valid(digits: str) -> bool:
