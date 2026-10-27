@@ -196,7 +196,7 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
             return f"GAGAL membaca berkas: {e}"
         if not 1 <= part <= len(parts):
             return f"GAGAL: part harus 1..{len(parts)}"
-        dated = statement_pdf.count_dated_lines(parts)
+        dated = statement_pdf.count_transactions(parts)
         with _LOCK:    # remember what the document contains so record_mutations can tell if rows are missing
             conn.execute("INSERT OR REPLACE INTO ingest_checks VALUES (?,?,?,?)",
                          (h, dated, len(parts), datetime.now(timezone.utc).isoformat()))

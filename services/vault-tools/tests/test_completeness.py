@@ -50,6 +50,17 @@ class Counting(unittest.TestCase):
         self.assertEqual(sp.count_dated_lines(["14/06 KARTU DEBIT SPBU 41.51301,KM 3 510,738.00 DB"]), 1)   # the coordinate is not money
         self.assertEqual(sp.count_dated_lines(["01/01 BIAYA ADM 0.40"]), 0)                                # 40 sen: rounds to zero
 
+    def test_mandiri_style_blocks_are_counted_by_their_signed_amount_lines(self):
+        mandiri = ("Saldo Awal/Initial Balance : 1.000.000,00\nNo Tanggal Keterangan Nominal (IDR) Saldo (IDR)\n"
+                   "Pembayaran QR\n05 Sep 2026\n1 ke Nusapala Parkir -10.000,00 990.000,00\n12:01:02 WIB\n[[NUM:****1111]]\n"
+                   "Transfer Masuk\n06 Sep 2026\n2 dari Budi +500.000,00 1.490.000,00\n13:00:00 WIB\n"
+                   "Bunga\n07 Sep 2026\n3 Bunga tabungan +0,45 1.490.000,45\n")
+        self.assertEqual(sp.count_dated_lines([mandiri]), 0)            # the dates sit alone: no money on those lines
+        self.assertEqual(sp.count_signed_lines([mandiri]), 2)           # the 45 sen of interest is not counted
+        self.assertEqual(sp.count_transactions([mandiri]), 2)
+        self.assertEqual(sp.count_transactions([BCA_LIKE]), 3)           # BCA-style stays on the date-led count
+        self.assertEqual(sp.count_transactions(["tidak ada transaksi"]), 0)
+
     def test_opening_and_closing_balance_lines_never_count(self):
         t = "01/10 Saldo Awal 5,000.00\n31/10 Saldo Akhir 6,000.00\n15/10 Opening Balance\n"
         self.assertEqual(sp.count_dated_lines([t]), 0)

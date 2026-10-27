@@ -168,6 +168,27 @@ def count_dated_lines(parts: list[str]) -> int:
                if _DATED.match(ln) and not _BALANCE_LINE.search(ln) and _first_money_is_real(ln))
 
 
+_SIGNED_PAIR = re.compile(r"([-+]\d{1,3}(?:[.,]\d{3})*[.,]\d{2})\s+\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?(?!\d)")
+
+
+def count_signed_lines(parts: list[str]) -> int:
+    """Mandiri-style blocks keep the date on its own line; the mutation is a signed amount followed by the
+    running balance (-12.000,00 5.300.000,00). Count those lines (sub-rupiah ones excluded)."""
+    n = 0
+    for p in parts:
+        for ln in p.splitlines():
+            m = _SIGNED_PAIR.search(ln)
+            if m and int(re.sub(r"\D", "", m.group(1)[1:-3]) or 0) >= 1:
+                n += 1
+    return n
+
+
+def count_transactions(parts: list[str]) -> int:
+    """Transactions in the document: the larger of the date-led count (BCA, Jago) and the signed-amount count
+    (Mandiri). Both agree where both formats apply. 0 means the layout is unknown, so no completeness check."""
+    return max(count_dated_lines(parts), count_signed_lines(parts))
+
+
 TEXT_SUFFIXES = (".csv", ".txt")
 
 
