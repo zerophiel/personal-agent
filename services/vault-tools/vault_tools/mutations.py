@@ -85,6 +85,9 @@ def record_mutations(conn: sqlite3.Connection, account_alias: str, file_hash: st
             (acct["id"], d, desc, amount, category, "verified" if category else "unverified",
              "mutation", key, file_hash))
         new += cur.rowcount
+        if cur.rowcount and amount < 0:           # a purchase already captured from a screenshot is merged, not double counted
+            from .health import merge_receipt_into_mutation
+            merge_receipt_into_mutation(conn, cur.lastrowid, d, amount)
     conn.execute(
         "INSERT INTO mutation_files VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         (file_hash, acct["id"], period_start, period_end, opening_balance, closing_balance,
@@ -119,7 +122,8 @@ def set_category_rule(conn, merchant: str, category: str) -> str:
     conn.execute("INSERT INTO category_rules VALUES (?,?) ON CONFLICT(pattern) DO UPDATE SET category=excluded.category",
                  (pattern, cat))
     hit = 0
-    for r in conn.execute("SELECT id, merchant FROM transactions WHERE source='mutation' AND status='unverified'").fetchall():
+    for r in conn.execute("SELECT id, merchant FROM transactions WHERE source IN ('mutation','receipt')"
+                          " AND status='unverified' AND merged_into IS NULL").fetchall():
         if normalize(r["merchant"]) == pattern:
             conn.execute("UPDATE transactions SET category=?, status='verified' WHERE id=?", (cat, r["id"]))
             hit += 1
@@ -131,7 +135,7 @@ def list_uncategorized(conn, limit: int = 30) -> list[str]:
     """Most frequent unverified merchants first, so one rule fixes many rows."""
     groups: dict[str, list] = defaultdict(list)
     for r in conn.execute("SELECT id, merchant, amount, category FROM transactions "
-                          "WHERE source='mutation' AND status='unverified'"):
+                          "WHERE source IN ('mutation','receipt') AND status='unverified' AND merged_into IS NULL"):
         groups[normalize(r["merchant"])].append(r)
     out = []
     for pat, rs in sorted(groups.items(), key=lambda kv: -len(kv[1]))[:limit]:

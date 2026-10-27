@@ -93,6 +93,28 @@ class PdfIntake(unittest.TestCase):
     def test_control_and_zero_width_chars_stripped(self):
         self.assertEqual(sp.sanitize("a​b\x00c‮d"), "abcd")
 
+    def test_long_documents_are_split_into_labelled_parts_that_reassemble(self):
+        lines = [f"Baris data nomor {i:04d} Rp {i * 1000}" for i in range(900)]
+        data = make_pdf(lines)
+        h, parts = sp.ingest_file_parts(data, "mutasi.pdf", [], )
+        self.assertGreater(len(parts), 1)
+        self.assertTrue(all(len(p) <= sp.CHUNK_CHARS + 600 for p in parts))            # header/footer overhead only
+        for i, p in enumerate(parts, 1):
+            self.assertIn(f"bagian={i}/{len(parts)}", p.splitlines()[0])
+            self.assertEqual(p.count("<<<END_DATA>>>"), 1)
+        joined = "\n".join(parts)
+        self.assertIn("Baris data nomor 0000", joined)
+        self.assertIn("Baris data nomor 0899", joined)
+        self.assertEqual(h, sp.file_sha256(data))
+
+    def test_split_parts_respects_limit_and_loses_nothing(self):
+        text = "\n".join(f"baris {i}" for i in range(2000))
+        parts = sp.split_parts(text, limit=500)
+        self.assertTrue(all(len(p) <= 500 for p in parts))
+        self.assertEqual("\n".join(parts), text)
+        self.assertEqual(sp.split_parts("x" * 1200, limit=500), ["x" * 500, "x" * 500, "x" * 200])
+        self.assertEqual(sp.split_parts("", limit=500), [""])
+
     def test_decrypted_pdf_never_touches_disk(self):
         before = set(os.listdir(tempfile.gettempdir()))
         sp.ingest(make_pdf(password="pw12345678"), ["pw12345678"])

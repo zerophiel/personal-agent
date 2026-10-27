@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 5   # 5: debts.pay_method/pay_to_alias/debit_account_alias; 2: cards.pay_method/pay_to_alias; 3: transaction dedupe, mutation_files, category_rules; 4: sinking_funds
+SCHEMA_VERSION = 6   # 6: transactions.merged_into, net_snapshots; 5: debts.pay_method/pay_to_alias/debit_account_alias; 2: cards.pay_method/pay_to_alias; 3: transaction dedupe, mutation_files, category_rules; 4: sinking_funds
 
 
 def _money(col: str, nullable: bool = False) -> str:
@@ -48,7 +48,8 @@ CREATE TABLE IF NOT EXISTS transactions (
   {_money('amount')} NOT NULL, category TEXT,
   status TEXT NOT NULL CHECK (status IN ('unverified','verified')),
   source TEXT NOT NULL CHECK (source IN ('statement','receipt','manual','mutation')),
-  dedupe_key TEXT, file_hash TEXT);
+  dedupe_key TEXT, file_hash TEXT,
+  merged_into INTEGER);   -- a receipt later seen in a bank mutation points at that row (never counted twice)
 CREATE INDEX IF NOT EXISTS idx_txn_date ON transactions(txn_date);
 CREATE TABLE IF NOT EXISTS mutation_files (
   file_hash TEXT PRIMARY KEY, account_id INTEGER NOT NULL REFERENCES accounts(id),
@@ -63,6 +64,9 @@ CREATE TABLE IF NOT EXISTS sinking_funds (
   pool_pay_to TEXT NOT NULL,            -- payee alias of the pool account number (contributions go here)
   creditor_pay_to TEXT,                 -- payee alias of the creditor's account (final payment)
   {_money('saved_so_far')} NOT NULL, saved_asof TEXT NOT NULL, note TEXT);
+CREATE TABLE IF NOT EXISTS net_snapshots (
+  month TEXT PRIMARY KEY, {_money('total_debt')} NOT NULL, {_money('accounts_balance', True)},
+  {_money('saved_funds')} NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS category_rules (
   pattern TEXT PRIMARY KEY, category TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS plans (
@@ -110,9 +114,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE debts ADD COLUMN {col} TEXT")
     # v2 -> v3: transaction dedupe + provenance (mutation_files/category_rules come from DDL)
     tcols = {r["name"] for r in conn.execute("PRAGMA table_info(transactions)")}
-    for col in ("dedupe_key", "file_hash"):
+    for col, typ in (("dedupe_key", "TEXT"), ("file_hash", "TEXT"), ("merged_into", "INTEGER")):   # v6 adds merged_into
         if col not in tcols:
-            conn.execute(f"ALTER TABLE transactions ADD COLUMN {col} TEXT")
+            conn.execute(f"ALTER TABLE transactions ADD COLUMN {col} {typ}")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_txn_dedupe ON transactions(dedupe_key)"
                  " WHERE dedupe_key IS NOT NULL")
     conn.commit()
