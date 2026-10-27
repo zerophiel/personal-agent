@@ -10,7 +10,7 @@ import json
 import os
 import sqlite3
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from . import auth
 from .client import GmailError, TokenError
@@ -25,6 +25,7 @@ class Config:
     senders: dict[str, str]          # lowercase address -> bank key
     drop_dir: str
     state_db: str
+    org_domains: dict[str, str] = field(default_factory=dict)   # bank key -> parent domain
     label: str = LABEL
     retention_days: int = RETENTION_DAYS
 
@@ -77,7 +78,7 @@ def process_message(client, cfg: Config, mid: str, now=time.time) -> str:
     if bank is None:
         emit(cfg, {"type": "rejected", "reason": "sender_not_allowlisted", "from": auth.safe_label(addr)}, now)
         return "rejected_sender"
-    ok, why = auth.auth_ok(headers, domain)
+    ok, why = auth.auth_ok(headers, domain, cfg.org_domains.get(bank))
     if not ok:
         emit(cfg, {"type": "rejected", "reason": f"auth_failed:{why}", "bank": bank}, now)
         return "rejected_auth"

@@ -39,6 +39,19 @@ class Auth(unittest.TestCase):
             self.assertFalse(ok, bad)
             self.assertEqual(why, "no_trusted_pass")
 
+    def test_parent_org_domain_accepted_only_when_configured(self):
+        ar = "mx.google.com; dkim=pass header.i=@hsbc.co.id; dmarc=pass (p=REJECT) header.from=hsbc.co.id"
+        self.assertEqual(auth.auth_ok(hdrs(ar=(ar,)), "mail.hsbc.co.id", "hsbc.co.id"), (True, "ok"))
+        self.assertFalse(auth.auth_ok(hdrs(ar=(ar,)), "mail.hsbc.co.id")[0])          # not configured
+        self.assertFalse(auth.auth_ok(hdrs(ar=(ar,)), "mail.hsbc.co.id", "dbs.com")[0])  # wrong org domain
+
+    def test_org_domain_cannot_be_a_lookalike_or_public_suffix(self):
+        for hf, frm, org in (("co.id", "mail.hsbc.co.id", "hsbc.co.id"),
+                             ("hsbc.co.id", "mail.hsbc.co.id.evil.com", "hsbc.co.id"),
+                             ("hsbc.co.id", "evilhsbc.co.id", "hsbc.co.id")):
+            ar = f"mx.google.com; dkim=pass; dmarc=pass header.from={hf}"
+            self.assertFalse(auth.auth_ok(hdrs(ar=(ar,)), frm, org)[0], (hf, frm))
+
     def test_forged_pass_alongside_real_fail_does_not_win(self):
         forged = "evil.example; dkim=pass; dmarc=pass header.from=dbs.com"
         real = "mx.google.com; dkim=fail; dmarc=fail header.from=dbs.com"

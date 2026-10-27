@@ -28,10 +28,16 @@ def _clauses(value: str) -> list[str]:
     return [c.strip() for c in value.split(";")[1:]]
 
 
-def auth_ok(headers: dict[str, list[str]], from_domain: str) -> tuple[bool, str]:
+def auth_ok(headers: dict[str, list[str]], from_domain: str,
+            org_domain: str | None = None) -> tuple[bool, str]:
     """Require, in an Authentication-Results header written by mx.google.com: dkim=pass AND
-    dmarc=pass whose header.from equals the From domain. Headers from any other authserv-id
-    (e.g. ones a sender injected) are ignored. Returns (ok, short reason)."""
+    dmarc=pass whose header.from is the From domain, or the bank's configured parent
+    `org_domain` when the From domain is a subdomain of it (e.g. mail.hsbc.co.id -> hsbc.co.id).
+    Headers from any other authserv-id (e.g. ones a sender injected) are ignored.
+    Returns (ok, short reason)."""
+    accepted = {from_domain}
+    if org_domain and (from_domain == org_domain or from_domain.endswith("." + org_domain)):
+        accepted.add(org_domain)
     seen_trusted = False
     for value in headers.get("authentication-results", []):
         authserv = value.split(";", 1)[0].strip().split(" ")[0].lower()
@@ -42,6 +48,6 @@ def auth_ok(headers: dict[str, list[str]], from_domain: str) -> tuple[bool, str]
         dkim = any(re.match(r"dkim=pass\b", c) for c in clauses)
         dmarc_domains = [m.group(1).lower() for c in clauses if re.match(r"dmarc=pass\b", c)
                          for m in [re.search(r"header\.from=([A-Za-z0-9.\-]+)", c)] if m]
-        if dkim and from_domain in dmarc_domains:
+        if dkim and accepted & set(dmarc_domains):
             return True, "ok"
     return False, "no_trusted_pass" if seen_trusted else "no_trusted_header"

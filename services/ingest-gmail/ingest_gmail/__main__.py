@@ -11,8 +11,10 @@ def main() -> int:
     load = lambda n: json.load(open(os.path.join(secrets, n)))  # noqa: E731
     here = os.path.dirname(os.path.abspath(__file__))
     with open(os.path.join(here, "senders.json")) as f:
-        senders = {addr.lower(): bank for bank, addr in json.load(f).items()}
-    cfg = Config(senders=senders, drop_dir=os.environ.get("DROP_DIR", "/ingest"),
+        banks = json.load(f)
+    cfg = Config(senders={b["address"].lower(): k for k, b in banks.items()},
+                 org_domains={k: b["org_domain"] for k, b in banks.items()},
+                 drop_dir=os.environ.get("DROP_DIR", "/ingest"),
                  state_db=os.environ.get("STATE_DB", "/state/ingest.db"))
     summary = run(GmailClient(load("gmail_ingest_client"), load("gmail_ingest_token")), cfg)
     print(f"ingest-gmail: {summary}")
