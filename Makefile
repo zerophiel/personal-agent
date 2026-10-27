@@ -45,3 +45,4 @@ restore:
 
 test:
 	cd services/control && python3 -I -m unittest discover -s tests -v
+	cd services/vault-tools && python3 -I -m unittest discover -s tests -v
