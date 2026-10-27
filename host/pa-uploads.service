@@ -1,0 +1,5 @@
+[Unit]
+Description=Relay Telegram uploads to the ingest folder and enforce 90-day retention
+[Service]
+Type=oneshot
+ExecStart=/opt/personal-agent/scripts/sync-uploads.sh

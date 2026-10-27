@@ -15,6 +15,7 @@ import re
 import pdfplumber
 import pikepdf
 
+from . import names
 from .masking import mask_sensitive
 
 MAX_BYTES = 15 * 1024 * 1024
@@ -33,8 +34,19 @@ def file_sha256(data: bytes) -> str:
 
 def resolve_ref(file_ref: str, base_dir: str) -> str:
     """Resolve `file_ref` inside `base_dir` only (no traversal, no symlink escape)."""
+    file_ref = names.normalize_ref(file_ref)
     base = os.path.realpath(base_dir)
     path = os.path.realpath(os.path.join(base, file_ref))
+    if os.path.commonpath([base, path]) != base:
+        raise PdfError("file_ref not found")
+    if not os.path.isfile(path) and file_ref.startswith(names.UPLOAD_PREFIX):
+        # list_uploads shows a sanitized name; find the real file whose sanitized name matches
+        folder = os.path.join(base, names.UPLOAD_PREFIX.rstrip("/"))
+        want = file_ref[len(names.UPLOAD_PREFIX):]
+        for e in (os.scandir(folder) if os.path.isdir(folder) else []):
+            if e.is_file(follow_symlinks=False) and names.safe_name(e.name) == want:
+                path = os.path.realpath(e.path)
+                break
     if os.path.commonpath([base, path]) != base or not os.path.isfile(path):
         raise PdfError("file_ref not found")
     if os.path.getsize(path) > MAX_BYTES:
@@ -77,9 +89,9 @@ def extract_text(pdf_bytes: bytes) -> str:
         raise PdfError("text extraction failed") from e
 
 
-def sanitize(text: str, extra_patterns=()) -> str:
+def sanitize(text: str, extra_patterns=(), mask_accounts: bool = True) -> str:
     text = _CTRL.sub("", text)
-    text = mask_sensitive(text, extra_patterns)
+    text = mask_sensitive(text, extra_patterns, mask_accounts)
     if len(text) > MAX_CHARS:
         text = text[:MAX_CHARS] + "\n[dipotong]"
     return text
@@ -102,4 +114,22 @@ def ingest(data: bytes, candidates: list[str], extra_patterns=()) -> tuple[str, 
     text = sanitize(extract_text(decrypt(data, candidates)), extra_patterns)
     if len(text.strip()) < 40:  # scanned/image-only: needs the vision fallback (not automatic)
         raise PdfError("no extractable text (image-only PDF)")
+    return h, wrap_untrusted(text, h)
+
+
+TEXT_SUFFIXES = (".csv", ".txt")
+
+
+def ingest_file(data: bytes, filename: str, candidates: list[str], extra_patterns=()) -> tuple[str, str]:
+    """PDF (possibly encrypted) or a plain CSV/TXT export (e.g. an account mutation download)."""
+    if data.startswith(b"%PDF"):
+        return ingest(data, candidates, extra_patterns)
+    if len(data) > MAX_BYTES:
+        raise PdfError("file too large")
+    if not filename.lower().endswith(TEXT_SUFFIXES) or b"\x00" in data[:4096]:
+        raise PdfError("unsupported file type (PDF, CSV or TXT only)")
+    text = sanitize(data.decode("utf-8", "replace"), extra_patterns)
+    if len(text.strip()) < 20:
+        raise PdfError("file is empty")
+    h = file_sha256(data)
     return h, wrap_untrusted(text, h)

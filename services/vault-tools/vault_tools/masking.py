@@ -31,7 +31,12 @@ def _mask_digits(raw: str) -> str:
     return f"[[NUM:****{digits[-4:]}]]"
 
 
-def mask_sensitive(text: str, extra_patterns: Iterable[str] = ()) -> str:
+# Account numbers are not Luhn-valid. Long bare digit runs only (10-16): amounts printed with
+# separators ("1.500.000,00") never match, and a digit run touching . or , is left alone.
+_ACCOUNT_RUN = re.compile(r"(?<![\d.,])\d{10,16}(?!\d)(?![.,]\d)")
+
+
+def mask_sensitive(text: str, extra_patterns: Iterable[str] = (), mask_accounts: bool = False) -> str:
     def repl(m: re.Match) -> str:
         digits = re.sub(r"\D", "", m.group(0))
         if 13 <= len(digits) <= 19 and luhn_valid(digits):
@@ -39,6 +44,8 @@ def mask_sensitive(text: str, extra_patterns: Iterable[str] = ()) -> str:
         return m.group(0)
 
     out = _CANDIDATE.sub(repl, text)
+    if mask_accounts:
+        out = _ACCOUNT_RUN.sub(lambda m: _mask_digits(m.group(0)), out)
     for pat in extra_patterns:
         out = re.sub(pat, lambda m: _mask_digits(m.group(0)), out)
     return out

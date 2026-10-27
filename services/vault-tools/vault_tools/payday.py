@@ -48,8 +48,12 @@ class Obligation:
     minimum: int = 0          # cards only: minimum due
     from_account: str = "main"
     late_cost_bp: int = 0     # est. monthly interest/penalty on unpaid amount, basis points
+    method: str = "transfer"  # transfer | app_menu (pay from the bank's app menu)
+    pay_to: str | None = None  # vault alias of the number to pay (shown only by /rincian)
 
     def __post_init__(self):
+        if self.method not in ("transfer", "app_menu"):
+            raise ValueError(f"unknown method {self.method}")
         if self.kind not in KINDS:
             raise ValueError(f"unknown kind {self.kind}")
         check_idr(self.amount)
@@ -65,6 +69,8 @@ class Transfer:
     to_alias: str
     amount: int
     reason: str
+    method: str = "transfer"
+    pay_to: str | None = None
 
 
 @dataclass(frozen=True)
@@ -97,17 +103,18 @@ def _items(payday: date, obligations: Iterable[Obligation], horizon: date):
         if o.kind == "card":
             minimum = o.minimum
             out.append((P_OVERDUE if overdue else P_MIN_DUE, o.due, o.payee_alias, minimum,
-                        "tagihan kartu - minimum", o.from_account, o.late_cost_bp))
+                        "tagihan kartu - minimum", o.from_account, o.late_cost_bp, o.method, o.pay_to))
             rest = o.amount - minimum
             if rest:
                 out.append((P_OVERDUE if overdue else P_CARD_REST, o.due, o.payee_alias, rest,
-                            "tagihan kartu - sisa saldo (bayar penuh)", o.from_account, o.late_cost_bp))
+                            "tagihan kartu - sisa saldo (bayar penuh)", o.from_account, o.late_cost_bp,
+                            o.method, o.pay_to))
             continue
         prio = {"fixed": P_ESSENTIAL, "debt": P_INSTALLMENT, "pool": P_INSTALLMENT,
                 "saving": P_SAVING}[o.kind]
         out.append((P_OVERDUE if overdue else prio, o.due, o.payee_alias, o.amount,
                     {"fixed": "pengeluaran tetap", "debt": "cicilan", "pool": "transfer pool",
-                     "saving": "tabungan"}[o.kind], o.from_account, o.late_cost_bp))
+                     "saving": "tabungan"}[o.kind], o.from_account, o.late_cost_bp, o.method, o.pay_to))
     # stable total order: priority, due date, alias, reason
     out.sort(key=lambda t: (t[0], t[1], t[2], t[4]))
     return [t for t in out if t[3] > 0]
@@ -123,12 +130,12 @@ def build_plan(payday: date, salary: int, obligations: Iterable[Obligation],
     remaining = salary
     transfers: list[Transfer] = []
     unfunded: list[Unfunded] = []
-    for prio, due, alias, amount, reason, acct, late_bp in _items(payday, obligations, nxt):
+    for prio, due, alias, amount, reason, acct, late_bp, method, pay_to in _items(payday, obligations, nxt):
         pay = min(amount, remaining)
         remaining -= pay
         if pay:
             tdate = payday if prio == P_OVERDUE else max(payday, due - timedelta(days=3))
-            transfers.append(Transfer(tdate, acct, alias, pay, reason))
+            transfers.append(Transfer(tdate, acct, alias, pay, reason, method, pay_to))
         short = amount - pay
         if short:
             unfunded.append(Unfunded(alias, short, reason, bp_of(short, late_bp)))

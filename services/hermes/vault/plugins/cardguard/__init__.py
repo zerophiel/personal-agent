@@ -160,6 +160,37 @@ def _rincian(event):
     return {"action": "skip"}
 
 
+_PAYEE_CMD = re.compile(r"^/(rekening|va)(?:@\w+)?(?:\s+(.*))?$", re.I | re.S)
+_PAYEE_ARGS = re.compile(r"^([a-z0-9][a-z0-9-]{1,40})\s+([A-Za-z][A-Za-z0-9 ]{1,20}?)\s+([\d][\d -]{6,26}\d)$", re.I)
+_USAGE = ("Format: /rekening <alias> <bank> <nomor>  (atau /va ...). Contoh: /rekening bca-rek BCA 1234567890. "
+          "Pesan Anda dihapus dan nomor tidak disimpan.")
+
+
+def _payee_command(event, text: str):
+    """/rekening and /va: store an account/VA number straight into the vault, tell the owner, delete the
+    message, and skip. The model never sees the number or the command."""
+    m = _PAYEE_CMD.match(text.strip())
+    kind = "account" if m.group(1).lower() == "rekening" else "va"
+    args = _PAYEE_ARGS.match((m.group(2) or "").strip())
+    _delete_async(event)
+    if not args:
+        _notify(event, _USAGE)
+        return {"action": "skip"}
+    alias, bank, number = args.group(1).lower(), " ".join(args.group(2).split()), re.sub(r"\D", "", args.group(3))
+    if not 8 <= len(number) <= 24:
+        _notify(event, _USAGE)
+        return {"action": "skip"}
+    status, raw = _post("/internal/store_payee", {"alias": alias, "kind": kind, "bank": bank, "number": number})
+    body = json.loads(raw or b"{}")
+    if status == 200 and body.get("ok"):
+        again = " (nomor ini sudah tersimpan sebelumnya)" if body.get("duplicate") else ""
+        _notify(event, f"Tersimpan: {body['alias']} ****{number[-4:]} ({bank}, {kind}){again}. Pesan Anda sudah dihapus.")
+    else:
+        log.error("cardguard: payee command failed status=%s", status)
+        _notify(event, "Gagal menyimpan nomor dengan aman. Pesan dihapus; coba lagi nanti.")
+    return {"action": "skip"}
+
+
 def on_inbound(event, **kwargs):
     try:
         text = getattr(event, "text", None)
@@ -168,6 +199,8 @@ def on_inbound(event, **kwargs):
         private = getattr(getattr(event, "source", None), "chat_type", None) == "dm"
         if private and text.strip().lower() == "/rincian":
             return _rincian(event)
+        if private and _PAYEE_CMD.match(text.strip()):
+            return _payee_command(event, text)
         digits_list = find_numbers(text)
         if not digits_list:
             return None

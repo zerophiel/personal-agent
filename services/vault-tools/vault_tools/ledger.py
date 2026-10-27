@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 4   # 2: cards.pay_method/pay_to_alias; 3: transaction dedupe, mutation_files, category_rules; 4: sinking_funds
 
 
 def _money(col: str, nullable: bool = False) -> str:
@@ -19,7 +19,9 @@ CREATE TABLE IF NOT EXISTS cards (
   id INTEGER PRIMARY KEY, alias TEXT NOT NULL UNIQUE, bank TEXT NOT NULL, last4 TEXT NOT NULL,
   statement_day INTEGER NOT NULL CHECK (statement_day BETWEEN 1 AND 31),
   due_day INTEGER NOT NULL CHECK (due_day BETWEEN 1 AND 31),
-  {_money('credit_limit')} NOT NULL);
+  {_money('credit_limit')} NOT NULL,
+  pay_method TEXT NOT NULL DEFAULT 'transfer' CHECK (pay_method IN ('transfer','app_menu')),
+  pay_to_alias TEXT);
 CREATE TABLE IF NOT EXISTS debts (
   id INTEGER PRIMARY KEY, alias TEXT NOT NULL UNIQUE, lender TEXT NOT NULL,
   {_money('outstanding')} NOT NULL, {_money('installment')} NOT NULL,
@@ -42,8 +44,24 @@ CREATE TABLE IF NOT EXISTS transactions (
   txn_date TEXT NOT NULL, merchant TEXT NOT NULL,
   {_money('amount')} NOT NULL, category TEXT,
   status TEXT NOT NULL CHECK (status IN ('unverified','verified')),
-  source TEXT NOT NULL CHECK (source IN ('statement','receipt','manual','mutation')));
+  source TEXT NOT NULL CHECK (source IN ('statement','receipt','manual','mutation')),
+  dedupe_key TEXT, file_hash TEXT);
 CREATE INDEX IF NOT EXISTS idx_txn_date ON transactions(txn_date);
+CREATE TABLE IF NOT EXISTS mutation_files (
+  file_hash TEXT PRIMARY KEY, account_id INTEGER NOT NULL REFERENCES accounts(id),
+  period_start TEXT NOT NULL, period_end TEXT NOT NULL,
+  {_money('opening_balance', True)}, {_money('closing_balance', True)},
+  row_count INTEGER NOT NULL, new_rows INTEGER NOT NULL,
+  reconciled INTEGER NOT NULL CHECK (reconciled IN (0,1)), recon_diff INTEGER NOT NULL,
+  ingested_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS sinking_funds (
+  alias TEXT PRIMARY KEY, {_money('target')} NOT NULL CHECK (target > 0), due_date TEXT NOT NULL,
+  pool_alias TEXT NOT NULL REFERENCES accounts(alias),
+  pool_pay_to TEXT NOT NULL,            -- payee alias of the pool account number (contributions go here)
+  creditor_pay_to TEXT,                 -- payee alias of the creditor's account (final payment)
+  {_money('saved_so_far')} NOT NULL, saved_asof TEXT NOT NULL, note TEXT);
+CREATE TABLE IF NOT EXISTS category_rules (
+  pattern TEXT PRIMARY KEY, category TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS plans (
   id INTEGER PRIMARY KEY, payday TEXT NOT NULL, snapshot_json TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS thresholds (
@@ -67,4 +85,23 @@ def connect(path: str) -> sqlite3.Connection:
     if path != ":memory:":
         conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(DDL)
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """v1 -> v2: add the card payment columns to an existing ledger (CREATE IF NOT EXISTS skips them)."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(cards)")}
+    if "pay_method" not in cols:
+        conn.execute("ALTER TABLE cards ADD COLUMN pay_method TEXT NOT NULL DEFAULT 'transfer'"
+                     " CHECK (pay_method IN ('transfer','app_menu'))")
+    if "pay_to_alias" not in cols:
+        conn.execute("ALTER TABLE cards ADD COLUMN pay_to_alias TEXT")
+    # v2 -> v3: transaction dedupe + provenance (mutation_files/category_rules come from DDL)
+    tcols = {r["name"] for r in conn.execute("PRAGMA table_info(transactions)")}
+    for col in ("dedupe_key", "file_hash"):
+        if col not in tcols:
+            conn.execute(f"ALTER TABLE transactions ADD COLUMN {col} TEXT")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_txn_dedupe ON transactions(dedupe_key)"
+                 " WHERE dedupe_key IS NOT NULL")
+    conn.commit()

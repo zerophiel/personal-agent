@@ -1,0 +1,7 @@
+[Unit]
+Description=Trigger the upload relay when Hermes caches a new document
+[Path]
+PathChanged=/opt/personal-agent-data/hermes-vault/cache/documents
+Unit=pa-uploads.service
+[Install]
+WantedBy=multi-user.target

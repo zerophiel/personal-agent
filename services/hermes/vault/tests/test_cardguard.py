@@ -101,6 +101,45 @@ class CardGuard(unittest.TestCase):
             rec = json.loads(f.readline())
         self.assertEqual((rec["c"], rec["m"]), (99, 777))
 
+    def test_rekening_command_stored_deleted_skipped_model_never_sees_it(self):
+        self.f.body = json.dumps({"ok": True, "alias": "bca-rek"}).encode()
+        out = cg.on_inbound(ev("/rekening bca-rek BCA 1234 5678 90"))
+        self.assertEqual(out, {"action": "skip"})
+        path, body = self.f.posts[0]
+        self.assertEqual(path, "/internal/store_payee")
+        self.assertEqual((body["alias"], body["kind"], body["bank"], body["number"]), ("bca-rek", "account", "BCA", "1234567890"))
+        ms = self.methods()
+        self.assertIn("deleteMessage", ms)
+        said = [p["text"] for m, p in self.f.bot_calls if m == "sendMessage"][0]
+        self.assertIn("bca-rek ****7890", said)
+        self.assertNotIn("1234567890", said)
+
+    def test_va_command_uses_va_kind_and_botname_suffix(self):
+        self.f.body = json.dumps({"ok": True, "alias": "sekolah-va", "duplicate": True}).encode()
+        cg.on_inbound(ev("/va@danoevault_agent sekolah-va Mandiri 8808123456789012"))
+        self.assertEqual(self.f.posts[0][1]["kind"], "va")
+        said = [p["text"] for m, p in self.f.bot_calls if m == "sendMessage"][0]
+        self.assertIn("sudah tersimpan sebelumnya", said)
+
+    def test_malformed_payee_command_still_deleted_and_never_stored(self):
+        for bad in ("/rekening", "/rekening bca-rek 1234567890", "/va x BCA 12", "/rekening bca-rek BCA 12345678901234567890123456789"):
+            self.f.posts.clear()
+            self.assertEqual(cg.on_inbound(ev(bad)), {"action": "skip"}, bad)
+            self.assertEqual(self.f.posts, [], bad)
+        self.assertIn("deleteMessage", self.methods())
+
+    def test_payee_command_ignored_outside_private_chat(self):
+        out = cg.on_inbound(ev("/rekening bca-rek BCA 1234567890", chat_type="group"))
+        self.assertIsNone(out)
+        self.assertEqual(self.f.posts, [])
+
+    def test_payee_command_vault_failure_tells_owner_and_deletes(self):
+        self.f.status, self.f.body = 500, b"{}"
+        self.assertEqual(cg.on_inbound(ev("/rekening bca-rek BCA 1234567890")), {"action": "skip"})
+        said = [p["text"] for m, p in self.f.bot_calls if m == "sendMessage"][0]
+        self.assertIn("Gagal", said)
+        self.assertIn("deleteMessage", self.methods())
+
     def test_rincian_failure_skips_and_tells_owner(self):
         self.f.status, self.f.body = 500, b""
         self.assertEqual(cg.on_inbound(ev("/rincian")), {"action": "skip"})
