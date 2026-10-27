@@ -41,6 +41,19 @@ def row(conn, alias="hutang-teman"):
 HOL = tools.id_holidays(2026) | tools.id_holidays(2027) | tools.id_holidays(2028)
 
 
+class Wib(unittest.TestCase):
+    def test_wib_today_is_utc_plus_seven(self):
+        from datetime import datetime, timedelta, timezone
+        expected = (datetime.now(timezone.utc) + timedelta(hours=7)).date()
+        self.assertIn(tools.wib_today(), (expected, expected + timedelta(days=1), expected - timedelta(days=1)))
+        self.assertEqual(tools.WIB.utcoffset(None), timedelta(hours=7))
+
+    def test_after_midnight_wib_is_next_day_in_utc_terms(self):
+        from datetime import datetime, timezone
+        late_utc = datetime(2026, 10, 27, 18, 30, tzinfo=timezone.utc)      # 01:30 WIB on the 28th
+        self.assertEqual(late_utc.astimezone(tools.WIB).date(), date(2026, 10, 28))
+
+
 class Math(unittest.TestCase):
     def test_fifteen_paydays_from_oct_2026_to_dec_2027(self):
         self.assertEqual(tools.sinking_paydays_left(date(2026, 10, 30), date(2028, 1, 15), HOL), 15)

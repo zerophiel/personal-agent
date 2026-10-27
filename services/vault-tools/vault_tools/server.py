@@ -76,7 +76,7 @@ class _Auth:
 
 
 def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: str,
-               allowed_hosts: list[str] | None = None, today=date.today,
+               allowed_hosts: list[str] | None = None, today=tools.wib_today,
                ingest_dir: str = "/ingest", passwords_path: str | None = "/run/secrets/pdf_passwords"):
     if len(mcp_token) < 32 or len(internal_token) < 32 or mcp_token == internal_token:
         raise ValueError("tokens must be >= 32 chars and different")

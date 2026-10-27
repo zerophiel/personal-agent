@@ -32,6 +32,14 @@ def _cuti_bersama() -> frozenset[date]:
     return frozenset(date.fromisoformat(d) for v in data.values() for d in v)
 
 
+WIB = timezone(timedelta(hours=7))   # Indonesia West time: fixed offset, no DST
+
+
+def wib_today() -> date:
+    """Today's date in WIB. The container clock is UTC, which lags a day between 00:00 and 07:00 WIB."""
+    return datetime.now(WIB).date()
+
+
 def id_holidays(year: int) -> frozenset[date]:
     """Indonesian national holidays (python-holidays) plus cuti bersama (local data file)."""
     h = _holidays.country_holidays("ID", years=[year - 1, year, year + 1])
