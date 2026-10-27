@@ -237,6 +237,43 @@ def read_new_events(conn, path: str, limit: int = 20) -> list[str]:
     return out
 
 
+def pending_statements(conn, events_path: str, ingest_dir: str, limit: int = 8) -> list[str]:
+    """Statement files from ingest-gmail that are not recorded (or skipped) yet, oldest first. Derived from the
+    ledger every call, so it does not depend on the events cursor and never "loses" work the model left unfinished."""
+    try:
+        with open(events_path) as f:
+            lines = f.read().splitlines()
+    except FileNotFoundError:
+        return []
+    done = {r[0] for r in conn.execute("SELECT file_hash FROM statements")} | \
+           {r[0] for r in conn.execute("SELECT file_ref FROM skipped_files")}
+    seen: dict[str, dict] = {}
+    for line in lines:
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        ref = str(ev.get("file_ref", ""))
+        if ev.get("type") != "new_statement" or not ref or ref in seen:
+            continue
+        if ref.removesuffix(".pdf") in done or ref in done or not os.path.isfile(os.path.join(ingest_dir, ref)):
+            continue
+        seen[ref] = ev
+    todo = sorted(seen.values(), key=lambda e: (e.get("received_ms", 0), e.get("file_ref", "")))
+    out = [f"belum diproses: {len(todo)} berkas"]
+    out += [f"bank={str(e.get('bank'))[:12]}; file_ref={e['file_ref'][:80]}" for e in todo[:max(1, min(limit, 20))]]
+    return out
+
+
+def skip_statement_file(conn, file_ref: str, reason: str) -> str:
+    if not file_ref or len(file_ref) > 120 or "/" in file_ref:
+        raise ValueError("file_ref tidak valid")
+    conn.execute("INSERT OR REPLACE INTO skipped_files(file_ref, reason, created_at) VALUES (?,?,?)",
+                 (file_ref, reason[:120], datetime.now(timezone.utc).isoformat()))
+    conn.commit()
+    return f"{file_ref[:16]}...: dilewati ({reason[:60]})"
+
+
 # ---- obligations and plan -----------------------------------------------------------
 
 # ---- sinking funds: a lump sum owed on a date, saved up in the owner's pool account ----------

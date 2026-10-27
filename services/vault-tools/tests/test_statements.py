@@ -209,6 +209,32 @@ class IngestEvents(unittest.TestCase):
             self.assertEqual(tools.read_new_events(conn, os.path.join(d, "missing")), [])
 
 
+class PendingStatements(unittest.TestCase):
+    def test_survives_the_cursor_and_drops_recorded_or_skipped_files(self):
+        conn = connect(":memory:")
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "_events.jsonl")
+            refs = {b: c * 64 + ".pdf" for b, c in (("cimb", "a"), ("dbs", "b"), ("hsbc", "c"), ("mega", "d"))}
+            with open(p, "w") as f:
+                for i, (b, r) in enumerate(refs.items()):
+                    for _ in range(2):                                         # the same file announced twice
+                        f.write(json.dumps({"type": "new_statement", "bank": b, "file_ref": r, "received_ms": i}) + "\n")
+                    if b != "mega":
+                        open(os.path.join(d, r), "wb").close()                  # mega's file is gone
+                f.write(json.dumps({"type": "rejected", "reason": "sender_not_allowlisted"}) + "\n")
+            tools.read_new_events(conn, p, 50)                                   # the cursor is burnt, as in production
+            out = tools.pending_statements(conn, p, d)
+            self.assertEqual(out[0], "belum diproses: 3 berkas")
+            self.assertEqual([x.split(";")[0] for x in out[1:]], ["bank=cimb", "bank=dbs", "bank=hsbc"])    # oldest first, no dupes
+            tools.upsert_card(conn, "cimb-1", "CIMB", "1111", 5, 20, 5_000_000)
+            record_statement(conn, "cimb-1", "a" * 64, "2026-09-01", "2026-09-20", 0, 0, 100, 0, 100, 10)
+            tools.skip_statement_file(conn, refs["hsbc"], "di luar periode")
+            self.assertEqual(tools.pending_statements(conn, p, d), ["belum diproses: 1 berkas", f"bank=dbs; file_ref={refs['dbs']}"])
+            with self.assertRaises(ValueError):
+                tools.skip_statement_file(conn, "../x.pdf", "x")
+            self.assertEqual(tools.pending_statements(conn, os.path.join(d, "missing"), d), [])
+
+
 try:
     from starlette.testclient import TestClient  # noqa: F401
     from vault_tools.server import create_app

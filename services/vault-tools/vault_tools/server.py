@@ -37,7 +37,7 @@ MCP_TOOL_NAMES = ("upsert_card", "upsert_debt", "upsert_expense", "set_threshold
                   "upsert_sinking_fund", "sinking_status", "record_expense", "set_budget", "budget_status",
                   "health_check", "list_statements", "record_card_payment", "debt_free_roadmap",
                   "add_owner_name", "suggest_categories", "apply_suggestions", "living_cost_analysis",
-                  "record_card_installments", "card_installments_status")
+                  "record_card_installments", "card_installments_status", "pending_statements", "skip_statement_file")
 
 
 class Installment(BaseModel):
@@ -388,6 +388,20 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
         """Peristiwa baru dari job ingest-gmail (statement baru, penolakan, error). Laporkan ke pemilik;
         untuk new_statement panggil ingest_statement(file_ref, bank)."""
         return tools.read_new_events(conn, os.path.join(ingest_dir, "_events.jsonl"), max(1, min(limit, 50)))
+
+    @mcp.tool()
+    @locked
+    def pending_statements(limit: int = 8) -> list[str]:
+        """Antrean tagihan dari email yang BELUM tercatat (dihitung dari ledger, bukan kursor). Baris pertama = jumlah
+        total yang tersisa. Proses satu per satu dengan ingest_statement lalu record_statement; berkas yang dilewati
+        (di luar periode, ganda, tak terbaca) tandai dengan skip_statement_file agar tidak muncul lagi."""
+        return tools.pending_statements(conn, os.path.join(ingest_dir, "_events.jsonl"), ingest_dir, limit)
+
+    @mcp.tool()
+    @locked
+    def skip_statement_file(file_ref: str, reason: str) -> str:
+        """Tandai berkas antrean tagihan sebagai dilewati (alasan singkat)."""
+        return tools.skip_statement_file(conn, file_ref, reason)
 
     @mcp.tool()
     @locked
