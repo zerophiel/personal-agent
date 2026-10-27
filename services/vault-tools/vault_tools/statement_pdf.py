@@ -142,10 +142,30 @@ _DATED = re.compile(rf"^\s*(\d{{1,2}}[/.-]\d{{1,2}}([/.-]\d{{2,4}})?|\d{{1,2}}\s
 _BALANCE_LINE = re.compile(r"saldo\s+(awal|akhir)|opening balance|closing balance|beginning balance|ending balance|balance (brought|carried)", re.I)
 
 
+#   1,234.56  1.234,56  20,000  +0,26  12.50  (thousands separators and/or two decimals; bare "0938" or "2026" is not money)
+_MONEY = re.compile(r"[-+]?\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{2})?(?!\d)|[-+]?\d+[.,]\d{2}(?!\d)")
+_THOUSANDS_ONLY = re.compile(r"[-+]?\d{1,3}(?:[.,]\d{3})+")
+
+
+def _first_money_is_real(line: str) -> bool:
+    """The first money amount after the date (the mutation, before any running balance) is at least Rp 1.
+    Sub-rupiah interest lines round to 0 and are never recorded, so they must not count as missing rows."""
+    d = _DATED.match(line)
+    m = _MONEY.search(line[d.end():] if d else line)
+    if not m:
+        return False
+    tok = m.group(0)
+    has_decimals = re.search(r"[.,]\d{2}$", tok) and not _THOUSANDS_ONLY.fullmatch(tok)
+    whole = re.sub(r"\D", "", tok[:-3] if has_decimals else tok)
+    return bool(whole) and int(whole) >= 1
+
+
 def count_dated_lines(parts: list[str]) -> int:
-    """How many transaction-looking lines (they start with a date) the document has, balance lines excluded.
-    Used to catch rows a model forgot to send; wrapped description lines do not start with a date."""
-    return sum(1 for p in parts for ln in p.splitlines() if _DATED.match(ln) and not _BALANCE_LINE.search(ln))
+    """How many transaction lines the document has: they start with a date, carry a money amount of at least
+    Rp 1, and are not balance lines. Headers (period ranges, '10.3% MONEY OUT') and sub-rupiah interest do not
+    count. Used to catch rows a model forgot to send; wrapped description lines do not start with a date."""
+    return sum(1 for p in parts for ln in p.splitlines()
+               if _DATED.match(ln) and not _BALANCE_LINE.search(ln) and _first_money_is_real(ln))
 
 
 TEXT_SUFFIXES = (".csv", ".txt")

@@ -39,6 +39,17 @@ class Counting(unittest.TestCase):
         self.assertEqual(sp.count_dated_lines([a, b]), 3)
         self.assertEqual(sp.count_dated_lines(["tidak ada tanggal di sini"]), 0)
 
+    def test_headers_percentages_and_sub_rupiah_interest_are_not_transactions(self):
+        jago = ("01 Dec 2025 31 Jan 2026\n10.3% MONEY OUT\n"
+                "02 Jan 2026 Transfer ke teman -1.500.000,00 3.250.000\n"
+                "05 Jan 2026 Interest Interest +0,26 3.250.000,26\n"
+                "05 Jan 2026 Tax on Interest Tax on Interest -0,05 3.250.000,21\n"
+                "09 Jan 2026 Pembayaran QR -20.000,00 3.230.000\n")
+        self.assertEqual(sp.count_dated_lines([jago]), 2)
+        self.assertEqual(sp.count_dated_lines(["06/01 KR OTOMATIS LLG-DEUTSCHE BANK 0938 730,289.59"]), 1)
+        self.assertEqual(sp.count_dated_lines(["14/06 KARTU DEBIT SPBU 41.51301,KM 3 510,738.00 DB"]), 1)   # the coordinate is not money
+        self.assertEqual(sp.count_dated_lines(["01/01 BIAYA ADM 0.40"]), 0)                                # 40 sen: rounds to zero
+
     def test_opening_and_closing_balance_lines_never_count(self):
         t = "01/10 Saldo Awal 5,000.00\n31/10 Saldo Akhir 6,000.00\n15/10 Opening Balance\n"
         self.assertEqual(sp.count_dated_lines([t]), 0)
