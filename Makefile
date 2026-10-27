@@ -5,7 +5,7 @@ REMOTE_DIR ?= /opt/personal-agent
 SSH := ssh $(VPS_USER)@$(VPS_HOST)
 COMPOSE := sudo docker compose -f compose/docker-compose.yml --env-file config/stack.env
 
-.PHONY: help preflight deploy status logs secret-set secret-gen prune prune-dry backup restore test
+.PHONY: help preflight deploy status logs secret-set secret-gen pdf-passwords prune prune-dry backup restore test
 
 help:
 	@grep -E '^[a-z-]+:' Makefile | cut -d: -f1 | tr '\n' ' '; echo
@@ -36,6 +36,11 @@ secret-gen:
 	@test -n "$(NAME)" -a -n "$(TYPE)" || (echo "NAME and TYPE required"; exit 1)
 	scp -q scripts/secret-gen.sh $(VPS_USER)@$(VPS_HOST):/tmp/pa-secret-gen.sh
 	$(SSH) 'sudo bash /tmp/pa-secret-gen.sh $(NAME) $(TYPE); rm -f /tmp/pa-secret-gen.sh'
+
+# make pdf-passwords   (interactive, hidden input, runs on the VPS)
+pdf-passwords:
+	scp -q scripts/pdf-passwords-set.py $(VPS_USER)@$(VPS_HOST):/tmp/pa-pdf-passwords.py
+	$(SSH) -t 'sudo python3 /tmp/pa-pdf-passwords.py; rm -f /tmp/pa-pdf-passwords.py'
 
 prune-dry:
 	$(SSH) 'cd $(REMOTE_DIR) && sudo DRY_RUN=1 bash scripts/prune.sh'
