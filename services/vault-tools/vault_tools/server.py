@@ -23,7 +23,7 @@ from starlette.responses import JSONResponse, PlainTextResponse
 
 from pydantic import BaseModel, Field
 
-from . import card_installments, health, living, mutations, names, roadmap, statement_pdf, statements, suggest, tools
+from . import card_installments, health, living, mutations, names, roadmap, statement_pdf, statements, subscriptions, suggest, tools
 from .ledger import connect
 from .money import format_idr
 from .payee_vault import PayeeVault, has_forbidden_card_data
@@ -37,7 +37,8 @@ MCP_TOOL_NAMES = ("upsert_card", "upsert_debt", "upsert_expense", "set_threshold
                   "upsert_sinking_fund", "sinking_status", "record_expense", "set_budget", "budget_status",
                   "health_check", "list_statements", "record_card_payment", "debt_free_roadmap",
                   "add_owner_name", "suggest_categories", "apply_suggestions", "living_cost_analysis",
-                  "record_card_installments", "card_installments_status", "pending_statements", "skip_statement_file")
+                  "record_card_installments", "card_installments_status", "pending_statements", "skip_statement_file",
+                  "upsert_subscription", "subscriptions_status")
 
 
 class Installment(BaseModel):
@@ -296,6 +297,21 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
         di tagihan terbaru dianggap sudah selesai. Jangan tertukar dengan tanggal dd/mm: cicilan biasanya ada di
         kolom/keterangan 'cicilan' atau 'installment' dan jumlahnya sama tiap bulan."""
         return card_installments.record(conn, card_alias, statement_date, [i.model_dump() for i in items])
+
+    @mcp.tool()
+    @locked
+    def upsert_subscription(alias: str, name: str, monthly_amount: int, source: str, status: str = "active",
+                            note: str | None = None) -> str:
+        """Catat/ubah LANGGANAN digital (Google One, Apple, Anthropic, Netflix, dll). status: active (masih berjalan),
+        ended (sudah berhenti, supaya tidak dianggap lagi), unsure (belum pasti, tanyakan pemilik). source = alias kartu
+        atau rekening. Catat HANYA setelah pemilik mengonfirmasi, kecuali status unsure. Langganan dolar: perkiraan rupiah."""
+        return subscriptions.upsert(conn, alias, name, monthly_amount, source, status, note)
+
+    @mcp.tool()
+    @locked
+    def subscriptions_status() -> str:
+        """Daftar langganan (aktif, berhenti, belum pasti) dan total aktif per bulan."""
+        return subscriptions.format_list(conn)
 
     @mcp.tool()
     @locked

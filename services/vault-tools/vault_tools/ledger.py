@@ -80,6 +80,10 @@ CREATE TABLE IF NOT EXISTS card_installments (   -- "03/12" on a card statement:
   seq INTEGER NOT NULL, total INTEGER NOT NULL CHECK (total >= 2 AND seq BETWEEN 1 AND total),
   as_of TEXT NOT NULL,                  -- statement date that printed seq/total
   PRIMARY KEY (card_id, key));
+CREATE TABLE IF NOT EXISTS subscriptions (
+  alias TEXT PRIMARY KEY, name TEXT NOT NULL, {_money('amount')} NOT NULL,   -- IDR per month (USD ones: approximate)
+  source TEXT NOT NULL,                 -- card or account alias it is charged to
+  status TEXT NOT NULL CHECK (status IN ('active','ended','unsure')), note TEXT, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS skipped_files (   -- ingest files the owner chose not to record (out of range, duplicate, unreadable)
   file_ref TEXT PRIMARY KEY, reason TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS plans (
