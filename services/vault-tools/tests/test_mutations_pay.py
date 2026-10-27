@@ -207,6 +207,36 @@ class Mutations(unittest.TestCase):
         with self.assertRaises(ValueError):
             mu.cashflow(conn, "2026-13")
 
+    def test_one_off_items_stay_out_of_the_monthly_picture(self):
+        conn = acct_db()
+        mu.record_mutations(conn, "bca-main", H1, "2026-10-01", "2026-10-31", None, None, rows(
+            ("2026-10-13", "KLAIM JHT", 130_000_000), ("2026-10-15", "PEMBAYARAN HSBC", -23_000_000),
+            ("2026-10-25", "GAJI PT MAJU", 42_000_000), ("2026-10-26", "BELANJA", -2_000_000)))
+        mu.set_category_rule(conn, "KLAIM JHT", "sekali:jht")
+        mu.set_category_rule(conn, "PEMBAYARAN HSBC", "sekali:pelunasan-kartu")
+        c = mu.cashflow(conn, "2026-10")
+        self.assertEqual((c["income"], c["expenses"], c["net"]), (42_000_000, 2_000_000, 40_000_000))
+        self.assertEqual((c["one_off_in"], c["one_off_out"]), (130_000_000, 23_000_000))
+        text = mu.format_cashflow(c)
+        self.assertIn("Sekali (tidak dihitung dalam rasio): masuk Rp 130.000.000; keluar Rp 23.000.000", text)
+        self.assertEqual(c["savings_rate_bp"], 40_000_000 * 10_000 // 42_000_000)
+        self.assertNotIn("klaim jht", [k for k, _ in c["by_category"]])
+        from vault_tools import health as hl
+        self.assertFalse(hl.is_discretionary("sekali:jht"))
+
+    def test_one_off_credit_is_never_suggested_as_salary(self):
+        conn = acct_db()
+        for i, month in enumerate(("2026-08", "2026-09", "2026-10")):
+            mu.record_mutations(conn, "bca-main", str(i) * 64, f"{month}-01", f"{month}-28", None, None,
+                                rows((f"{month}-25", "GAJI PT MAJU 998877", 40_000_000 + i)))
+        mu.record_mutations(conn, "bca-main", "9" * 64, "2026-10-01", "2026-10-30", None, None,
+                            rows(("2026-10-13", "KLAIM JHT BPJS", 130_000_000)))
+        mu.set_category_rule(conn, "KLAIM JHT BPJS", "sekali:jht")
+        s = mu.suggest_salary(conn)
+        self.assertIn("gaji pt maju #", s)
+        self.assertIn("Rp 40.0", s)
+        self.assertNotIn("jht", s)
+
     def test_recurring_and_salary_detection(self):
         conn = acct_db()
         self.seed_months(conn)

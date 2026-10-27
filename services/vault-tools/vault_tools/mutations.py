@@ -18,6 +18,13 @@ from .money import check_idr, format_idr
 
 MAX_ROWS = 2000
 INTERNAL = "transfer_internal"
+ONE_OFF = "sekali:"     # windfalls and one-time moves (JHT, bonus, THR, a lump-sum card payoff): not part of the monthly picture
+
+
+def excluded(category: str | None) -> bool:
+    """Not counted in monthly income/expense: own-account moves and one-off items."""
+    c = category or ""
+    return c == INTERNAL or c.startswith(ONE_OFF)
 _REF = re.compile(r"\d{6,}")
 _CTRL = re.compile(r"[\x00-\x1f\x7f]")
 
@@ -158,17 +165,20 @@ def cashflow(conn, month: str) -> dict:
     if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
         raise ValueError("month harus YYYY-MM")
     rows = _month_rows(conn, month)
-    income = sum(r["amount"] for r in rows if r["amount"] > 0 and r["category"] != INTERNAL)
-    spend = -sum(r["amount"] for r in rows if r["amount"] < 0 and r["category"] != INTERNAL)
+    income = sum(r["amount"] for r in rows if r["amount"] > 0 and not excluded(r["category"]))
+    spend = -sum(r["amount"] for r in rows if r["amount"] < 0 and not excluded(r["category"]))
+    one_off_in = sum(r["amount"] for r in rows if r["amount"] > 0 and (r["category"] or "").startswith(ONE_OFF))
+    one_off_out = -sum(r["amount"] for r in rows if r["amount"] < 0 and (r["category"] or "").startswith(ONE_OFF))
     by_cat: dict[str, int] = defaultdict(int)
     merchants: dict[str, int] = defaultdict(int)
     for r in rows:
-        if r["amount"] < 0 and r["category"] != INTERNAL:
+        if r["amount"] < 0 and not excluded(r["category"]):
             by_cat[r["category"] or "belum dikategorikan"] += -r["amount"]
             merchants[normalize(r["merchant"])] += -r["amount"]
     bad = conn.execute("SELECT COUNT(*) FROM mutation_files WHERE reconciled=0").fetchone()[0]
     return {
         "month": month, "rows": len(rows), "income": income, "expenses": spend, "net": income - spend,
+        "one_off_in": one_off_in, "one_off_out": one_off_out,
         "savings_rate_bp": (income - spend) * 10_000 // income if income > 0 else None,
         "by_category": sorted(by_cat.items(), key=lambda kv: -kv[1]),
         "top_merchants": sorted(merchants.items(), key=lambda kv: -kv[1])[:5],
@@ -186,6 +196,8 @@ def format_cashflow(c: dict) -> str:
              f"selisih {format_idr(c['net'])}; rasio tabung {rate}"]
     lines += [f"- {k}: {format_idr(v)}" for k, v in c["by_category"][:8]]
     lines.append("Terbesar: " + "; ".join(f"{k} {format_idr(v)}" for k, v in c["top_merchants"]))
+    if c.get("one_off_in") or c.get("one_off_out"):
+        lines.append(f"Sekali (tidak dihitung dalam rasio): masuk {format_idr(c['one_off_in'])}; keluar {format_idr(c['one_off_out'])}")
     if c["unverified"]:
         lines.append(f"Catatan: {c['unverified']} transaksi belum diverifikasi kategorinya.")
     if c["unreconciled_files"]:
@@ -198,7 +210,7 @@ def recurring(conn, min_months: int = 3, tolerance_pct: int = 15) -> list[str]:
     by: dict[str, list] = defaultdict(list)
     for r in conn.execute("SELECT merchant, amount, substr(txn_date,1,7) m, category FROM transactions "
                           "WHERE source='mutation' AND amount < 0"):
-        if r["category"] != INTERNAL:
+        if not excluded(r["category"]):
             by[normalize(r["merchant"])].append((r["m"], -r["amount"]))
     out = []
     for key, items in by.items():
@@ -214,7 +226,8 @@ def suggest_salary(conn, lookback_months: int = 4) -> str:
     """Largest monthly credit that repeats with a similar amount: a candidate salary for the owner to confirm."""
     by_month: dict[str, tuple[int, str]] = {}
     for r in conn.execute("SELECT merchant, amount, substr(txn_date,1,7) m FROM transactions "
-                          "WHERE source='mutation' AND amount >= 1000000 AND IFNULL(category,'') != ?", (INTERNAL,)):
+                          "WHERE source='mutation' AND amount >= 1000000 AND IFNULL(category,'') != ?"
+                          " AND IFNULL(category,'') NOT LIKE 'sekali:%'", (INTERNAL,)):
         if r["m"] not in by_month or r["amount"] > by_month[r["m"]][0]:
             by_month[r["m"]] = (r["amount"], normalize(r["merchant"]))
     recent = sorted(by_month.items())[-lookback_months:]
