@@ -28,7 +28,8 @@ logs:
 # make secret-set NAME=telegram_control_token  (value is prompted on the VPS, never echoed)
 secret-set:
 	@test -n "$(NAME)" || (echo "NAME required"; exit 1)
-	$(SSH) -t 'cd $(REMOTE_DIR) && sudo bash scripts/secret-set.sh $(NAME)'
+	scp -q scripts/secret-set.sh $(VPS_USER)@$(VPS_HOST):/tmp/pa-secret-set.sh
+	$(SSH) -t 'sudo bash /tmp/pa-secret-set.sh $(NAME); rm -f /tmp/pa-secret-set.sh'
 
 prune-dry:
 	$(SSH) 'cd $(REMOTE_DIR) && sudo DRY_RUN=1 bash scripts/prune.sh'
