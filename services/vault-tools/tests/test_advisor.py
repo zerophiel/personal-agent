@@ -155,6 +155,36 @@ class Advice(unittest.TestCase):
         self.assertEqual(costs["cimb-1"], 5_400_000 * 225 // 10_000)                       # 5.4M at default 2.25%
 
 
+class DueBeforePayday(unittest.TestCase):
+    def test_bill_due_before_the_salary_is_flagged_first_with_the_minimum(self):
+        conn = world(fixed=0)
+        conn.execute("UPDATE statements SET due_date='2026-10-28' WHERE card_id=1")          # due tomorrow; payday is 2026-10-30
+        conn.commit()
+        snap = tools.generate_payday_plan(conn, TODAY)
+        first = snap["reminders"][0]
+        self.assertTrue(first.startswith("MENDESAK: tagihan bca-1 jatuh tempo 2026-10-28, sebelum gajian 2026-10-30."), first)
+        self.assertIn("Bayar minimal Rp 800.000 (penuh Rp 8.000.000) dari saldo yang ada sekarang agar tidak kena denda", first)
+        self.assertNotIn("cimb-1", first)                                                      # B is due 2026-11-05, after payday
+        self.assertIn("MENDESAK", tools.summarize_plan(snap))
+
+    def test_bill_already_past_due_says_so(self):
+        conn = world(fixed=0)
+        conn.execute("UPDATE statements SET due_date='2026-10-20' WHERE card_id=1")
+        conn.commit()
+        self.assertTrue(tools.generate_payday_plan(conn, TODAY)["reminders"][0].startswith("SUDAH LEWAT: tagihan bca-1"))
+
+    def test_no_reminder_when_every_bill_is_due_after_payday(self):
+        snap = tools.generate_payday_plan(world(), TODAY)
+        self.assertFalse(any("MENDESAK" in r or "SUDAH LEWAT" in r for r in snap["reminders"]))
+
+    def test_only_the_minimum_when_minimum_equals_total(self):
+        conn = world(fixed=0)
+        conn.execute("UPDATE statements SET due_date='2026-10-28', total_due=800000, minimum_due=800000 WHERE card_id=1")
+        conn.commit()
+        r = tools.generate_payday_plan(conn, TODAY)["reminders"][0]
+        self.assertTrue(r.endswith("dari saldo yang ada sekarang."), r)
+
+
 class LivingReserveEstimate(unittest.TestCase):
     def tx(self, conn, month, category, amount, status="verified"):
         conn.execute("INSERT INTO transactions(txn_date,merchant,amount,category,status,source) VALUES (?,?,?,?,?,'mutation')",

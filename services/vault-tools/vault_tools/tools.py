@@ -463,11 +463,20 @@ def generate_payday_plan(conn, today: date, payday: date | None = None,
     if reserve is None:
         reserve = health.estimate_living_reserve(conn, payday, salary)
         reserve_source = "estimasi dari transaksi yang sudah diverifikasi" if reserve else "belum diset"
-    plan = build_plan(payday, salary, collect_obligations(conn, payday, nxt, hol), hol,
-                      buffer=get_threshold(conn, "cash_buffer", 0), reserve=reserve)
+    obs = collect_obligations(conn, payday, nxt, hol)
+    plan = build_plan(payday, salary, obs, hol, buffer=get_threshold(conn, "cash_buffer", 0), reserve=reserve)
     snap = plan_to_dict(plan)
     snap["reserve_source"] = reserve_source
     snap["reminders"] = []
+    # A card bill that falls due BEFORE this payday cannot wait for the salary: it must be paid from the balance
+    # on hand. Shown first, because a late payment costs a fee and may hurt the credit record.
+    for o in sorted((o for o in obs if o.kind == "card" and o.due < payday), key=lambda o: o.due):
+        gone = o.due < today
+        snap["reminders"].append(
+            f"{'SUDAH LEWAT' if gone else 'MENDESAK'}: tagihan {o.payee_alias} jatuh tempo {o.due.isoformat()}, "
+            f"sebelum gajian {payday.isoformat()}. Bayar minimal {format_idr(o.minimum)} (penuh {format_idr(o.amount)}) "
+            f"dari saldo yang ada sekarang"
+            + (" agar tidak kena denda; sisanya bisa setelah gajian." if o.amount > o.minimum else "."))
     for t in snap["transfers"]:
         if t.get("method") == "autodebit":
             snap["reminders"].append(
