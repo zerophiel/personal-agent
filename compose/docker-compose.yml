@@ -46,6 +46,22 @@ services:
     volumes: ["../config/squid/ctl.conf:/etc/squid/squid.conf:ro"]
     networks: [net-ctl, egress]
 
+  vault-tools:
+    <<: *hardened
+    build: ../services/vault-tools
+    environment:
+      HTTPS_PROXY: http://squid-vault:3128   # Notion sync (later); everything else stays internal
+      NO_PROXY: localhost,127.0.0.1
+    secrets: [vault_tools_key, vault_tools_mcp_token, vault_tools_internal_token]
+    volumes: ["/opt/personal-agent-data/vault-tools:/data"]
+    networks: [net-vault]
+    read_only: true
+    tmpfs: ["/tmp"]
+    mem_limit: 384m
+    oom_score_adj: -500
+    cpus: 1.0
+    depends_on: [squid-vault]
+
   control:
     <<: *hardened
     build: ../services/control
@@ -66,3 +82,9 @@ services:
 secrets:
   telegram_control_token:
     file: /opt/personal-agent-secrets/telegram_control_token
+  vault_tools_key:
+    file: /opt/personal-agent-secrets/vault_tools_key
+  vault_tools_mcp_token:
+    file: /opt/personal-agent-secrets/vault_tools_mcp_token
+  vault_tools_internal_token:
+    file: /opt/personal-agent-secrets/vault_tools_internal_token

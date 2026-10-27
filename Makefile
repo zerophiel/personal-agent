@@ -5,7 +5,7 @@ REMOTE_DIR ?= /opt/personal-agent
 SSH := ssh $(VPS_USER)@$(VPS_HOST)
 COMPOSE := sudo docker compose -f compose/docker-compose.yml --env-file config/stack.env
 
-.PHONY: help preflight deploy status logs secret-set prune prune-dry backup restore test
+.PHONY: help preflight deploy status logs secret-set secret-gen prune prune-dry backup restore test
 
 help:
 	@grep -E '^[a-z-]+:' Makefile | cut -d: -f1 | tr '\n' ' '; echo
@@ -31,6 +31,12 @@ secret-set:
 	scp -q scripts/secret-set.sh $(VPS_USER)@$(VPS_HOST):/tmp/pa-secret-set.sh
 	$(SSH) -t 'sudo bash /tmp/pa-secret-set.sh $(NAME); rm -f /tmp/pa-secret-set.sh'
 
+# make secret-gen NAME=vault_tools_key TYPE=key   (random value created on the VPS)
+secret-gen:
+	@test -n "$(NAME)" -a -n "$(TYPE)" || (echo "NAME and TYPE required"; exit 1)
+	scp -q scripts/secret-gen.sh $(VPS_USER)@$(VPS_HOST):/tmp/pa-secret-gen.sh
+	$(SSH) 'sudo bash /tmp/pa-secret-gen.sh $(NAME) $(TYPE); rm -f /tmp/pa-secret-gen.sh'
+
 prune-dry:
 	$(SSH) 'cd $(REMOTE_DIR) && sudo DRY_RUN=1 bash scripts/prune.sh'
 
@@ -45,4 +51,4 @@ restore:
 
 test:
 	cd services/control && python3 -I -m unittest discover -s tests -v
-	cd services/vault-tools && python3 -I -m unittest discover -s tests -v
+	cd services/vault-tools && $${VAULT_PY:-python3} -I -m unittest discover -s tests -v   # VAULT_PY=venv python to include server tests

@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS statements (
   {_money('charges')} NOT NULL, {_money('fees')} NOT NULL,
   {_money('total_due')} NOT NULL, {_money('minimum_due')} NOT NULL,
   reconciled INTEGER NOT NULL CHECK (reconciled IN (0,1)),
-  recon_diff INTEGER NOT NULL, ingested_at TEXT NOT NULL);
+  recon_diff INTEGER NOT NULL, ingested_at TEXT NOT NULL, paid_at TEXT);
 CREATE TABLE IF NOT EXISTS transactions (
   id INTEGER PRIMARY KEY, statement_id INTEGER REFERENCES statements(id),
   card_id INTEGER REFERENCES cards(id), account_id INTEGER REFERENCES accounts(id),
@@ -60,7 +60,8 @@ PRAGMA user_version = {SCHEMA_VERSION};
 
 
 def connect(path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(path)
+    # Handlers run on different threads; server.py serializes every access with one lock.
+    conn = sqlite3.connect(path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     if path != ":memory:":
