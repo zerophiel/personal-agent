@@ -13,6 +13,9 @@ x-hardened: &hardened
 x-squid: &squid
   <<: *hardened
   image: ubuntu/squid:6.6-24.04_edge
+  # squid starts as root and drops to user `proxy`; it needs these caps after cap_drop ALL
+  cap_add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE]
+  tmpfs: ["/var/log/squid:uid=13,gid=13,mode=0755,size=32m"]
   mem_limit: 128m
   oom_score_adj: -500
   cpus: 0.25
