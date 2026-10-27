@@ -101,6 +101,24 @@ class FakeClient:
         return self.atts[aid]
 
 
+class SenderConfig(unittest.TestCase):
+    def test_shipped_config_loads_and_covers_mega_variants(self):
+        from ingest_gmail.__main__ import load_senders
+        path = os.path.join(os.path.dirname(__file__), "..", "ingest_gmail", "senders.json")
+        banks = json.load(open(path))
+        senders = load_senders(banks)
+        self.assertEqual(senders["ebilling@bankmega.com"], "mega")
+        self.assertEqual(senders["e-billing@bankmega.com"], "mega")
+        self.assertEqual(senders["creditcard.estatement@cimbniaga.co.id"], "cimb")  # case-insensitive
+        for b in banks.values():
+            self.assertTrue(all(a.split("@")[1].endswith(b["org_domain"]) for a in b["addresses"]))
+
+    def test_duplicate_address_across_banks_is_an_error(self):
+        from ingest_gmail.__main__ import load_senders
+        with self.assertRaises(ValueError):
+            load_senders({"a": {"addresses": ["x@y.com"]}, "b": {"addresses": ["X@y.com"]}})
+
+
 class Run(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
