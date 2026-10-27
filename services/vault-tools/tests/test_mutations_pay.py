@@ -218,11 +218,32 @@ class Mutations(unittest.TestCase):
         self.assertEqual((c["income"], c["expenses"], c["net"]), (42_000_000, 2_000_000, 40_000_000))
         self.assertEqual((c["one_off_in"], c["one_off_out"]), (130_000_000, 23_000_000))
         text = mu.format_cashflow(c)
-        self.assertIn("Sekali (tidak dihitung dalam rasio): masuk Rp 130.000.000; keluar Rp 23.000.000", text)
+        self.assertIn("Sekali/perantara (tidak dihitung dalam rasio): masuk Rp 130.000.000; keluar Rp 23.000.000", text)
         self.assertEqual(c["savings_rate_bp"], 40_000_000 * 10_000 // 42_000_000)
         self.assertNotIn("klaim jht", [k for k, _ in c["by_category"]])
         from vault_tools import health as hl
         self.assertFalse(hl.is_discretionary("sekali:jht"))
+
+    def test_money_passing_through_the_owner_is_not_income_expense_or_living(self):
+        conn = acct_db()
+        mu.record_mutations(conn, "bca-main", H1, "2026-01-01", "2026-01-31", None, None, rows(
+            ("2026-01-17", "TRSF DARI REZA", 100_000_000), ("2026-01-17", "TRSF KE AMMAR", -100_000_000),
+            ("2026-01-25", "GAJI PT MAJU", 40_000_000), ("2026-01-26", "BELANJA", -3_000_000)))
+        mu.set_category_rule(conn, "TRSF DARI REZA", "perantara:ammar-reza")
+        mu.set_category_rule(conn, "TRSF KE AMMAR", "perantara:ammar-reza")
+        c = mu.cashflow(conn, "2026-01")
+        self.assertEqual((c["income"], c["expenses"], c["net"]), (40_000_000, 3_000_000, 37_000_000))
+        self.assertEqual((c["one_off_in"], c["one_off_out"]), (100_000_000, 100_000_000))
+        self.assertIn("Sekali/perantara", mu.format_cashflow(c))
+        from vault_tools import health as hl
+        self.assertFalse(hl.is_discretionary("perantara:ammar-reza"))
+        mu.record_mutations(conn, "bca-main", "8" * 64, "2026-02-01", "2026-02-28", None, None,
+                            rows(("2026-02-25", "GAJI PT MAJU", 40_000_001), ("2026-02-13", "TRSF DARI REZA", 120_000_000)))
+        mu.record_mutations(conn, "bca-main", "7" * 64, "2026-03-01", "2026-03-31", None, None, rows(("2026-03-25", "GAJI PT MAJU", 40_000_002)))
+        s = mu.suggest_salary(conn)
+        self.assertIn("'gaji pt maju'", s)                                           # the pass-through credit is not the "salary"
+        self.assertIn("Rp 40.0", s)
+        self.assertNotIn("120", s)
 
     def test_one_off_credit_is_never_suggested_as_salary(self):
         conn = acct_db()

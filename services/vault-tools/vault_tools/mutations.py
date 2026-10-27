@@ -18,7 +18,9 @@ from .money import check_idr, format_idr
 
 MAX_ROWS = 2000
 INTERNAL = "transfer_internal"
-ONE_OFF = "sekali:"     # windfalls and one-time moves (JHT, bonus, THR, a lump-sum card payoff): not part of the monthly picture
+# windfalls and one-time moves (JHT, bonus, THR, a lump-sum card payoff) and money that only passes through the
+# owner on its way between third parties (perantara:): none of it is part of the monthly picture
+ONE_OFF = ("sekali:", "perantara:")
 
 
 def excluded(category: str | None) -> bool:
@@ -232,7 +234,7 @@ def format_cashflow(c: dict) -> str:
     lines += [f"- {k}: {format_idr(v)}" for k, v in c["by_category"][:8]]
     lines.append("Terbesar: " + "; ".join(f"{k} {format_idr(v)}" for k, v in c["top_merchants"]))
     if c.get("one_off_in") or c.get("one_off_out"):
-        lines.append(f"Sekali (tidak dihitung dalam rasio): masuk {format_idr(c['one_off_in'])}; keluar {format_idr(c['one_off_out'])}")
+        lines.append(f"Sekali/perantara (tidak dihitung dalam rasio): masuk {format_idr(c['one_off_in'])}; keluar {format_idr(c['one_off_out'])}")
     if c["unverified"]:
         lines.append(f"Catatan: {c['unverified']} transaksi belum diverifikasi kategorinya.")
     if c["unreconciled_files"]:
@@ -262,7 +264,7 @@ def suggest_salary(conn, lookback_months: int = 4) -> str:
     by_month: dict[str, tuple[int, str]] = {}
     for r in conn.execute("SELECT merchant, amount, substr(txn_date,1,7) m FROM transactions "
                           "WHERE source='mutation' AND amount >= 1000000 AND IFNULL(category,'') != ?"
-                          " AND IFNULL(category,'') NOT LIKE 'sekali:%'", (INTERNAL,)):
+                          " AND IFNULL(category,'') NOT LIKE 'sekali:%' AND IFNULL(category,'') NOT LIKE 'perantara:%'", (INTERNAL,)):
         if r["m"] not in by_month or r["amount"] > by_month[r["m"]][0]:
             by_month[r["m"]] = (r["amount"], normalize(r["merchant"]))
     recent = sorted(by_month.items())[-lookback_months:]
