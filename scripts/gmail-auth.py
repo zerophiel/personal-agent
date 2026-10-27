@@ -6,6 +6,7 @@ Usage: gmail-auth.py client_secret.json | ssh vps '... cat > .../gmail_ingest_to
 Needs: pip install google-auth-oauthlib
 """
 import contextlib
+import datetime
 import json
 import sys
 
@@ -34,8 +35,10 @@ def main() -> int:
     if set(creds.scopes or []) != set(SCOPES):
         print("Scope tidak sesuai, dibatalkan.", file=sys.stderr)
         return 1
+    # issued_at lets the VPS warn before a Testing-mode token (7-day lifetime) expires
     json.dump({"refresh_token": creds.refresh_token, "scopes": list(creds.scopes),
-               "token_uri": creds.token_uri}, sys.stdout)
+               "token_uri": creds.token_uri,
+               "issued_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, sys.stdout)
     print("Token dibuat dan dikirim ke stdout.", file=sys.stderr)
     return 0
 

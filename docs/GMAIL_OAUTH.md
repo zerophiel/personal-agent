@@ -12,9 +12,10 @@ Semua langkah di bawah dikerjakan **di laptop Anda**. Token tidak pernah lewat c
 1. **APIs & Services -> OAuth consent screen** (di UI baru: **Google Auth Platform -> Branding/Audience**).
 2. User type: **External**. Nama aplikasi `personal-agent-ingest`, email dukungan dan kontak developer: email Anda.
 3. **Scopes (Data Access):** tambahkan **`https://www.googleapis.com/auth/gmail.readonly`** saja.
-4. **Audience:** tekan **Publish app** sehingga status menjadi **In production**.
-   - Penting: pada mode **Testing**, refresh token kedaluwarsa dalam 7 hari. Pada **In production** tidak.
-   - Aplikasi akan tanpa verifikasi Google. Itu diterima untuk akun tunggal Anda: saat login muncul peringatan "Google hasn't verified this app", pilih **Advanced -> Go to personal-agent-ingest (unsafe)**. Batas 100 pengguna tidak relevan.
+4. **Audience (mode Testing, dipakai saat ini):** biarkan status **Testing**, lalu di **Test users** klik **Add users** dan tambahkan email Gmail Anda sendiri.
+   - Konsekuensi: pada mode **Testing**, refresh token **kedaluwarsa dalam 7 hari**. Job `pa-gmail-token` (harian 08:00 WIB) mengirim peringatan lewat bot control mulai 2 hari sebelum habis; Anda cukup menjalankan ulang langkah 4 di bawah (sekitar satu menit).
+   - Untuk membuat token tidak kedaluwarsa, aplikasi harus **Publish -> In production**. Itu mensyaratkan domain terverifikasi (homepage + privacy policy di domain milik sendiri). Anda belum punya domain, jadi jalur ini ditunda. Kalau nanti punya, publish aplikasi lalu buat token baru; timer peringatan bisa dimatikan.
+   - Saat login akan muncul peringatan "Google hasn't verified this app": pilih **Advanced -> Go to personal-agent-ingest (unsafe)**.
 5. Jangan menambahkan scope lain. Scope `gmail.readonly` tidak bisa mengirim, mengubah, atau menghapus email.
 
 ## 3. Client OAuth

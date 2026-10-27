@@ -50,5 +50,6 @@ restore:
 	@echo "See docs/RUNBOOK.md#restore (restores to a scratch dir only)"
 
 test:
+	python3 -I -m unittest discover -s tests -v
 	cd services/control && python3 -I -m unittest discover -s tests -v
 	cd services/vault-tools && $${VAULT_PY:-python3} -I -m unittest discover -s tests -v   # VAULT_PY=venv python to include server tests

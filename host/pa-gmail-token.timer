@@ -1,0 +1,7 @@
+[Unit]
+Description=Gmail token expiry check, daily 08:00 WIB
+[Timer]
+OnCalendar=*-*-* 08:00:00 Asia/Jakarta
+Persistent=true
+[Install]
+WantedBy=timers.target
