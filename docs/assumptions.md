@@ -10,7 +10,10 @@
 | 6 | Plugins are opt-in | Confirmed | Must list under `plugins.enabled`; loaded as source `user`. |
 
 | 7 | MCP over HTTP with bearer from env | **Pass** (2026-10-27) | `mcp_servers.vault_tools.url` + `headers.Authorization: "Bearer ${env:VAULT_TOOLS_MCP_TOKEN}"`; Hermes logged "registered 7 tool(s)" as `mcp__vault_tools__<tool>`. |
-| 8 | Model id `claude-sonnet-5-5` / aux `claude-haiku-5-5` accepted | **Pending live message** | Not in the Hermes docs (only `claude-sonnet-4-6` shown); first Telegram reply will confirm. |
+| 8 | Model id `claude-sonnet-5-5` accepted | **Pass** (2026-10-27) | Not in the Hermes docs (only `claude-sonnet-4-6` shown); live Telegram replies came back. Aux `claude-haiku-5-5` not yet confirmed. |
+| 9 | Raw number never reaches model/session/logs with the real container | **Pass** | Dummy card sent to the vault bot: 0 raw hits across `/opt/data` and vault-tools logs; token present in `state.db`, `gateway.log`, `agent.log`. |
+| 10 | `deleteMessage` on the owner's incoming message | **Pass** | Log `deleteMessage ok`; owner confirmed the message disappeared. |
+| 11 | `/rincian` via `skip` + direct Bot API send stays out of the session store | **Pass** | Reply text "Belum ada rencana" has 0 hits in the data dir; TTL record written (auto-delete after 24h, sweep every 15 min; first expiry not yet observed). |
 
 ## Still open
 - Telegram-side copy of the raw message: `cardguard` now calls `deleteMessage` (dm chats only, background thread, failures logged without the token). Implemented and unit-tested with a fake deleter; **live test pending** (needs the container with the vault bot token). `event.message_id` matches Telegram's native id (observed ids 2 and 5 around bot replies 3 and 4).
