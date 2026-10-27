@@ -8,6 +8,9 @@
 5. R2 backup: create `/opt/personal-agent-secrets/restic.env` on the VPS (see `scripts/backup.sh`).
 6. `make deploy`, then `make status`.
 
+## Host state (done 2026-10-27)
+KVM, Ubuntu 24.04.4, sshd drop-in `/etc/ssh/sshd_config.d/00-hardening.conf` (no root, no password), ufw deny-in/allow 22, unattended-upgrades, Docker 29.9.2 + Compose v5.6.1 from Docker apt repo, daemon log rotation 10m x3, journald 500M cap, swap ~6 GB, TZ Asia/Jakarta. `ubuntu` is NOT in the docker group; use `sudo docker`.
+
 ## Gate checks for M1
 - Blocked-domain egress test: from the control container, `https://example.com` via squid-ctl must return 403.
 - `make prune-dry` keeps images of the current compose and `releases/previous.txt`; no volume is touched.

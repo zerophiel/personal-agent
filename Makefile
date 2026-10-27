@@ -3,7 +3,7 @@ VPS_HOST ?= 43.157.242.194
 VPS_USER ?= ubuntu
 REMOTE_DIR ?= /opt/personal-agent
 SSH := ssh $(VPS_USER)@$(VPS_HOST)
-COMPOSE := docker compose -f compose/docker-compose.yml --env-file config/stack.env
+COMPOSE := sudo docker compose -f compose/docker-compose.yml --env-file config/stack.env
 
 .PHONY: help preflight deploy status logs secret-set prune prune-dry backup restore test
 
