@@ -29,7 +29,7 @@ from .payday import last_working_day
 
 MCP_TOOL_NAMES = ("upsert_card", "upsert_debt", "upsert_expense", "set_threshold",
                   "generate_payday_plan", "list_payees", "next_payday",
-                  "ingest_statement", "record_statement")
+                  "ingest_statement", "record_statement", "ingest_events")
 
 
 _LOCK = threading.RLock()
@@ -136,6 +136,13 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
         except statement_pdf.PdfError as e:
             return f"GAGAL membaca statement: {e}"
         return f"file_hash={h}\n{text}"
+
+    @mcp.tool()
+    @locked
+    def ingest_events(limit: int = 20) -> list[str]:
+        """Peristiwa baru dari job ingest-gmail (statement baru, penolakan, error). Laporkan ke pemilik;
+        untuk new_statement panggil ingest_statement(file_ref, bank)."""
+        return tools.read_new_events(conn, os.path.join(ingest_dir, "_events.jsonl"), max(1, min(limit, 50)))
 
     @mcp.tool()
     @locked

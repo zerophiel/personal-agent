@@ -64,6 +64,25 @@ services:
     cpus: 1.0
     depends_on: [squid-vault]
 
+  ingest-gmail:   # one-shot job: `docker compose --profile jobs run --rm ingest-gmail` (timer pa-ingest)
+    <<: *hardened
+    restart: "no"
+    profiles: ["jobs"]
+    build: ../services/ingest-gmail
+    environment:
+      HTTPS_PROXY: http://squid-vault:3128   # allowlist: gmail.googleapis.com, oauth2.googleapis.com
+      NO_PROXY: localhost,127.0.0.1
+    secrets: [gmail_ingest_token, gmail_ingest_client]
+    volumes:
+      - /opt/personal-agent-data/ingest:/ingest          # rw here; vault-tools mounts it read-only
+      - /opt/personal-agent-data/ingest-state:/state
+    networks: [net-vault]
+    read_only: true
+    tmpfs: ["/tmp"]
+    mem_limit: 256m
+    cpus: 0.5
+    depends_on: [squid-vault]
+
   vault:
     image: nousresearch/hermes-agent@sha256:9c5561579f3ffdf333401797094ac3a743738d6c25d40f4331c7bf77b694238d
     command: ["gateway", "run"]
@@ -112,5 +131,9 @@ secrets:
     file: /opt/personal-agent-secrets/vault_tools_mcp_token
   vault_tools_internal_token:
     file: /opt/personal-agent-secrets/vault_tools_internal_token
+  gmail_ingest_token:
+    file: /opt/personal-agent-secrets/gmail_ingest_token
+  gmail_ingest_client:
+    file: /opt/personal-agent-secrets/gmail_ingest_client
   pdf_passwords:   # JSON {"bank": ["password", ...]}; set with `make secret-set NAME=pdf_passwords`
     file: /opt/personal-agent-secrets/pdf_passwords

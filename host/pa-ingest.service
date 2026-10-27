@@ -1,0 +1,7 @@
+[Unit]
+Description=ingest-gmail daily statement fetch (no LLM)
+After=docker.service
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/personal-agent
+ExecStart=/usr/bin/docker compose -f compose/docker-compose.yml --env-file config/stack.env --profile jobs run --rm ingest-gmail

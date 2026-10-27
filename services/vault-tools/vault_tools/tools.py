@@ -102,6 +102,29 @@ def get_threshold(conn, key: str, default: int | None = None) -> int | None:
     return row["value"] if row else default
 
 
+_EVENT_KEYS = ("type", "reason", "bank", "file_ref", "from")
+
+
+def read_new_events(conn, path: str, limit: int = 20) -> list[str]:
+    """New ingest-gmail events since the last call (cursor kept in `thresholds`). Only a fixed
+    set of short fields is passed on, so nothing free-form from an email can reach the model."""
+    cursor = get_threshold(conn, "ingest_events_cursor", 0)
+    try:
+        with open(path) as f:
+            lines = f.read().splitlines()
+    except FileNotFoundError:
+        return []
+    out = []
+    for line in lines[cursor:cursor + limit]:
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        out.append("; ".join(f"{k}={str(ev[k])[:80]}" for k in _EVENT_KEYS if k in ev))
+    set_threshold(conn, "ingest_events_cursor", cursor + min(limit, len(lines) - cursor))
+    return out
+
+
 # ---- obligations and plan -----------------------------------------------------------
 
 def collect_obligations(conn, payday: date, nxt: date) -> list[Obligation]:
