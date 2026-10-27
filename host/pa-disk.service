@@ -1,0 +1,6 @@
+[Unit]
+Description=Disk usage check
+[Service]
+Type=oneshot
+EnvironmentFile=/opt/personal-agent/config/stack.env
+ExecStart=/opt/personal-agent/scripts/disk-check.sh

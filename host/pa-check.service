@@ -1,0 +1,5 @@
+[Unit]
+Description=restic integrity check
+[Service]
+Type=oneshot
+ExecStart=/opt/personal-agent/scripts/backup.sh check

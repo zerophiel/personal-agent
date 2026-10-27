@@ -1,0 +1,5 @@
+[Unit]
+Description=restic retention (7d/4w/6m)
+[Service]
+Type=oneshot
+ExecStart=/opt/personal-agent/scripts/backup.sh forget
