@@ -471,6 +471,11 @@ def generate_payday_plan(conn, today: date, payday: date | None = None,
     # A card bill that falls due BEFORE this payday cannot wait for the salary: it must be paid from the balance
     # on hand. Shown first, because a late payment costs a fee and may hurt the credit record.
     for o in sorted((o for o in obs if o.kind == "card" and o.due < payday), key=lambda o: o.due):
+        if o.minimum <= 0:   # the owner already paid at least the minimum: no late fee risk, only interest on the rest
+            snap["reminders"].append(
+                f"INFO: tagihan {o.payee_alias} sudah memenuhi minimum; sisa {format_idr(o.amount)} jatuh tempo "
+                f"{o.due.isoformat()} (sebelum gajian {payday.isoformat()}). Melunasinya sebelum tanggal itu menghindari bunga.")
+            continue
         gone = o.due < today
         snap["reminders"].append(
             f"{'SUDAH LEWAT' if gone else 'MENDESAK'}: tagihan {o.payee_alias} jatuh tempo {o.due.isoformat()}, "

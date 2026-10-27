@@ -167,6 +167,16 @@ class DueBeforePayday(unittest.TestCase):
         self.assertNotIn("cimb-1", first)                                                      # B is due 2026-11-05, after payday
         self.assertIn("MENDESAK", tools.summarize_plan(snap))
 
+    def test_minimum_already_met_is_info_not_urgent(self):
+        conn = world(fixed=0)
+        conn.execute("UPDATE statements SET due_date='2026-10-28' WHERE card_id=1")
+        conn.commit()
+        tools.record_card_payment(conn, TODAY, "bca-1", 1_000_000)                          # more than the 800,000 minimum
+        first = tools.generate_payday_plan(conn, TODAY)["reminders"][0]
+        self.assertTrue(first.startswith("INFO: tagihan bca-1 sudah memenuhi minimum; sisa Rp 7.000.000 jatuh tempo 2026-10-28"), first)
+        self.assertNotIn("MENDESAK", first)
+        self.assertNotIn("Rp 0", first)
+
     def test_bill_already_past_due_says_so(self):
         conn = world(fixed=0)
         conn.execute("UPDATE statements SET due_date='2026-10-20' WHERE card_id=1")

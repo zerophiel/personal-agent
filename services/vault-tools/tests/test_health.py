@@ -168,6 +168,18 @@ class Health(unittest.TestCase):
         self.assertEqual(h["verdict"], "BURUK")
         self.assertTrue(any("LEBIH BESAR" in t and "defisit Rp 1.000.000" in t for s, t in h["findings"]))
 
+    def test_month_in_progress_before_payday_is_not_judged_as_a_deficit(self):
+        conn = planned()
+        mu.record_mutations(conn, "mandiri-utama", "z" * 64, "2026-11-01", "2026-11-10", None, None,
+                            [{"date": "2026-11-05", "description": "BELANJA", "amount": -3_000_000}])    # no salary yet
+        h = hl.health_check(conn, TODAY, "2026-11")                                                     # today is 2026-11-10; payday 2026-11-30
+        self.assertFalse(any(s == "bad" for s, _ in h["findings"]))
+        self.assertTrue(any("belum lengkap: gaji baru masuk sekitar 2026-11-30" in t for _, t in h["findings"]))
+        self.assertEqual(h["verdict"], "SEHAT")
+        # the same numbers for a month that is over ARE a deficit
+        late = hl.health_check(conn, date(2026, 12, 5), "2026-11")
+        self.assertTrue(any("LEBIH BESAR" in t for _, t in late["findings"]))
+
     def test_good_month_is_healthy_and_low_saving_is_a_warning(self):
         conn = planned()
         cash_month(conn, 10_000_000, 2_000_000, "a")

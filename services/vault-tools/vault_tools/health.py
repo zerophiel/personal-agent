@@ -238,8 +238,17 @@ def health_check(conn, today: date, month: str | None = None) -> dict:
     month = month or f"{today.year}-{today.month:02d}"
     findings: list[tuple[str, str]] = []
     cf = cashflow(conn, month)
+    y, m = int(month[:4]), int(month[5:7])
+    from .tools import id_holidays
+    from .payday import last_working_day
+    month_payday = last_working_day(y, m, id_holidays(y))
     if cf["rows"] == 0:
         findings.append(("info", f"Belum ada mutasi untuk {month}; rasio tabung belum bisa dihitung."))
+    elif cf["income"] == 0 and today <= month_payday and f"{today.year}-{today.month:02d}" == month:
+        # the salary has not arrived yet: a half-finished month would look like a huge deficit
+        findings.append(("info", f"{month} belum lengkap: gaji baru masuk sekitar {month_payday.isoformat()}. "
+                                 f"Pengeluaran sejauh ini {format_idr(cf['expenses'])}; rasio tabung dinilai setelah gaji masuk "
+                                 f"(lihat bulan lalu untuk gambaran penuh)."))
     else:
         rate = cf["savings_rate_bp"]
         floor = _th(conn, "min_savings_rate_bp", DEFAULT_MIN_SAVINGS_BP)
