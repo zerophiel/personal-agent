@@ -122,7 +122,13 @@ class Server(unittest.TestCase):
         with TestClient(self.app) as c:
             r = self.post(c, "/internal/store_payee", INT_T,
                           {"alias": "dbs-1111", "kind": "card", "bank": "DBS", "number": "4111 1111 1111 1111"})
-            self.assertEqual(r.json(), {"ok": True, "display": "dbs-1111 ****1111"})
+            self.assertEqual(r.json(), {"ok": True, "alias": "dbs-1111", "display": "dbs-1111 ****1111"})
+            dup = self.post(c, "/internal/store_payee", INT_T,
+                            {"alias": "other-9", "kind": "card", "bank": "?", "number": "4111111111111111"}).json()
+            self.assertEqual((dup["alias"], dup["duplicate"]), ("dbs-1111", True))  # same number, same alias
+            other = self.post(c, "/internal/store_payee", INT_T,
+                              {"alias": "dbs-1111", "kind": "card", "bank": "?", "number": "5500 0000 0000 0004"}).json()
+            self.assertEqual(other["alias"], "dbs-1111-2")                          # alias collision -> suffix
             self.assertNotIn("4111111111111111", r.text)
             self.assertIn("Belum ada", self.post(c, "/internal/rincian", INT_T, {}).text)
 

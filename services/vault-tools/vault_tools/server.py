@@ -11,6 +11,7 @@ import functools
 import hmac
 import json
 import os
+import sqlite3
 import sys
 import threading
 from datetime import date
@@ -128,10 +129,24 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
             return JSONResponse({"ok": False, "error": "cvv_or_expiry_rejected"}, status_code=422)
         try:
             with _LOCK:
-                shown = vault.store(body["alias"], body["kind"], body["bank"], body["number"])
+                existing = vault.find_alias(body["number"])
+                if existing:  # same number sent again: reuse its alias
+                    return JSONResponse({"ok": True, "alias": existing, "duplicate": True,
+                                         "display": next(d for d in vault.list_display()
+                                                         if d.startswith(existing + " "))})
+                base, alias, shown = body["alias"], body["alias"], None
+                for n in range(1, 10):  # alias collision with a different number: suffix -2, -3...
+                    alias = base if n == 1 else f"{base}-{n}"
+                    try:
+                        shown = vault.store(alias, body["kind"], body["bank"], body["number"])
+                        break
+                    except sqlite3.IntegrityError:
+                        conn.rollback()
+                if shown is None:
+                    raise ValueError("alias_exhausted")
         except Exception as e:  # never echo the number back
             return JSONResponse({"ok": False, "error": type(e).__name__}, status_code=422)
-        return JSONResponse({"ok": True, "display": shown})
+        return JSONResponse({"ok": True, "alias": alias, "display": shown})
 
     async def rincian(request: Request):
         with _LOCK:

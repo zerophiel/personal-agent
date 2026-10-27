@@ -1,11 +1,14 @@
-# vault profile config (SPIKE version: no model credentials, no real data)
-plugins:
-  enabled:
-    - cardguard
-unauthorized_dm_behavior: ignore
+# Hermes vault profile (v0.22.5). Mounted read-only; changes go through git + deploy only.
+# Keys per hermes-agent docs: /user-guide/configuration, /reference/mcp-config-reference,
+# /integrations/providers. Model id claude-sonnet-5-5 is NOT in the docs; verified live (docs/assumptions.md).
+model:
+  provider: anthropic
+  default: claude-sonnet-5-5
+
 agent:
   max_turns: 40
-  disabled_toolsets:
+  reasoning_effort: medium
+  disabled_toolsets:        # finance zone: no shell, code, browser, web, files, delegation, cron, memory
     - terminal
     - code_execution
     - browser
@@ -14,5 +17,56 @@ agent:
     - file
     - cronjob
     - memory
+    - kanban
+
+auxiliary:
+  compression:
+    provider: anthropic
+    model: claude-haiku-5-5
+  title_generation:
+    provider: anthropic
+    model: claude-haiku-5-5
+  vision:
+    provider: anthropic
+    model: claude-haiku-5-5
+
+compression:
+  threshold_tokens: 60000
+  idle_compact_after_seconds: 1800
+
+memory:
+  memory_enabled: false      # financial facts live in the ledger, never in Hermes memory
+  user_profile_enabled: false
+  write_approval: true
+
+skills:
+  write_approval: true
+
 security:
   allow_lazy_installs: false
+
+sessions:
+  retention_days: 90
+
+unauthorized_dm_behavior: ignore
+
+plugins:
+  enabled:
+    - cardguard
+
+gateway:
+  platforms:
+    telegram:
+      extra:
+        disable_link_previews: true
+
+mcp_servers:
+  vault_tools:
+    url: "http://vault-tools:8000/mcp"
+    headers:
+      Authorization: "Bearer ${env:VAULT_TOOLS_MCP_TOKEN}"
+    timeout: 60
+    connect_timeout: 20
+    tools:
+      resources: false
+      prompts: false

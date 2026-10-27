@@ -1,5 +1,7 @@
 import importlib.util
+import json
 import os
+import tempfile
 import threading
 import unittest
 from types import SimpleNamespace
@@ -10,43 +12,114 @@ cg = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cg)
 
 
-def ev(text, mid=1):
-    return SimpleNamespace(text=text, message_id=mid)
+def ev(text, chat_type="dm", mid=1):
+    return SimpleNamespace(text=text, message_id=mid, source=SimpleNamespace(chat_type=chat_type, chat_id=99))
+
+
+class Fake:
+    """Stands in for vault-tools and the Telegram Bot API."""
+    def __init__(self):
+        self.posts, self.bot_calls, self.status, self.body = [], [], 200, None
+        self.store = {}
+
+    def post(self, path, body, timeout=8):
+        self.posts.append((path, body))
+        if self.body is not None:
+            return self.status, self.body
+        if path == "/internal/store_payee":
+            alias = self.store.setdefault(body["number"], body["alias"])
+            return 200, json.dumps({"ok": True, "alias": alias}).encode()
+        return 200, "2026-11-05 dbs-1111\n  Rp 300.000\n  `4111111111111111`".encode()
+
+    def bot(self, method, **params):
+        self.bot_calls.append((method, params))
+        return {"message_id": 777} if method == "sendMessage" else True
 
 
 class CardGuard(unittest.TestCase):
-    def test_rewrites_spaced_and_plain(self):
+    def setUp(self):
+        self.f = Fake()
+        cg._post, cg._bot = self.f.post, self.f.bot
+        self.tmp = tempfile.TemporaryDirectory()
+        cg.TTL_FILE = os.path.join(self.tmp.name, "ttl", "rincian.jsonl")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def methods(self):
+        threading.Event().wait(0.1)  # background delete thread
+        return [m for m, _ in self.f.bot_calls]
+
+    def test_rewrites_to_alias_token_and_deletes_raw(self):
         for raw in ("4111 1111 1111 1111", "4111111111111111", "4111-1111-1111-1111"):
             out = cg.on_inbound(ev(f"kartu {raw} ok"))
-            self.assertEqual(out, {"action": "rewrite", "text": "kartu [[CARD:****1111]] ok"})
+            self.assertEqual(out, {"action": "rewrite", "text": "kartu [[CARD:num-1111]] ok"})
+        self.assertIn("deleteMessage", self.methods())
+        sent = json.dumps(self.f.posts)
+        self.assertIn("raw_text", sent)  # raw text goes only to vault-tools (same zone)
 
-    def test_plain_text_untouched(self):
+    def test_two_numbers_two_aliases(self):
+        self.f.store["5500000000000004"] = "num-0004"
+        out = cg.on_inbound(ev("a 4111111111111111 b 5500 0000 0000 0004"))
+        self.assertEqual(out["text"], "a [[CARD:num-1111]] b [[CARD:num-0004]]")
+
+    def test_plain_text_and_non_luhn_untouched(self):
         self.assertIsNone(cg.on_inbound(ev("gaji Rp 10000000 masuk")))
-        self.assertIsNone(cg.on_inbound(ev("ref 4111111111111112")))  # fails Luhn
+        self.assertIsNone(cg.on_inbound(ev("ref 4111111111111112")))
         self.assertIsNone(cg.on_inbound(ev(None)))
+        self.assertEqual(self.f.posts, [])
 
-    def test_delete_only_private_chats(self):
-        calls = []
-        done = threading.Event()
+    def test_cvv_rejected_message_deleted_owner_told(self):
+        self.f.status, self.f.body = 422, b'{"ok": false, "error": "cvv_or_expiry_rejected"}'
+        self.assertEqual(cg.on_inbound(ev("4111111111111111 cvv 123")), {"action": "skip"})
+        ms = self.methods()
+        self.assertIn("deleteMessage", ms)
+        self.assertIn("sendMessage", ms)
 
-        def deleter(chat, mid):
-            calls.append((chat, mid))
-            done.set()
+    def test_vault_down_fails_closed(self):
+        def boom(*a, **k):
+            raise ConnectionError("down")
+        cg._post = boom
+        self.assertEqual(cg.on_inbound(ev("4111111111111111")), {"action": "skip"})
 
-        dm = SimpleNamespace(message_id=2, source=SimpleNamespace(chat_type="dm", chat_id=99))
-        cg._delete_async(dm, deleter)
-        self.assertTrue(done.wait(2))
-        self.assertEqual(calls, [(99, 2)])
-        grp = SimpleNamespace(message_id=3, source=SimpleNamespace(chat_type="group", chat_id=-5))
-        cg._delete_async(grp, deleter)
-        no_id = SimpleNamespace(message_id=None, source=SimpleNamespace(chat_type="dm", chat_id=99))
-        cg._delete_async(no_id, deleter)
-        threading.Event().wait(0.2)
-        self.assertEqual(calls, [(99, 2)])
+    def test_vault_error_fails_closed_and_deletes(self):
+        self.f.status, self.f.body = 500, b"{}"
+        self.assertEqual(cg.on_inbound(ev("4111111111111111")), {"action": "skip"})
+        self.assertIn("deleteMessage", self.methods())
 
-    def test_fail_closed_on_error(self):
+    def test_group_chat_with_number_dropped_without_storing(self):
+        self.assertEqual(cg.on_inbound(ev("4111111111111111", chat_type="group")), {"action": "skip"})
+        self.assertEqual(self.f.posts, [])
+
+    def test_rincian_sent_directly_recorded_and_skipped(self):
+        out = cg.on_inbound(ev(" /Rincian "))
+        self.assertEqual(out, {"action": "skip"})
+        self.assertEqual(self.f.posts[0][0], "/internal/rincian")
+        method, params = self.f.bot_calls[0]
+        self.assertEqual((method, params["chat_id"], params["parse_mode"]), ("sendMessage", 99, "Markdown"))
+        with open(cg.TTL_FILE) as f:
+            rec = json.loads(f.readline())
+        self.assertEqual((rec["c"], rec["m"]), (99, 777))
+
+    def test_rincian_failure_skips_and_tells_owner(self):
+        self.f.status, self.f.body = 500, b""
+        self.assertEqual(cg.on_inbound(ev("/rincian")), {"action": "skip"})
+        self.assertEqual([m for m, _ in self.f.bot_calls], ["sendMessage"])
+
+    def test_ttl_sweep_deletes_only_expired(self):
+        os.makedirs(os.path.dirname(cg.TTL_FILE))
+        with open(cg.TTL_FILE, "w") as f:
+            f.write(json.dumps({"c": 1, "m": 10, "exp": 100}) + "\n" + json.dumps({"c": 1, "m": 11, "exp": 900}) + "\n")
+        gone = []
+        self.assertEqual(cg.sweep_ttl(now=500, deleter=lambda c, m: gone.append(m)), 1)
+        self.assertEqual(gone, [10])
+        with open(cg.TTL_FILE) as f:
+            self.assertEqual([json.loads(line)["m"] for line in f], [11])
+
+    def test_error_inside_hook_fails_closed(self):
         class Boom:
             message_id = 9
+            source = SimpleNamespace(chat_type="dm", chat_id=1)
             @property
             def text(self):
                 raise RuntimeError("boom")

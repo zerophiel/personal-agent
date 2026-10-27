@@ -62,6 +62,28 @@ services:
     cpus: 1.0
     depends_on: [squid-vault]
 
+  vault:
+    image: nousresearch/hermes-agent@sha256:9c5561579f3ffdf333401797094ac3a743738d6c25d40f4331c7bf77b694238d
+    command: ["gateway", "run"]
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    env_file: /opt/personal-agent-data/vault.env   # rendered on the VPS by scripts/render-vault-env.sh
+    volumes:
+      - /opt/personal-agent-data/hermes-vault:/opt/data
+      # read-only overlays: the agent cannot edit its own config, persona or plugins
+      - ../services/hermes/vault/config.yaml:/opt/data/config.yaml:ro
+      - ../services/hermes/vault/SOUL.md:/opt/data/SOUL.md:ro
+      - ../services/hermes/vault/plugins/cardguard:/opt/data/plugins/cardguard:ro
+    networks: [net-vault]
+    mem_limit: 1g
+    oom_score_adj: -500
+    cpus: 1.0
+    cpu_shares: 1024
+    depends_on: [squid-vault, vault-tools]
+
   control:
     <<: *hardened
     build: ../services/control
