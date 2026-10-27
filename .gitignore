@@ -1,0 +1,6 @@
+secrets/*.dec*
+*.key
+*.pem
+__pycache__/
+.claude/
+.env

@@ -1,0 +1,65 @@
+# M1 platform: isolated networks, per-zone egress proxies, control bot.
+# Zone services (vault, front, comms, ...) are added in M2-M4 on these networks.
+name: personal-agent
+
+x-hardened: &hardened
+  restart: unless-stopped
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "3"}
+
+x-squid: &squid
+  <<: *hardened
+  image: ubuntu/squid:6.10-24.04_edge
+  mem_limit: 128m
+  oom_score_adj: -500
+  cpus: 0.25
+
+networks:
+  # internal: true => no route out. Only the squid-* proxies also join `egress`.
+  net-vault: {internal: true}
+  net-front: {internal: true}
+  net-comms: {internal: true}
+  net-ctl:   {internal: true}
+  egress: {}
+
+services:
+  squid-vault:
+    <<: *squid
+    volumes: ["../config/squid/vault.conf:/etc/squid/squid.conf:ro"]
+    networks: [net-vault, egress]
+  squid-front:
+    <<: *squid
+    volumes: ["../config/squid/front.conf:/etc/squid/squid.conf:ro"]
+    networks: [net-front, egress]
+  squid-comms:
+    <<: *squid
+    volumes: ["../config/squid/comms.conf:/etc/squid/squid.conf:ro"]
+    networks: [net-comms, egress]
+  squid-ctl:
+    <<: *squid
+    volumes: ["../config/squid/ctl.conf:/etc/squid/squid.conf:ro"]
+    networks: [net-ctl, egress]
+
+  control:
+    <<: *hardened
+    build: ../services/control
+    environment:
+      MY_TELEGRAM_ID: ${MY_TELEGRAM_ID}
+      HTTPS_PROXY: http://squid-ctl:3128
+      NO_PROXY: localhost
+      TELEGRAM_TOKEN_FILE: /run/secrets/telegram_control_token
+    secrets: [telegram_control_token]
+    networks: [net-ctl]
+    read_only: true
+    tmpfs: ["/tmp"]
+    mem_limit: 128m
+    oom_score_adj: -500
+    cpus: 0.25
+    depends_on: [squid-ctl]
+
+secrets:
+  telegram_control_token:
+    file: /opt/personal-agent-secrets/telegram_control_token

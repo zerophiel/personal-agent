@@ -1,0 +1,7 @@
+[Unit]
+Description=Backup retention Sun 04:00 WIB
+[Timer]
+OnCalendar=Sun *-*-* 04:00:00 Asia/Jakarta
+Persistent=true
+[Install]
+WantedBy=timers.target

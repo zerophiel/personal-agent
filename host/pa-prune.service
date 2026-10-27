@@ -1,0 +1,5 @@
+[Unit]
+Description=Weekly Docker cleanup (never touches volumes)
+[Service]
+Type=oneshot
+ExecStart=/opt/personal-agent/scripts/prune.sh
