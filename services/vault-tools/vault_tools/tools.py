@@ -149,6 +149,10 @@ def generate_payday_plan(conn, today: date, payday: date | None = None,
     plan = build_plan(payday, salary, collect_obligations(conn, payday, nxt), hol,
                       buffer=get_threshold(conn, "cash_buffer", 0))
     snap = plan_to_dict(plan)
+    for r in conn.execute(
+            "SELECT c.alias FROM statements s JOIN cards c ON c.id = s.card_id WHERE s.reconciled = 0"
+            " AND s.paid_at IS NULL AND s.id = (SELECT MAX(id) FROM statements WHERE card_id = s.card_id)"):
+        snap["warnings"].append(f"Statement {r['alias']} belum cocok saat rekonsiliasi; angka tagihan perlu diperiksa.")
     conn.execute("INSERT INTO plans(payday,snapshot_json,created_at) VALUES (?,?,?)",
                  (payday.isoformat(), json.dumps(snap), datetime.now(timezone.utc).isoformat()))
     conn.commit()
