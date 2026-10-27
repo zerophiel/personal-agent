@@ -93,6 +93,7 @@ class Plan:
     cash_to_hold: int
     daily_allowance: int
     warnings: tuple[str, ...] = field(default_factory=tuple)
+    reserve: int = 0
 
 
 def _items(payday: date, obligations: Iterable[Obligation], horizon: date):
@@ -118,22 +119,30 @@ def _items(payday: date, obligations: Iterable[Obligation], horizon: date):
                     {"fixed": "pengeluaran tetap", "debt": "cicilan", "pool": "transfer pool",
                      "saving": "tabungan"}[o.kind], o.from_account, o.late_cost_bp, o.method, o.pay_to))
     # stable total order: priority, due date, alias, reason
-    out.sort(key=lambda t: (t[0], t[1], t[2], t[4]))
+    # card balances beyond the minimum: highest interest first (avalanche), then earliest due
+    out.sort(key=lambda t: (t[0], -t[6] if t[0] == P_CARD_REST else 0, t[1], t[2], t[4]))
     return [t for t in out if t[3] > 0]
 
 
 def build_plan(payday: date, salary: int, obligations: Iterable[Obligation],
-               holidays: Iterable[date] = (), buffer: int = 0) -> Plan:
+               holidays: Iterable[date] = (), buffer: int = 0, reserve: int = 0) -> Plan:
+    """`reserve` is cash kept for day-to-day living: obligations and card minimums are paid before it,
+    card balances beyond the minimum and savings only from what is left above it."""
     check_idr(salary)
     check_idr(buffer)
-    if salary < 0 or buffer < 0:
-        raise ValueError("salary and buffer must be >= 0")
+    check_idr(reserve)
+    if salary < 0 or buffer < 0 or reserve < 0:
+        raise ValueError("salary, buffer and reserve must be >= 0")
     nxt = next_payday(payday, holidays)
     remaining = salary
     transfers: list[Transfer] = []
     unfunded: list[Unfunded] = []
+    kept_by_reserve = False
     for prio, due, alias, amount, reason, acct, late_bp, method, pay_to in _items(payday, obligations, nxt):
-        pay = min(amount, remaining)
+        limit = remaining - reserve if prio >= P_CARD_REST else remaining
+        pay = min(amount, max(0, limit))
+        if prio >= P_CARD_REST and pay < amount and reserve and remaining - pay <= reserve:
+            kept_by_reserve = True       # held back by the living reserve, not by an empty account
         remaining -= pay
         if pay:
             tdate = payday if prio == P_OVERDUE else max(payday, due - timedelta(days=3))
@@ -144,8 +153,12 @@ def build_plan(payday: date, salary: int, obligations: Iterable[Obligation],
     days = (nxt - payday).days
     warnings = []
     if unfunded:
-        warnings.append("Gaji tidak cukup untuk semua kewajiban; lihat daftar belum terdanai.")
+        if kept_by_reserve and reserve:
+            warnings.append(f"Sebagian saldo kartu/tabungan belum dibayar karena kas Rp {reserve:,} ".replace(",", ".")
+                            + "dicadangkan untuk hidup harian; lihat daftar belum terdanai dan saran.")
+        else:
+            warnings.append("Gaji tidak cukup untuk semua kewajiban; lihat daftar belum terdanai.")
     if remaining < buffer:
         warnings.append("Sisa kas di bawah buffer yang Anda tetapkan.")
     return Plan(payday, nxt, salary, tuple(transfers), tuple(unfunded), remaining,
-                remaining // days if days else 0, tuple(warnings))
+                remaining // days if days else 0, tuple(warnings), reserve)

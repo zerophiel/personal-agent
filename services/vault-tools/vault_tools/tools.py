@@ -94,21 +94,50 @@ def resolve_pay(conn, bank: str, pay_method: str | None, pay_to_alias: str | Non
 
 def upsert_card(conn: sqlite3.Connection, alias: str, bank: str, last4: str,
                 statement_day: int, due_day: int, credit_limit: int,
-                pay_method: str | None = None, pay_to_alias: str | None = None) -> str:
+                pay_method: str | None = None, pay_to_alias: str | None = None,
+                interest_bp_month: int | None = None) -> str:
+    """interest_bp_month: the card's monthly interest on an unpaid balance in basis points (2,25% = 225),
+    as printed on the statement. Left out = keep the stored value (or the default of 2,25%)."""
     check_idr(credit_limit)
+    if interest_bp_month is not None:
+        check_idr(interest_bp_month)
+        if not 0 <= interest_bp_month <= 1000:
+            raise ValueError("interest_bp_month harus 0..1000 (basis poin per bulan, mis. 225 = 2,25%)")
     method, pay_to = resolve_pay(conn, bank, pay_method, pay_to_alias)
     conn.execute(
-        "INSERT INTO cards(alias,bank,last4,statement_day,due_day,credit_limit,pay_method,pay_to_alias)"
-        " VALUES (?,?,?,?,?,?,?,?)"
+        "INSERT INTO cards(alias,bank,last4,statement_day,due_day,credit_limit,pay_method,pay_to_alias,interest_bp_month)"
+        " VALUES (?,?,?,?,?,?,?,?,?)"
         " ON CONFLICT(alias) DO UPDATE SET bank=excluded.bank,last4=excluded.last4,"
         "statement_day=excluded.statement_day,due_day=excluded.due_day,credit_limit=excluded.credit_limit,"
-        "pay_method=excluded.pay_method,pay_to_alias=COALESCE(excluded.pay_to_alias,cards.pay_to_alias)",
-        (alias, bank, last4, statement_day, due_day, credit_limit, method, pay_to))
+        "pay_method=excluded.pay_method,pay_to_alias=COALESCE(excluded.pay_to_alias,cards.pay_to_alias),"
+        "interest_bp_month=COALESCE(excluded.interest_bp_month,cards.interest_bp_month)",
+        (alias, bank, last4, statement_day, due_day, credit_limit, method, pay_to, interest_bp_month))
     conn.commit()
     how = "lewat menu aplikasi" if method == "app_menu" else "transfer"
     note = "" if pay_to or conn.execute("SELECT pay_to_alias FROM cards WHERE alias=?", (alias,)).fetchone()[0] \
         else f"; tujuan bayar belum diset ({how})"
     return f"kartu {alias} ****{last4} tersimpan, bayar {how}{note}"
+
+
+def record_card_payment(conn, today: date, card_alias: str, amount: int) -> str:
+    """The owner paid `amount` towards the card's latest statement (full or partial). A partial payment leaves
+    the rest to be planned (and to accrue interest); a full one closes the statement."""
+    check_idr(amount)
+    if amount <= 0:
+        raise ValueError("amount harus > 0")
+    s = conn.execute("SELECT s.id, s.total_due, s.paid_amount FROM statements s JOIN cards c ON c.id = s.card_id"
+                     " WHERE c.alias=? AND s.paid_at IS NULL ORDER BY s.id DESC LIMIT 1", (card_alias,)).fetchone()
+    if s is None:
+        raise ValueError(f"tidak ada tagihan {card_alias} yang belum dibayar")
+    paid = s["paid_amount"] + amount
+    closed = paid >= s["total_due"]
+    conn.execute("UPDATE statements SET paid_amount=?, paid_at=? WHERE id=?",
+                 (paid, today.isoformat() if closed else None, s["id"]))
+    conn.commit()
+    left = max(0, s["total_due"] - paid)
+    over = f" (kelebihan {format_idr(paid - s['total_due'])}: cek apakah ada salah ketik)" if paid > s["total_due"] else ""
+    return (f"{card_alias}: LUNAS{over}." if closed else
+            f"{card_alias}: dibayar {format_idr(paid)} dari {format_idr(s['total_due'])}; sisa {format_idr(left)}.")
 
 
 def upsert_debt(conn, alias: str, lender: str, outstanding: int, installment: int,
@@ -216,6 +245,63 @@ SINKING_BUFFER_DAYS = 3        # the last contribution must land this many days 
 ROUND_UP_TO = 1_000            # contributions are rounded up to a neat Rp 1.000
 
 
+DEFAULT_CARD_INTEREST_BP = 225   # 2.25% a month until the owner/statement gives the card's own rate
+
+
+def card_advice(conn, snap: dict, payday: date, holidays) -> list[str]:
+    """Numbers-only guidance for each card: pay in full, partly, or minimum, what an unpaid balance costs
+    next month, and what could be traded to pay it off. Pure arithmetic over the plan; the owner decides."""
+    advice = []
+    cards = conn.execute(
+        "SELECT c.alias, c.interest_bp_month, s.total_due - s.paid_amount AS total_due,"
+        " MAX(0, s.minimum_due - s.paid_amount) AS minimum_due FROM statements s JOIN cards c ON c.id = s.card_id"
+        " WHERE s.paid_at IS NULL AND s.total_due - s.paid_amount > 0"
+        " AND s.id = (SELECT MAX(id) FROM statements WHERE card_id = s.card_id)"
+        " ORDER BY COALESCE(c.interest_bp_month, ?) DESC", (get_threshold(conn, "default_card_interest_bp", DEFAULT_CARD_INTEREST_BP),)).fetchall()
+    default_rate = get_threshold(conn, "default_card_interest_bp", DEFAULT_CARD_INTEREST_BP)
+    carried, carried_cost = 0, 0
+    for c in cards:
+        paid = sum(t["amount"] for t in snap["transfers"] if t["to_alias"] == c["alias"])
+        rate = c["interest_bp_month"] if c["interest_bp_month"] is not None else default_rate
+        rest = max(0, c["total_due"] - paid)
+        if paid >= c["total_due"]:
+            advice.append(f"{c['alias']}: LUNASI {format_idr(c['total_due'])}. Tidak ada bunga.")
+            continue
+        cost = bp_of_idr(rest, rate)
+        carried += rest
+        carried_cost += cost
+        how = ("hanya minimum" if paid <= c["minimum_due"] else "bayar sebagian")
+        advice.append(f"{c['alias']}: {how} {format_idr(paid)} dari {format_idr(c['total_due'])} (minimum {format_idr(c['minimum_due'])}). "
+                      f"Sisa {format_idr(rest)} berbunga sekitar {format_idr(cost)} bulan depan ({rate / 100:.2f}%/bulan).")
+    if carried:
+        reserve = snap.get("reserve", 0)
+        if reserve:
+            advice.append(f"Opsi A: kurangi cadangan harian {format_idr(min(reserve, carried))} untuk melunasi lebih banyak "
+                          f"(hemat bunga sekitar {format_idr(carried_cost * min(reserve, carried) // carried)}); risikonya kas harian lebih tipis.")
+        for f in conn.execute("SELECT * FROM sinking_funds").fetchall():
+            planned = sum(t["amount"] for t in snap["transfers"] if t["to_alias"] == f["alias"])
+            s = sinking_required(conn, f, payday, holidays)
+            delta = min(carried, planned)
+            if delta and s["paydays_left"] > 1:
+                base = _round_up(-(-(s["remaining"] - planned) // (s["paydays_left"] - 1)))
+                new = _round_up(-(-(s["remaining"] - planned + delta) // (s["paydays_left"] - 1)))
+                saved = carried_cost * delta // carried
+                advice.append(f"Opsi B: tunda {format_idr(delta)} dari setoran pot {f['alias']} untuk melunasi kartu "
+                              f"(hemat bunga sekitar {format_idr(saved)}); setoran bulan depan naik dari {format_idr(base)} "
+                              f"menjadi {format_idr(new)}. Pot tidak berbunga, jadi menunda tidak menambah biaya selama sisa gajian masih cukup.")
+        advice.append(f"Jika tidak ada yang diubah, total bunga kartu bulan depan sekitar {format_idr(carried_cost)}.")
+    target = get_threshold(conn, "monthly_savings_target", 0)
+    if target:
+        got = sum(t["amount"] for t in snap["transfers"] if t["to_alias"] == "tabungan")
+        advice.append(f"Tabungan: {format_idr(got)} dari target {format_idr(target)}."
+                      + ("" if got >= target else " Target belum tercapai bulan ini."))
+    return advice
+
+
+def bp_of_idr(amount: int, bp: int) -> int:
+    return (amount * bp + 5_000) // 10_000
+
+
 def _round_up(value: int, step: int = ROUND_UP_TO) -> int:
     return -(-value // step) * step
 
@@ -319,14 +405,20 @@ def collect_obligations(conn, payday: date, nxt: date, holidays=()) -> list[Obli
             obs.append(Obligation("pool", f["alias"], payday, s["per_month"], from_account="main",
                                   pay_to=f["pool_pay_to"]))
     # cards: latest unpaid statement per card (overdue if due before payday)
+    default_rate = get_threshold(conn, "default_card_interest_bp", DEFAULT_CARD_INTEREST_BP)
     for r in conn.execute(
-            "SELECT c.alias, c.pay_method, c.pay_to_alias, s.due_date, s.total_due, s.minimum_due"
+            "SELECT c.alias, c.pay_method, c.pay_to_alias, c.interest_bp_month, s.due_date,"
+            " s.total_due - s.paid_amount AS total_due, MAX(0, s.minimum_due - s.paid_amount) AS minimum_due"
             " FROM statements s JOIN cards c ON c.id = s.card_id"
-            " WHERE s.paid_at IS NULL AND s.total_due > 0"
+            " WHERE s.paid_at IS NULL AND s.total_due - s.paid_amount > 0"
             " AND s.id = (SELECT MAX(id) FROM statements WHERE card_id = s.card_id)"):
         obs.append(Obligation("card", r["alias"], date.fromisoformat(r["due_date"]),
-                              r["total_due"], r["minimum_due"], late_cost_bp=300,
+                              r["total_due"], r["minimum_due"],
+                              late_cost_bp=r["interest_bp_month"] if r["interest_bp_month"] is not None else default_rate,
                               method=r["pay_method"], pay_to=r["pay_to_alias"]))
+    target = get_threshold(conn, "monthly_savings_target", 0)
+    if target and target > 0:     # savings come after card balances: card interest (about 2-3% a month) beats any savings yield
+        obs.append(Obligation("saving", "tabungan", payday, target))
     for r in conn.execute("SELECT alias, installment, due_day, rate_bp, pay_method, pay_to_alias, debit_account_alias"
                           " FROM debts WHERE tenor_left > 0"):
         auto = r["pay_method"] == "autodebit"
@@ -365,9 +457,16 @@ def generate_payday_plan(conn, today: date, payday: date | None = None,
         if salary is None:
             raise ValueError("net_salary belum diset (set_threshold net_salary)")
     nxt = next_payday(payday, hol)
+    from . import health   # local import: health -> mutations -> (lazy) health
+    reserve = get_threshold(conn, "living_reserve")
+    reserve_source = "diset pemilik"
+    if reserve is None:
+        reserve = health.estimate_living_reserve(conn, payday, salary)
+        reserve_source = "estimasi dari transaksi yang sudah diverifikasi" if reserve else "belum diset"
     plan = build_plan(payday, salary, collect_obligations(conn, payday, nxt, hol), hol,
-                      buffer=get_threshold(conn, "cash_buffer", 0))
+                      buffer=get_threshold(conn, "cash_buffer", 0), reserve=reserve)
     snap = plan_to_dict(plan)
+    snap["reserve_source"] = reserve_source
     snap["reminders"] = []
     for t in snap["transfers"]:
         if t.get("method") == "autodebit":
@@ -390,6 +489,10 @@ def generate_payday_plan(conn, today: date, payday: date | None = None,
                                         f"{format_idr(f['target'])}; kurang {format_idr(f['target'] - s['saved'] - planned)}.")
         elif due >= nxt and s["paydays_left"] == 0 and s["remaining"]:
             snap["warnings"].append(f"{f['alias']}: tidak ada gajian tersisa sebelum jatuh tempo; kurang {format_idr(s['remaining'])}.")
+    snap["advice"] = card_advice(conn, snap, payday, hol)
+    if reserve_source == "belum diset" and snap["advice"]:     # only matters when cards or savings are in play
+        snap["warnings"].append("Cadangan hidup harian belum diset: set_threshold living_reserve (atau verifikasi kategori "
+                                "transaksi agar bisa diestimasi). Tanpa itu, seluruh sisa gaji dianggap boleh dipakai melunasi kartu.")
     for r in conn.execute(
             "SELECT c.alias FROM statements s JOIN cards c ON c.id = s.card_id WHERE s.reconciled = 0"
             " AND s.paid_at IS NULL AND s.id = (SELECT MAX(id) FROM statements WHERE card_id = s.card_id)"):
@@ -412,6 +515,9 @@ def summarize_plan(snap: dict) -> str:
         lines.append(f"! BELUM TERDANAI {u['to_alias']}: {format_idr(u['amount'])} "
                      f"({u['reason']}), estimasi biaya {format_idr(u['est_delay_cost'])}")
     lines += [f"* {r}" for r in snap.get("reminders", [])]
+    if snap.get("reserve"):
+        lines.append(f"Cadangan hidup harian: {format_idr(snap['reserve'])} ({snap.get('reserve_source')})")
+    lines += [f"> {a}" for a in snap.get("advice", [])]
     lines.append(f"Kas ditahan: {format_idr(snap['cash_to_hold'])}; jatah harian {format_idr(snap['daily_allowance'])}")
     lines += [f"Peringatan: {w}" for w in snap["warnings"]]
     return "\n".join(lines)

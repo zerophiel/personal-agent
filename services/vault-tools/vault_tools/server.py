@@ -23,7 +23,7 @@ from starlette.responses import JSONResponse, PlainTextResponse
 
 from pydantic import BaseModel, Field
 
-from . import health, mutations, names, statement_pdf, statements, tools
+from . import health, mutations, names, roadmap, statement_pdf, statements, tools
 from .ledger import connect
 from .money import format_idr
 from .payee_vault import PayeeVault, has_forbidden_card_data
@@ -35,7 +35,7 @@ MCP_TOOL_NAMES = ("upsert_card", "upsert_debt", "upsert_expense", "set_threshold
                   "upsert_account", "record_mutations", "set_category", "set_category_rule",
                   "list_uncategorized", "cashflow_summary", "recurring_payments", "suggest_salary",
                   "upsert_sinking_fund", "sinking_status", "record_expense", "set_budget", "budget_status",
-                  "health_check", "list_statements")
+                  "health_check", "list_statements", "record_card_payment", "debt_free_roadmap")
 
 
 class Txn(BaseModel):
@@ -92,13 +92,14 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
     @locked
     def upsert_card(alias: str, bank: str, last4: str, statement_day: int, due_day: int,
                     credit_limit: int, pay_method: str | None = None,
-                    pay_to_alias: str | None = None) -> str:
+                    pay_to_alias: str | None = None, interest_bp_month: int | None = None) -> str:
         """Simpan/ubah kartu kredit (alias + 4 digit terakhir; nomor lengkap tidak lewat sini).
         pay_to_alias = alias penerima yang sudah tersimpan (mis. num-1111 untuk nomor kartu, atau alias
         dari /rekening). Aturan: Jenius/BCA bayar TRANSFER ke REKENING; Mandiri bayar lewat MENU APLIKASI
-        (nomor kartu hanya untuk pengingat); bank lain transfer."""
+        (nomor kartu hanya untuk pengingat); bank lain transfer. interest_bp_month = bunga kartu per bulan
+        bila tercetak di tagihan, dalam basis poin (2,25% = 225); dipakai untuk menghitung biaya sisa saldo."""
         return tools.upsert_card(conn, alias, bank, last4, statement_day, due_day, credit_limit,
-                                 pay_method, pay_to_alias)
+                                 pay_method, pay_to_alias, interest_bp_month)
 
     @mcp.tool()
     @locked
@@ -230,6 +231,22 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
 
     @mcp.tool()
     @locked
+    def debt_free_roadmap() -> str:
+        """Peta jalan menuju BEBAS UTANG: kapan tiap cicilan/dana terikat selesai, berapa bulan melunasi kartu
+        (simulasi bunga), perkiraan tanggal bebas utang, dan arus kas yang terbebas tiap kewajiban selesai.
+        Dihitung kode dengan asumsi yang tertulis di hasilnya; gunakan untuk menjelaskan tujuan jangka panjang."""
+        return roadmap.format_roadmap(roadmap.roadmap(conn, today()))
+
+    @mcp.tool()
+    @locked
+    def record_card_payment(card_alias: str, amount: int) -> str:
+        """Catat bahwa pemilik SUDAH membayar kartu (penuh atau sebagian) untuk tagihan terbarunya. Wajib dipanggil
+        setelah pemilik bilang sudah transfer/bayar, supaya rencana berikutnya tidak menagih saldo yang sudah dibayar
+        dan sisa tagihan terbawa dengan benar."""
+        return tools.record_card_payment(conn, today(), card_alias, amount)
+
+    @mcp.tool()
+    @locked
     def set_budget(category: str, monthly_amount: int) -> str:
         """Tetapkan anggaran bulanan per kategori (mis. makan). Peringatan muncul di 80% dan saat lewat."""
         return health.set_budget(conn, category, monthly_amount)
@@ -254,12 +271,14 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
     @locked
     def list_statements(limit: int = 10) -> list[str]:
         """Tagihan kartu yang tersimpan (terbaru dulu): tanggal cetak, jatuh tempo, total, minimum, status rekonsiliasi."""
-        rows = conn.execute("SELECT c.alias, s.statement_date, s.due_date, s.total_due, s.minimum_due, s.reconciled, s.paid_at"
+        rows = conn.execute("SELECT c.alias, s.statement_date, s.due_date, s.total_due, s.minimum_due, s.reconciled, s.paid_at,"
+                            " s.paid_amount"
                             " FROM statements s JOIN cards c ON c.id = s.card_id ORDER BY s.id DESC LIMIT ?",
                             (max(1, min(limit, 30)),)).fetchall()
         return [f"{r['alias']} | cetak {r['statement_date']} | jatuh tempo {r['due_date']} | total {format_idr(r['total_due'])} | "
                 f"minimum {format_idr(r['minimum_due'])} | {'cocok' if r['reconciled'] else 'TIDAK COCOK'}"
-                f"{' | dibayar' if r['paid_at'] else ''}" for r in rows] or ["Belum ada tagihan tersimpan."]
+                f"{' | LUNAS' if r['paid_at'] else (' | dibayar ' + format_idr(r['paid_amount']) if r['paid_amount'] else '')}"
+                for r in rows] or ["Belum ada tagihan tersimpan."]
 
     @mcp.tool()
     @locked
@@ -355,6 +374,10 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
                     lines.append(f"{t['date']} {t['to_alias']}\n  {format_idr(t['amount'])}\n"
                                  f"  AUTODEBET dari rekening {where} pada {t.get('due')}. "
                                  f"Pastikan saldo cukup; tidak perlu transfer.")
+                    continue
+                if t["reason"] == "tabungan":
+                    lines.append(f"{t['date']} tabungan\n  {format_idr(t['amount'])}\n"
+                                 f"  Sisihkan ke tabungan/rekening cadangan Anda sendiri (tidak ada nomor tujuan)")
                     continue
                 key = t.get("pay_to") or t["to_alias"]
                 meta = conn.execute("SELECT kind, bank FROM payee_secrets WHERE alias=?", (key,)).fetchone()

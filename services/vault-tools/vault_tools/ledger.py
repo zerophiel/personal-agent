@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 6   # 6: transactions.merged_into, net_snapshots; 5: debts.pay_method/pay_to_alias/debit_account_alias; 2: cards.pay_method/pay_to_alias; 3: transaction dedupe, mutation_files, category_rules; 4: sinking_funds
+SCHEMA_VERSION = 8   # 8: statements.paid_amount; 7: cards.interest_bp_month; 6: transactions.merged_into, net_snapshots; 5: debts.pay_method/pay_to_alias/debit_account_alias; 2: cards.pay_method/pay_to_alias; 3: transaction dedupe, mutation_files, category_rules; 4: sinking_funds
 
 
 def _money(col: str, nullable: bool = False) -> str:
@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS cards (
   due_day INTEGER NOT NULL CHECK (due_day BETWEEN 1 AND 31),
   {_money('credit_limit')} NOT NULL,
   pay_method TEXT NOT NULL DEFAULT 'transfer' CHECK (pay_method IN ('transfer','app_menu')),
-  pay_to_alias TEXT);
+  pay_to_alias TEXT,
+  interest_bp_month INTEGER);   -- monthly interest on an unpaid balance (basis points); NULL = default
 CREATE TABLE IF NOT EXISTS debts (
   id INTEGER PRIMARY KEY, alias TEXT NOT NULL UNIQUE, lender TEXT NOT NULL,
   {_money('outstanding')} NOT NULL, {_money('installment')} NOT NULL,
@@ -40,7 +41,8 @@ CREATE TABLE IF NOT EXISTS statements (
   {_money('charges')} NOT NULL, {_money('fees')} NOT NULL,
   {_money('total_due')} NOT NULL, {_money('minimum_due')} NOT NULL,
   reconciled INTEGER NOT NULL CHECK (reconciled IN (0,1)),
-  recon_diff INTEGER NOT NULL, ingested_at TEXT NOT NULL, paid_at TEXT);
+  recon_diff INTEGER NOT NULL, ingested_at TEXT NOT NULL, paid_at TEXT,
+  {_money('paid_amount')} NOT NULL DEFAULT 0);   -- payments the owner made against this statement (partial or full)
 CREATE TABLE IF NOT EXISTS transactions (
   id INTEGER PRIMARY KEY, statement_id INTEGER REFERENCES statements(id),
   card_id INTEGER REFERENCES cards(id), account_id INTEGER REFERENCES accounts(id),
@@ -104,6 +106,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
                      " CHECK (pay_method IN ('transfer','app_menu'))")
     if "pay_to_alias" not in cols:
         conn.execute("ALTER TABLE cards ADD COLUMN pay_to_alias TEXT")
+    scols = {r["name"] for r in conn.execute("PRAGMA table_info(statements)")}
+    if "paid_amount" not in scols:          # v8
+        conn.execute("ALTER TABLE statements ADD COLUMN paid_amount INTEGER NOT NULL DEFAULT 0"
+                     " CHECK (typeof(paid_amount)='integer')")
+    if "interest_bp_month" not in cols:     # v7
+        conn.execute("ALTER TABLE cards ADD COLUMN interest_bp_month INTEGER")
     # v4 -> v5: how a debt is paid (transfer to a payee, or auto-debit from one of the owner's accounts)
     dcols = {r["name"] for r in conn.execute("PRAGMA table_info(debts)")}
     if "pay_method" not in dcols:

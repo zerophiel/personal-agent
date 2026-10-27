@@ -95,6 +95,24 @@ def merge_receipt_into_mutation(conn, mutation_id: int, txn_date: str, amount: i
                      (r["category"], r["status"], mutation_id))
 
 
+def estimate_living_reserve(conn, before: date, salary: int | None = None) -> int:
+    """Typical monthly day-to-day spending: the average of up to 3 earlier months, counting ONLY transactions the
+    owner has categorized (verified) as non-obligation spending. Raw, unreviewed mutation rows would include
+    school, loans and card bills and inflate the reserve, so they are left out. 0 when there is no such history.
+    Rounded up to Rp 1.000 and capped at 60% of salary."""
+    this_month = f"{before.year}-{before.month:02d}"
+    per: dict[str, int] = {}
+    for r in conn.execute("SELECT substr(txn_date,1,7) m, category, amount FROM transactions WHERE amount < 0"
+                          " AND merged_into IS NULL AND status='verified' AND substr(txn_date,1,7) < ?", (this_month,)):
+        if r["category"] and is_discretionary(r["category"]):
+            per[r["m"]] = per.get(r["m"], 0) - r["amount"]
+    months = sorted(per)[-3:]
+    if not months:
+        return 0
+    avg = -(-(sum(per[m] for m in months) // len(months)) // 1000) * 1000
+    return min(avg, salary * 60 // 100) if salary else avg
+
+
 # ---- budgets and pace --------------------------------------------------------------------
 
 def set_budget(conn, category: str, monthly_amount: int) -> str:
@@ -176,7 +194,8 @@ def alerts_for(conn, today: date, category: str | None, txn_date: date | None = 
 def debt_load(conn) -> dict:
     installments = conn.execute("SELECT COALESCE(SUM(installment),0) FROM debts WHERE tenor_left > 0").fetchone()[0]
     cards = conn.execute(
-        "SELECT COALESCE(SUM(s.minimum_due),0), COALESCE(SUM(s.total_due),0) FROM statements s WHERE s.paid_at IS NULL"
+        "SELECT COALESCE(SUM(MAX(0, s.minimum_due - s.paid_amount)),0), COALESCE(SUM(s.total_due - s.paid_amount),0)"
+        " FROM statements s WHERE s.paid_at IS NULL"
         " AND s.id = (SELECT MAX(id) FROM statements WHERE card_id = s.card_id)").fetchone()
     outstanding = conn.execute("SELECT COALESCE(SUM(outstanding),0) FROM debts WHERE tenor_left > 0").fetchone()[0]
     salary = _th(conn, "net_salary")
