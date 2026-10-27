@@ -54,15 +54,21 @@ def owner_names(conn) -> list[str]:
     return [r["name"] for r in conn.execute("SELECT name FROM owner_names")]
 
 
-_FEE = re.compile(r"biaya (transaksi|txn|transfer|admin|adm|layanan|materai)|pajak bunga|admin fee")
+_FEE = re.compile(r"biaya (transaksi|txn|transfer|admin|adm|layanan|materai)|pajak bunga|admin fee|"
+                  r"transfer fee|tax on interest")
+_INTEREST = re.compile(r"\binterest\b|\bbunga\b")
 _CARD_WORDS = re.compile(r"kartu kredit|credit card|\bbca card\b|\bcard\b")
-_POCKET_MOVE = re.compile(r"pocket.*(movement|money in|money out|main pocket|between pockets)|main pocket|"
+_POCKET_MOVE = re.compile(r"pocket.*(movement|money in|money out|main pocket|between pockets)|movement between|main pocket|"
                           r"top ?up poket|pindahkan poket|\bpoket \d+")
 
 
 def suggest_category(normalized: str, amount: int, owners: list[str], own_last4: list[str] = ()) -> str | None:
     if _FEE.search(normalized):
         return "biaya-bank"                             # a fee line that mentions a payee is still just a fee
+    if _POCKET_MOVE.search(normalized):
+        return "transfer_internal"                      # checked before any keyword rule: a pocket NAME ("Gaji Pak Darja") is not the event
+    if _INTEREST.search(normalized) and amount > 0:
+        return "bunga"                                  # bank interest, tiny and not income from work
     if any(o in normalized for o in owners) and not _CARD_WORDS.search(normalized):
         return "transfer_internal"                      # money to/from the owner's own name (any channel: trsf, switching, BI-Fast)
     if _POCKET_MOVE.search(normalized):

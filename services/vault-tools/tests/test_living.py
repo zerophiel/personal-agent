@@ -212,6 +212,18 @@ class Suggestions(unittest.TestCase):
         for desc, sign, want in cases:
             self.assertEqual(sg.suggest_category(desc, sign * 1000, owners, mine), want, desc)
 
+    def test_a_pocket_name_is_not_the_event(self):
+        """Regression: a pocket called "Gaji Pak Darja" made pocket moves look like salary and interest like income."""
+        cases = [
+            ("gaji pak darja: listrik rumah dan mobil movement between pockets", 1, "transfer_internal"),
+            ("listrik: gaji pak darja movement between pockets", -1, "transfer_internal"),
+            ("gaji pak darja: interest", 1, "bunga"),
+            ("gaji pak darja: tax on interest", -1, "biaya-bank"),
+            ("gaji pak darja: outgoing transfer fee", -1, "biaya-bank"),
+        ]
+        for desc, sign, want in cases:
+            self.assertEqual(sg.suggest_category(desc, sign * 1000, ["danuarta wiratama"]), want, desc)
+
     def test_account_numbers_come_from_the_registered_accounts(self):
         conn = connect(":memory:")
         conn.execute("INSERT INTO accounts(alias,bank,kind,last4) VALUES ('b','BCA','main','2941')")
