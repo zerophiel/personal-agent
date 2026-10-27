@@ -14,7 +14,7 @@ import os
 import sqlite3
 import sys
 import threading
-from datetime import date
+from datetime import date, datetime, timezone
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
@@ -196,9 +196,16 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
             return f"GAGAL membaca berkas: {e}"
         if not 1 <= part <= len(parts):
             return f"GAGAL: part harus 1..{len(parts)}"
+        dated = statement_pdf.count_dated_lines(parts)
+        with _LOCK:    # remember what the document contains so record_mutations can tell if rows are missing
+            conn.execute("INSERT OR REPLACE INTO ingest_checks VALUES (?,?,?,?)",
+                         (h, dated, len(parts), datetime.now(timezone.utc).isoformat()))
+            conn.commit()
         more = (f"\n[Masih ada {len(parts) - part} bagian lagi: panggil ingest_statement dengan part={part + 1}]"
                 if part < len(parts) else "\n[Bagian terakhir]")
-        return f"file_hash={h}\n{parts[part - 1]}{more}"
+        count = (f"\nbaris_bertanggal={dated} (jumlah baris transaksi di SELURUH dokumen; mutasi yang kamu catat harus "
+                 f"memuat sebanyak ini baris)" if dated else "")
+        return f"file_hash={h}{count}\n{parts[part - 1]}{more}"
 
     @mcp.tool()
     def list_uploads(limit: int = 10) -> list[str]:
@@ -209,13 +216,16 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
     @locked
     def record_mutations(account_alias: str, file_hash: str, period_start: str, period_end: str,
                          rows: list[Txn], opening_balance: int | None = None,
-                         closing_balance: int | None = None) -> dict:
+                         closing_balance: int | None = None, replace: bool = False) -> dict:
         """Simpan mutasi rekening hasil ekstraksi (jumlah bertanda: keluar negatif). Baris yang sudah pernah
-        tersimpan dilewati (aman untuk periode tumpang tindih). Jika saldo awal+mutasi != saldo akhir,
-        hasil ditandai dan HARUS dilaporkan ke pemilik. Kategori diberikan terpisah (set_category)."""
+        tersimpan dilewati (aman untuk periode tumpang tindih). Cocokkan jumlah baris yang kamu kirim dengan
+        `baris_bertanggal` dari ingest_statement: jika kurang, hasil memuat peringatan KELENGKAPAN dan kamu harus
+        membaca ulang semua bagian lalu mengirim ulang dengan replace=true (menimpa catatan berkas itu).
+        Jika saldo awal+mutasi != saldo akhir (selisih sampai Rp 3 dianggap pembulatan sen), hasil ditandai dan
+        HARUS dilaporkan ke pemilik. Kategori diberikan terpisah (set_category)."""
         return mutations.record_mutations(
             conn, account_alias, file_hash, period_start, period_end, opening_balance, closing_balance,
-            [{"date": r.date, "description": r.description, "amount": r.amount} for r in rows])
+            [{"date": r.date, "description": r.description, "amount": r.amount} for r in rows], replace)
 
     @mcp.tool()
     @locked

@@ -69,6 +69,8 @@ CREATE TABLE IF NOT EXISTS sinking_funds (
 CREATE TABLE IF NOT EXISTS net_snapshots (
   month TEXT PRIMARY KEY, {_money('total_debt')} NOT NULL, {_money('accounts_balance', True)},
   {_money('saved_funds')} NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS ingest_checks (   -- what the PDF itself contains, to catch rows the model forgot to send
+  file_hash TEXT PRIMARY KEY, dated_lines INTEGER NOT NULL, parts INTEGER NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS owner_names (name TEXT PRIMARY KEY);   -- lowercase; a transfer to one of these is the owner's own move
 CREATE TABLE IF NOT EXISTS category_rules (
   pattern TEXT PRIMARY KEY, category TEXT NOT NULL);

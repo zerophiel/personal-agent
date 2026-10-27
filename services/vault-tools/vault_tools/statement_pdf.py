@@ -137,6 +137,17 @@ def split_parts(text: str, limit: int = CHUNK_CHARS) -> list[str]:
     return parts or [""]
 
 
+_MONTHS = r"(jan|feb|mar|apr|mei|may|jun|jul|agu|aug|sep|okt|oct|nov|des|dec)"
+_DATED = re.compile(rf"^\s*(\d{{1,2}}[/.-]\d{{1,2}}([/.-]\d{{2,4}})?|\d{{1,2}}\s+{_MONTHS}[a-z]*\.?\s+\d{{2,4}})\b", re.I)
+_BALANCE_LINE = re.compile(r"saldo\s+(awal|akhir)|opening balance|closing balance|beginning balance|ending balance|balance (brought|carried)", re.I)
+
+
+def count_dated_lines(parts: list[str]) -> int:
+    """How many transaction-looking lines (they start with a date) the document has, balance lines excluded.
+    Used to catch rows a model forgot to send; wrapped description lines do not start with a date."""
+    return sum(1 for p in parts for ln in p.splitlines() if _DATED.match(ln) and not _BALANCE_LINE.search(ln))
+
+
 TEXT_SUFFIXES = (".csv", ".txt")
 
 

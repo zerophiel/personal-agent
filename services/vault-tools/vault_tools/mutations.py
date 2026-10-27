@@ -38,11 +38,28 @@ def normalize(desc: str) -> str:
     return " ".join(_REF.sub("#", desc.lower()).split())[:100]
 
 
+ROUNDING_TOLERANCE = 3     # Rp: statements print cents, the rows are whole Rupiah; a diff this small is rounding
+
+
+def _purge_file(conn, file_hash: str) -> int:
+    """Remove what an earlier (incomplete) recording of this file stored. Returns rows that had a category."""
+    ids = [r[0] for r in conn.execute("SELECT id FROM transactions WHERE file_hash=?", (file_hash,))]
+    categorized = conn.execute("SELECT COUNT(*) FROM transactions WHERE file_hash=? AND category IS NOT NULL", (file_hash,)).fetchone()[0]
+    for i in ids:
+        conn.execute("UPDATE transactions SET merged_into=NULL WHERE merged_into=?", (i,))
+    conn.execute("DELETE FROM transactions WHERE file_hash=?", (file_hash,))
+    conn.execute("DELETE FROM mutation_files WHERE file_hash=?", (file_hash,))
+    return categorized
+
+
 def record_mutations(conn: sqlite3.Connection, account_alias: str, file_hash: str, period_start: str,
                      period_end: str, opening_balance: int | None, closing_balance: int | None,
-                     rows: list[dict]) -> dict:
+                     rows: list[dict], replace: bool = False) -> dict:
     """rows: [{date, description, amount (signed), balance?}]. Idempotent: re-sending a file or an
-    overlapping period adds only rows not seen before."""
+    overlapping period adds only rows not seen before. `replace=True` re-records a file that was stored
+    incompletely (its earlier rows are removed first). Two checks decide `reconciled`: opening + rows = closing
+    (within Rp 3 of rounding) and, when ingest_statement counted the document's dated lines, that no rows are
+    missing: balances alone miss credit/debit pairs that cancel each other out."""
     if len(file_hash) != 64:
         raise ValueError("file_hash must be the sha256 from ingest_statement")
     if not 0 < len(rows) <= MAX_ROWS:
@@ -58,8 +75,11 @@ def record_mutations(conn: sqlite3.Connection, account_alias: str, file_hash: st
         raise ValueError(f"rekening {account_alias} belum terdaftar (upsert_account dulu)")
     seen_file = conn.execute("SELECT new_rows, reconciled FROM mutation_files WHERE file_hash=?",
                              (file_hash,)).fetchone()
+    lost_categories = None
     if seen_file:
-        return {"status": "duplicate", "new_rows": 0, "reconciled": bool(seen_file["reconciled"])}
+        if not replace:
+            return {"status": "duplicate", "new_rows": 0, "reconciled": bool(seen_file["reconciled"])}
+        lost_categories = _purge_file(conn, file_hash)
 
     parsed, total = [], 0
     for r in rows:
@@ -72,10 +92,14 @@ def record_mutations(conn: sqlite3.Connection, account_alias: str, file_hash: st
     if not parsed:
         raise ValueError("no non-zero rows")
 
-    reconciled, diff = True, 0
+    balanced, diff = True, 0
     if opening_balance is not None and closing_balance is not None:
         diff = closing_balance - (opening_balance + total)
-        reconciled = diff == 0
+        balanced = abs(diff) <= ROUNDING_TOLERANCE
+    chk = conn.execute("SELECT dated_lines FROM ingest_checks WHERE file_hash=?", (file_hash,)).fetchone()
+    expected = chk["dated_lines"] if chk else 0
+    missing = max(0, expected - len(parsed)) if expected else 0
+    reconciled = balanced and missing == 0
 
     counts: dict[tuple, int] = defaultdict(int)
     new = 0
@@ -100,11 +124,22 @@ def record_mutations(conn: sqlite3.Connection, account_alias: str, file_hash: st
         (file_hash, acct["id"], period_start, period_end, opening_balance, closing_balance,
          len(parsed), new, int(reconciled), diff, datetime.now(timezone.utc).isoformat()))
     conn.commit()
-    out = {"status": "stored", "rows": len(parsed), "new_rows": new, "already_known": len(parsed) - new,
-           "reconciled": reconciled}
-    if not reconciled:
-        out["warning"] = (f"REKONSILIASI TIDAK COCOK: saldo akhir tercetak {closing_balance}, hasil hitung "
-                          f"{opening_balance + total}, selisih {diff}. Ada baris yang mungkin hilang atau salah baca.")
+    out = {"status": "replaced" if lost_categories is not None else "stored", "rows": len(parsed), "new_rows": new,
+           "already_known": len(parsed) - new, "reconciled": reconciled}
+    if lost_categories:
+        out["lost_categories"] = lost_categories     # manual categories on the old rows of this file are gone
+    warnings = []
+    if not balanced:
+        warnings.append(f"REKONSILIASI TIDAK COCOK: saldo akhir tercetak {closing_balance}, hasil hitung "
+                        f"{opening_balance + total}, selisih {diff}. Ada baris yang mungkin hilang atau salah baca.")
+    elif diff:
+        out["note"] = f"selisih Rp {diff} dianggap pembulatan sen"
+    if missing:
+        warnings.append(f"BARIS KURANG: dokumen memuat {expected} baris bertanggal, hanya {len(parsed)} yang dikirim "
+                        f"(kurang {missing}). Baca ulang SEMUA bagian dan kirim ulang lengkap dengan replace=true.")
+        out["missing_rows"] = missing
+    if warnings:
+        out["warning"] = " ".join(warnings)
     return out
 
 

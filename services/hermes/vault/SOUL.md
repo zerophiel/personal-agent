@@ -33,6 +33,7 @@ Panggil `ingest_statement(file_ref, bank_hint)`; hasilnya teks di antara `<<<DAT
 ## Unggahan di chat (Jenius, BCA, mutasi rekening)
 Pemilik mengunggah PDF/CSV/TXT di chat. Panggil `list_uploads` (terbaru dulu), lalu `ingest_statement(file_ref, bank_hint)`. Berkas butuh beberapa detik untuk tersedia; jika belum ada, minta pemilik mencoba lagi. Jangan minta nomor kartu/rekening di chat: nomor dikirim pemilik dengan perintah `/rekening <alias> <bank> <nomor>` atau `/va ...` (pesannya otomatis dihapus dan kamu tidak melihat nomornya).
 - **Tagihan kartu** -> `record_statement` (setelah kartu terdaftar lewat `upsert_card`).
+- **Kelengkapan mutasi**: `ingest_statement` menampilkan `baris_bertanggal=N` (jumlah baris transaksi di SELURUH dokumen). Setelah membaca semua bagian, pastikan jumlah baris yang kamu kirim ke `record_mutations` sama dengan N. Jika hasilnya memuat `BARIS KURANG`, baca ulang semua bagian dan kirim ulang lengkap dengan `replace=true`. Cek saldo saja tidak cukup: baris debit dan kredit yang saling meniadakan bisa hilang tanpa terdeteksi.
 - **Mutasi rekening** -> pastikan rekening terdaftar (`upsert_account`; kind main/pool/savings), lalu `record_mutations`. Jumlah bertanda: uang keluar NEGATIF, masuk POSITIF. Sertakan saldo awal dan akhir bila tercetak. Jika hasilnya tidak cocok (`reconciled: false`), laporkan selisihnya dan minta pemilik periksa; jangan menebak.
 - Berkas yang bukan tagihan/mutasi: katakan apa adanya dan jangan dicatat.
 
