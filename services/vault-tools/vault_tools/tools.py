@@ -203,6 +203,15 @@ def get_threshold(conn, key: str, default: int | None = None) -> int | None:
     return row["value"] if row else default
 
 
+def reserve_for(conn, payday: date) -> tuple[int | None, str]:
+    """The daily-cash reserve this payday's plan holds back. A one-off override (the owner already holds cash from the
+    last cycle) applies only to paydays up to `living_reserve_override_until` (YYYYMMDD); later plans use the normal one."""
+    ov, until = get_threshold(conn, "living_reserve_override"), get_threshold(conn, "living_reserve_override_until")
+    if ov is not None and until and int(payday.strftime("%Y%m%d")) <= until:
+        return ov, f"sementara (saldo awal ikut dipakai), berlaku sampai {str(until)[:4]}-{str(until)[4:6]}-{str(until)[6:]}"
+    return get_threshold(conn, "living_reserve"), "diset pemilik"
+
+
 def list_uploads(upload_dir: str, limit: int = 10) -> list[str]:
     """Newest files the owner uploaded in Telegram (Hermes document cache), as `telegram/<name>`
     refs for ingest_statement. Names are reduced to a safe charset (they are untrusted)."""
@@ -495,8 +504,7 @@ def generate_payday_plan(conn, today: date, payday: date | None = None,
             raise ValueError("net_salary belum diset (set_threshold net_salary)")
     nxt = next_payday(payday, hol)
     from . import health   # local import: health -> mutations -> (lazy) health
-    reserve = get_threshold(conn, "living_reserve")
-    reserve_source = "diset pemilik"
+    reserve, reserve_source = reserve_for(conn, payday)
     if reserve is None:
         reserve = health.estimate_living_reserve(conn, payday, salary)
         reserve_source = "estimasi dari transaksi yang sudah diverifikasi" if reserve else "belum diset"

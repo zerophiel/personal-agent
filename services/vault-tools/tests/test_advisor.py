@@ -236,6 +236,15 @@ class LivingReserveEstimate(unittest.TestCase):
         self.assertEqual((snap["reserve"], snap["reserve_source"]), (2_500_000, "estimasi dari transaksi yang sudah diverifikasi"))
         self.assertIn("Cadangan hidup harian: Rp 2.500.000 (estimasi", tools.summarize_plan(snap))
 
+    def test_one_off_reserve_override_expires_by_date(self):
+        conn = world(reserve=3_000_000)
+        tools.set_threshold(conn, "living_reserve_override", 1_000_000)
+        tools.set_threshold(conn, "living_reserve_override_until", 20261031)
+        self.assertEqual(tools.reserve_for(conn, date(2026, 10, 30))[0], 1_000_000)
+        self.assertIn("sementara", tools.reserve_for(conn, date(2026, 10, 30))[1])
+        self.assertEqual(tools.reserve_for(conn, date(2026, 11, 30)), (3_000_000, "diset pemilik"))     # back to normal by itself
+        self.assertEqual(tools.reserve_for(world(reserve=3_000_000), date(2026, 10, 30)), (3_000_000, "diset pemilik"))
+
     def test_untidy_history_never_drives_the_plan(self):
         """Regression: a Rp 13M reserve estimated from half-categorized months made the plan pay only a card minimum."""
         conn = world(reserve=None)
