@@ -137,6 +137,28 @@ class Budgets(unittest.TestCase):
             (b,) = hl.budget_status(conn, "2026-11")
             self.assertEqual((b["category"], b["status"]), ("makan", status), spent)
 
+    def test_card_budget_counts_only_card_purchases_and_cash_never_eats_it(self):
+        """Regression: a Tokopedia payment from a bank account (electricity token) ate the card budget (3060%)."""
+        conn = planned(100_000_000)
+        tools.upsert_card(conn, "c-1", "CIMB", "1111", 5, 20, 5_000_000)
+        hl.set_budget(conn, "kartu:belanja-online", 300_000)
+        spend(conn, 900_000, "TOKOPEDIA TOKEN LISTRIK", category="belanja-online")             # cash
+        (b,) = hl.budget_status(conn, "2026-11")
+        self.assertEqual((b["category"], b["spent"], b["status"]), ("kartu:belanja-online", 0, "ok"))
+        r = spend(conn, 350_000, "SHOPEE", category="belanja-online", card_alias="c-1")
+        self.assertTrue(any("Anggaran kartu:belanja-online" in a and "SUDAH LEWAT" in a for a in r["alerts"]), r["alerts"])
+        hl.set_budget(conn, "belanja-online", 1_000_000)                                       # cash budget is separate
+        by = {x["category"]: x for x in hl.budget_status(conn, "2026-11")}
+        self.assertEqual((by["belanja-online"]["spent"], by["kartu:belanja-online"]["spent"]), (900_000, 350_000))
+
+    def test_a_small_refund_does_not_make_the_month_before_payday_look_like_a_deficit(self):
+        conn = planned(100_000_000)
+        spend(conn, 5_000_000, "BELANJA", category="makan")
+        conn.execute("INSERT INTO transactions(txn_date,merchant,amount,status,source) VALUES ('2026-11-03','REFUND TOKO',500000,'unverified','mutation')")
+        conn.commit()
+        h = hl.health_check(conn, TODAY, "2026-11")
+        self.assertFalse(any(sev == "bad" and "LEBIH BESAR dari pemasukan" in t for sev, t in h["findings"]), h["findings"])
+
     def test_budget_alert_included_when_over(self):
         conn = planned(100_000_000)
         hl.set_budget(conn, "makan", 500_000)

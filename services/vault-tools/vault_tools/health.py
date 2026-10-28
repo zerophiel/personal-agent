@@ -77,7 +77,8 @@ def record_expense(conn: sqlite3.Connection, today: date, amount: int, merchant:
         (ids.get("account_id"), ids.get("card_id"), txn_date, merchant, -amount, cat,
          "verified" if rule and not category else "unverified", dedupe))
     conn.commit()
-    return {"status": "stored", "id": cur.lastrowid, "category": cat, "alerts": alerts_for(conn, today, cat, d)}
+    return {"status": "stored", "id": cur.lastrowid, "category": cat,
+            "alerts": alerts_for(conn, today, ("kartu:" + cat) if cat and card_alias else cat, d)}
 
 
 def merge_receipt_into_mutation(conn, mutation_id: int, txn_date: str, amount: int) -> None:
@@ -125,10 +126,15 @@ def set_budget(conn, category: str, monthly_amount: int) -> str:
 
 
 def _spent_by_category(conn, start: date, end: date) -> dict[str, int]:
+    """Spend per category. Rows paid by a card count under 'kartu:<category>' (a card budget), all others under the plain
+    category (cash budget): a Tokopedia payment from a bank account must not eat the card budget."""
     out: dict[str, int] = {}
-    for r in conn.execute("SELECT category, amount FROM transactions WHERE amount < 0 AND merged_into IS NULL"
+    for r in conn.execute("SELECT category, amount, card_id FROM transactions WHERE amount < 0 AND merged_into IS NULL"
                           " AND txn_date BETWEEN ? AND ?", (start.isoformat(), end.isoformat())):
-        out[r["category"] or "belum dikategorikan"] = out.get(r["category"] or "belum dikategorikan", 0) - r["amount"]
+        key = r["category"] or "belum dikategorikan"
+        if r["card_id"] is not None:
+            key = "kartu:" + key
+        out[key] = out.get(key, 0) - r["amount"]
     return out
 
 
@@ -242,7 +248,8 @@ def health_check(conn, today: date, month: str | None = None) -> dict:
     month_payday = last_working_day(y, m, id_holidays(y))
     if cf["rows"] == 0:
         findings.append(("info", f"Belum ada mutasi untuk {month}; rasio tabung belum bisa dihitung."))
-    elif cf["income"] == 0 and today <= month_payday and f"{today.year}-{today.month:02d}" == month:
+    elif ((cf["income"] == 0 or (_th(conn, "net_salary") and cf["income"] < _th(conn, "net_salary") // 2))
+          and today <= month_payday and f"{today.year}-{today.month:02d}" == month):
         # the salary has not arrived yet: a half-finished month would look like a huge deficit
         findings.append(("info", f"{month} belum lengkap: gaji baru masuk sekitar {month_payday.isoformat()}. "
                                  f"Pengeluaran sejauh ini {format_idr(cf['expenses'])}; rasio tabung dinilai setelah gaji masuk "

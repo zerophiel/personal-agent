@@ -245,7 +245,8 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
         """Catat SATU belanja dari screenshot/struk/ucapan pemilik. amount = besar pengeluaran (positif, Rupiah bulat),
         txn_date YYYY-MM-DD, account_alias bila dibayar dari rekening, card_alias bila dibayar kartu kredit.
         Hasil memuat `alerts`: SAMPAIKAN peringatan itu ke pemilik apa adanya. Jika status possible_duplicate,
-        tanyakan dulu ke pemilik. Kategori: pakai 'wajib:<nama>' untuk kewajiban (sekolah, les, cicilan, bayar kartu),
+        tanyakan dulu ke pemilik. Belanja dengan kartu WAJIB mengisi card_alias: ia dihitung ke anggaran kartu
+        ('kartu:<kategori>'), sedangkan belanja dari rekening dihitung ke anggaran kas. Kategori: pakai 'wajib:<nama>' untuk kewajiban (sekolah, les, cicilan, bayar kartu),
         selain itu kategori bebas (makan, transport, belanja, hiburan, dst)."""
         return health.record_expense(conn, today(), amount, merchant, txn_date, category, account_alias,
                                      card_alias, allow_duplicate)
