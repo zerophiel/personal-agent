@@ -47,6 +47,33 @@ def check_html(testcase, text, name):
     testcase.assertEqual((p.bad, p.stack), ([], []), name)
 
 
+class Rincian(unittest.TestCase):
+    def test_two_payments_to_the_same_card_become_one_transfer_with_the_total(self):
+        from vault_tools import rincian
+        from vault_tools.payee_vault import PayeeVault
+        conn = world()
+        v = PayeeVault(conn, bytes(range(32)))
+        v.store("num-1111", "card", "?", "4111111111111111")
+        conn.execute("UPDATE cards SET pay_to_alias='num-1111' WHERE alias='bca-1'")
+        conn.commit()
+        text = rincian.build(conn, v, tools.generate_payday_plan(conn, TODAY))
+        self.assertEqual(text.count("`4111111111111111`"), 1)                         # one destination, one line
+        self.assertIn("_2 pembayaran digabung_", text)                               # minimum + the remainder
+        self.assertIn("Jumlah: *Rp 8.000.000*", text)                                # 800.000 + 7.200.000
+        self.assertIn("Total transfer:", text)
+        self.assertNotRegex(text, r"\d{4}-\d{2}-\d{2}")                               # due dates are ignored
+        self.assertIn("seolah semuanya dibayar di hari yang sama", text)
+        self.assertIn("Cicilan Mobil", text)                                         # auto-debits listed apart
+
+    def test_destinations_without_a_registered_number_are_flagged_not_hidden(self):
+        from vault_tools import rincian
+        from vault_tools.payee_vault import PayeeVault
+        conn = world()
+        text = rincian.build(conn, PayeeVault(conn, bytes(range(32))), tools.generate_payday_plan(conn, TODAY))
+        self.assertIn("Tujuan belum didaftarkan", text)
+        self.assertIn("BCA …1111", text)
+
+
 class Reports(unittest.TestCase):
     def test_every_command_renders_valid_telegram_html_in_paragraphs_that_stand_alone(self):
         conn = world()

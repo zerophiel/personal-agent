@@ -127,7 +127,9 @@ class Rincian(unittest.TestCase):
             call("generate_payday_plan", {})
             with TestClient(app) as c:
                 text = c.post("/internal/rincian", json={}, headers={"Authorization": "Bearer " + "i" * 40}).text
-            self.assertIn("AUTODEBET dari rekening MANDIRI (mandiri-utama) pada 2026-11-02", text)
+            self.assertIn("Autodebet (tidak perlu transfer, pastikan saldo cukup)", text)
+            self.assertIn("Cicilan Mobil", text)
+            self.assertIn("dari rekening Mandiri", text)
             self.assertIn("Rp 5.701.000", text)
             self.assertNotIn("`", text)                                              # no copyable number at all
 

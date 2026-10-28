@@ -278,7 +278,7 @@ class Rincian(unittest.TestCase):
             call("generate_payday_plan", {})
             with TestClient(app) as c:
                 text = c.post("/internal/rincian", json={}, headers={"Authorization": "Bearer " + "i" * 40}).text
-            self.assertIn("Sisihkan ke tabungan/rekening cadangan Anda sendiri", text)
+            self.assertIn("Sisihkan ke tabungan sendiri", text)
             self.assertNotIn("`", text)
 
 

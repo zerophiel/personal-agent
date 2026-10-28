@@ -24,7 +24,7 @@ from starlette.responses import JSONResponse, PlainTextResponse
 
 from pydantic import BaseModel, Field
 
-from . import card_installments, health, living, mutations, names, reports, roadmap, statement_pdf, statements, subscriptions, suggest, tools
+from . import card_installments, health, living, mutations, names, reports, rincian as rincian_text, roadmap, statement_pdf, statements, subscriptions, suggest, tools
 from .ledger import connect
 from .money import format_idr
 from .payee_vault import PayeeVault, has_forbidden_card_data
@@ -518,38 +518,11 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
 
     async def rincian(request: Request):
         with _LOCK:
-            row = conn.execute("SELECT snapshot_json FROM plans ORDER BY id DESC LIMIT 1").fetchone()
-            if row is None:
-                return PlainTextResponse("Belum ada rencana gajian.")
-            snap, lines = json.loads(row["snapshot_json"]), []
-            for t in snap["transfers"]:
-                if t.get("method") == "autodebit":
-                    acct = conn.execute("SELECT bank FROM accounts WHERE alias=?", (t.get("pay_to"),)).fetchone()
-                    where = f"{acct['bank'].upper()} ({t['pay_to']})" if acct else "(rekening belum diset)"
-                    lines.append(f"{t['date']} {t['to_alias']}\n  {format_idr(t['amount'])}\n"
-                                 f"  AUTODEBET dari rekening {where} pada {t.get('due')}. "
-                                 f"Pastikan saldo cukup; tidak perlu transfer.")
-                    continue
-                if t["reason"] == "tabungan":
-                    lines.append(f"{t['date']} tabungan\n  {format_idr(t['amount'])}\n"
-                                 f"  Sisihkan ke tabungan/rekening cadangan Anda sendiri (tidak ada nomor tujuan)")
-                    continue
-                key = t.get("pay_to") or t["to_alias"]
-                meta = conn.execute("SELECT kind, bank FROM payee_secrets WHERE alias=?", (key,)).fetchone()
-                card = conn.execute("SELECT bank FROM cards WHERE alias=?", (t["to_alias"],)).fetchone()
-                bank = (card["bank"] if card else (meta["bank"] if meta and meta["bank"] != "?" else "")).upper()
-                head = f"{t['date']} {t['to_alias']}\n  {format_idr(t['amount'])}"
-                try:
-                    num = vault.reveal(key)
-                except KeyError:
-                    lines.append(f"{head}\n  (tujuan bayar belum diset)")
-                    continue
-                if t.get("method") == "app_menu":
-                    lines.append(f"{head}\n  Bayar lewat menu aplikasi {bank} (kartu kredit)\n  Kartu: `{num}`")
-                else:
-                    label = {"account": "Rekening", "va": "VA", "card": "Kartu"}.get(meta["kind"], "Nomor")
-                    lines.append(f"{head}\n  Transfer ke {bank} {label}: `{num}`")
-        return PlainTextResponse("\n\n".join(lines) or "Tidak ada transfer.")
+            try:
+                snap = tools.generate_payday_plan(conn, today())   # fresh plan: payments recorded since are reflected
+            except ValueError:
+                return PlainTextResponse("Belum ada rencana gajian (gaji belum diset).")
+            return PlainTextResponse(rincian_text.build(conn, vault, snap))
 
     app.add_route("/internal/store_payee", store_payee, methods=["POST"])
     app.add_route("/internal/rincian", rincian, methods=["POST"])
