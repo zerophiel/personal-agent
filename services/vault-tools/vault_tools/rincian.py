@@ -44,7 +44,8 @@ def build(conn, vault, snap: dict) -> str:
         meta = conn.execute("SELECT kind, bank FROM payee_secrets WHERE alias=?", (key,)).fetchone()
         card = cards.get(to_alias)
         if card:
-            return f"{_bank(card['bank'])} …{card['last4']}", "kartu kredit"
+            to = {"account": "rekening", "va": "virtual account"}.get(meta["kind"] if meta else "", "")
+            return f"{_bank(card['bank'])} …{card['last4']}", ("tagihan kartu, bayar ke " + to) if to else "kartu kredit"
         bank = _bank(meta["bank"]) if meta and meta["bank"] != "?" else ""
         kind = {"account": "rekening", "va": "virtual account", "card": "kartu"}.get(meta["kind"] if meta else "", "")
         return _nice(to_alias) + (f" ({bank})" if bank else ""), kind

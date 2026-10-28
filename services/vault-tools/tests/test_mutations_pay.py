@@ -357,7 +357,7 @@ class ServerFlows(unittest.TestCase):
             self.assertIn("Lewat menu aplikasi bank (bukan transfer)", text)
             self.assertIn("Mandiri …1111", text)
             self.assertIn("Nomor kartu: `4111111111111111`", text)           # the card number is what the app menu asks for
-            self.assertIn("*1. BCA …2222* - kartu kredit", text)
+            self.assertIn("*1. BCA …2222* - tagihan kartu, bayar ke rekening", text)
             self.assertIn("Nomor: `1234567890`", text)                       # a BCA card is paid to the registered account number
             self.assertNotIn("Transfer ke BCA Kartu", text)
 
