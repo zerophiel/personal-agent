@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 9   # 9: card_installments, skipped_files; 8: statements.paid_amount; 7: cards.interest_bp_month; 6: transactions.merged_into, net_snapshots; 5: debts.pay_method/pay_to_alias/debit_account_alias; 2: cards.pay_method/pay_to_alias; 3: transaction dedupe, mutation_files, category_rules; 4: sinking_funds
+SCHEMA_VERSION = 10  # 10: card_lines, doc_files, statements.lines_status/lines_diff, sinking_funds.low_*; 9: card_installments, skipped_files; 8: statements.paid_amount; 7: cards.interest_bp_month; 6: transactions.merged_into, net_snapshots; 5: debts.pay_method/pay_to_alias/debit_account_alias; 2: cards.pay_method/pay_to_alias; 3: transaction dedupe, mutation_files, category_rules; 4: sinking_funds
 
 
 def _money(col: str, nullable: bool = False) -> str:
@@ -85,6 +85,12 @@ CREATE TABLE IF NOT EXISTS category_keywords (   -- owner's own words (a teacher
   keyword TEXT PRIMARY KEY, category TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS card_installment_scans (   -- statements already read for installments (an empty one = none printed)
   card_id INTEGER NOT NULL REFERENCES cards(id), statement_date TEXT NOT NULL, PRIMARY KEY (card_id, statement_date));
+CREATE TABLE IF NOT EXISTS card_lines (   -- every transaction line of a card statement, read by code; amount > 0 = charge, < 0 = credit
+  id INTEGER PRIMARY KEY, statement_id INTEGER NOT NULL REFERENCES statements(id), card_id INTEGER NOT NULL REFERENCES cards(id),
+  cycle TEXT NOT NULL, txn_date TEXT, description TEXT NOT NULL, {_money('amount')} NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('belanja','langganan','cicilan','bunga','biaya','pembayaran','refund')), category TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_card_lines_cycle ON card_lines(cycle);
+CREATE TABLE IF NOT EXISTS doc_files (hash TEXT PRIMARY KEY, path TEXT NOT NULL);   -- which uploaded/ingested file has which sha256
 CREATE TABLE IF NOT EXISTS feature_requests (   -- what the bot could not do; the owner decides, a human builds it
   id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'baru' CHECK (status IN ('baru','dikerjakan','selesai','ditolak')));
@@ -150,6 +156,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE transactions ADD COLUMN {col} {typ}")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_txn_dedupe ON transactions(dedupe_key)"
                  " WHERE dedupe_key IS NOT NULL")
+    scols2 = {r["name"] for r in conn.execute("PRAGMA table_info(statements)")}
+    for col, typ in (("lines_status", "TEXT"), ("lines_diff", "INTEGER")):     # v10: card statement lines read by code
+        if col not in scols2:
+            conn.execute(f"ALTER TABLE statements ADD COLUMN {col} {typ}")
     fcols = {r["name"] for r in conn.execute("PRAGMA table_info(sinking_funds)")}
     for col, typ in (("low_amount", "INTEGER"), ("low_until", "TEXT")):
         if col not in fcols:

@@ -80,19 +80,13 @@ def analyse(conn, today: date, from_month: str | None = None, months: int = DEFA
     if values:
         base = int(median(values))
         res.update({"tight": _round_up(base), "recommended": _round_up(base * (100 + MARGIN_PCT) // 100), "loose": _round_up(max(values))})
-    salary = get_threshold(conn, "net_salary")
-    res["salary"] = salary
+    res["salary"] = get_threshold(conn, "net_salary")
     res["commitments"] = commitments(conn, today)
-    card_avg = None
-    recent_cards = [v for m, v in res["cards"].items() if m >= (from_month or "0000")]
-    if recent_cards:
-        card_avg = sum(recent_cards[-DEFAULT_MONTHS:]) // len(recent_cards[-DEFAULT_MONTHS:])
-    res["card_avg"] = card_avg
-    if salary and res["recommended"] is not None:
-        spend = res["recommended"] + (card_avg or 0)
-        res["monthly_free"] = salary - res["commitments"]["total"] - spend
-    else:
-        res["monthly_free"] = None
+    from . import card_lines
+    res["card_lines"] = card_lines.summary(conn, 3)
+    # No "monthly free" here any more: subtracting total card charges (which already hold instalments, subscriptions,
+    # interest and one-off purchases such as a school fee) from the salary next to the commitments double counted and
+    # produced a false deficit. The simulator computes the monthly picture from its parts.
     res["current_reserve"] = get_threshold(conn, "living_reserve")
     return res
 
@@ -117,19 +111,20 @@ def format_analysis(a: dict) -> str:
         flag = "" if a["enough"] else " (BARU 1 BULAN DATA: anggap sementara)"
         lines.append(f"Biaya hidup kas per bulan, dari {len(a['counted'])} bulan{flag}: ketat {format_idr(a['tight'])} (median), "
                      f"disarankan {format_idr(a['recommended'])} (median + {MARGIN_PCT}%), longgar {format_idr(a['loose'])} (bulan tertinggi)")
-    if a["cards"]:
-        lines.append("Belanja kartu per siklus tagihan (tidak ada di mutasi rekening): "
-                     + "; ".join(f"{m} {format_idr(v)}" for m, v in list(a["cards"].items())[-6:])
-                     + (f". Rata-rata {format_idr(a['card_avg'])}." if a["card_avg"] is not None else ""))
-    if a["monthly_free"] is not None:
-        c = a["commitments"]
-        lines.append(f"Hitungan bulanan: gaji {format_idr(a['salary'])} - komitmen tetap {format_idr(c['total'])} "
-                     f"(tetap {format_idr(c['fixed'])}, cicilan {format_idr(c['installments'])}, pot {format_idr(c['pot'])}) "
-                     f"- biaya hidup disarankan {format_idr(a['recommended'])} - belanja kartu {format_idr(a['card_avg'] or 0)} "
-                     f"= sisa {format_idr(a['monthly_free'])}"
-                     + (" (DEFISIT: pengeluaran melebihi gaji, perlu dikurangi)" if a["monthly_free"] < 0 else " untuk tabungan dan pelunasan"))
-    elif a["salary"] is None:
-        lines.append("net_salary belum diset, jadi sisa bulanan belum bisa dihitung.")
+    cl = a.get("card_lines") or {"months": []}
+    if cl["months"]:
+        parts = []
+        for m in cl["months"]:
+            k = cl["by_month"][m]["kinds"]
+            parts.append(f"{m}: belanja {format_idr(k.get('belanja', 0))}, langganan {format_idr(k.get('langganan', 0))}, "
+                         f"cicilan {format_idr(k.get('cicilan', 0))}, bunga+biaya {format_idr(k.get('bunga', 0) + k.get('biaya', 0))}")
+        lines.append("Kartu kredit per siklus (dari baris tagihan): " + "; ".join(parts) + ". Rincian: belanja_kartu.")
+    elif a["cards"]:
+        lines.append("Total tagihan baru kartu per siklus (SUDAH termasuk cicilan, langganan, bunga dan pembelian sekali; "
+                     "jangan dikurangkan dari gaji): " + "; ".join(f"{m} {format_idr(v)}" for m, v in list(a["cards"].items())[-6:]))
+    lines.append("Sisa bulanan dan arah utang kartu: pakai simulasi_skenario (dihitung dari komponennya, tanpa hitung ganda).")
+    if a["salary"] is None:
+        lines.append("net_salary belum diset.")
     if a["current_reserve"] is not None:
         lines.append(f"living_reserve yang berlaku sekarang: {format_idr(a['current_reserve'])}")
     if a["recommended"] is not None:

@@ -97,22 +97,25 @@ class Analysis(unittest.TestCase):
         self.assertEqual(len(a["counted"]), 8)
         self.assertEqual((a["tight"], a["recommended"], a["loose"]), (12_000_000, 13_200_000, 16_000_000))   # 9,10,10,12,12,13,14,16
 
-    def test_since_the_job_change_and_monthly_free_against_todays_salary(self):
+    def test_since_the_job_change(self):
         a = lv.analyse(world(), TODAY, from_month="2026-07")
         self.assertEqual((a["tight"], a["recommended"], a["loose"]), (14_000_000, 15_400_000, 16_000_000))
-        self.assertEqual(a["card_avg"], 6_000_000)                            # (5M + 7M) / 2
         self.assertEqual(a["commitments"], {"fixed": 4_000_000, "installments": 5_701_000, "pot": 0, "total": 9_701_000})
-        self.assertEqual(a["monthly_free"], 42_000_000 - 9_701_000 - 15_400_000 - 6_000_000)    # 10,899,000
         text = lv.format_analysis(a)
-        self.assertIn("sisa Rp 10.899.000 untuk tabungan dan pelunasan", text)
         self.assertIn("ketat Rp 14.000.000 (median), disarankan Rp 15.400.000 (median + 10%), longgar Rp 16.000.000", text)
         self.assertIn("gaji masuk Rp 42.000.000", text)
         self.assertIn("minta persetujuan pemilik lalu set_threshold living_reserve", text)
 
-    def test_deficit_is_called_out(self):
-        text = lv.format_analysis(lv.analyse(world(salary=20_000_000), TODAY, from_month="2026-07"))
-        self.assertIn("DEFISIT", text)
-        self.assertIn("-Rp 11.101.000", text)
+    def test_no_false_deficit_from_total_card_charges(self):
+        """Regression: salary - commitments - living - AVERAGE CARD CHARGES printed "DEFISIT Rp 23,8 juta" although the card
+        charges already held the instalments, subscriptions, interest and a one-off school fee."""
+        a = lv.analyse(world(salary=20_000_000), TODAY, from_month="2026-07")
+        self.assertNotIn("monthly_free", a)
+        text = lv.format_analysis(a)
+        self.assertNotIn("DEFISIT", text)
+        self.assertNotIn("= sisa", text)
+        self.assertIn("SUDAH termasuk cicilan, langganan, bunga dan pembelian sekali", text)
+        self.assertIn("simulasi_skenario", text)
 
     def test_one_month_is_marked_provisional_and_none_gives_a_clear_message(self):
         conn = connect(":memory:")

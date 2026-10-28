@@ -7,10 +7,10 @@ import html
 import re
 from datetime import date
 
-from . import card_installments, health, roadmap, subscriptions, tools
+from . import card_installments, card_lines, health, roadmap, subscriptions, tools
 from .money import format_idr
 
-NAMES = ("bantuan", "rencana", "tagihan", "cicilan", "anggaran", "peta", "kondisi", "data", "usulan")
+NAMES = ("bantuan", "rencana", "tagihan", "belanja", "cicilan", "anggaran", "peta", "kondisi", "data", "usulan")
 
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des")
 
@@ -91,6 +91,7 @@ Tujuan kita: bebas pinjaman dan keuangan yang membaik bertahap.
 {b("⌨️ Perintah:")}
 <code>/rencana</code> rencana gajian dan pembayaran terdekat
 <code>/tagihan</code> tagihan kartu dan jatuh tempo
+<code>/belanja</code> isi tagihan kartu: belanja, langganan, cicilan, bunga
 <code>/cicilan</code> cicilan kartu dan langganan
 <code>/anggaran</code> anggaran bulan ini
 <code>/peta</code> peta jalan bebas utang
@@ -244,6 +245,29 @@ def _data(conn, today: date) -> str:
     return "\n\n".join(out)
 
 
+def _belanja(conn, today: date) -> str:
+    s = card_lines.summary(conn, 2)
+    if not s["months"]:
+        return f"🧾 {b('Belanja kartu')}\nBelum ada baris tagihan yang terbaca."
+    banks = _banks(conn)
+    out = [f"🧾 {b('Isi tagihan kartu')}\n<i>Dibaca kode dari baris tagihan. \"Belanja\" = yang masih bisa kamu atur.</i>"]
+    for m in s["months"]:
+        d = s["by_month"][m]
+        k = d["kinds"]
+        rows = [f"🛒 Belanja: {b(format_idr(k.get('belanja', 0)))}", f"📺 Langganan: {e(format_idr(k.get('langganan', 0)))}",
+                f"🔁 Cicilan: {e(format_idr(k.get('cicilan', 0)))}", f"💸 Bunga + biaya: {e(format_idr(k.get('bunga', 0) + k.get('biaya', 0)))}"]
+        if k.get("refund"):
+            rows.append(f"↩️ Refund: {e(format_idr(-k['refund']))}")
+        cats = "\n".join(f"    • {e(c.replace('-', ' ').capitalize())}: {e(format_idr(v))}" for c, v in list(d["categories"].items())[:6])
+        big = "\n".join(f"    ⚠️ sekali: {e(desc[:40])} {e(format_idr(amt))}" for desc, amt, _ in d["big"])
+        out.append(f"📅 {b('Siklus tagihan ' + bln(m))} ({len(d['cards'])} kartu)\n" + "\n".join(rows)
+                   + (f"\n{b('Belanja per kategori')}\n{cats}" if cats else "") + (f"\n{big}" if big else ""))
+    if s["mismatch"] or s["missing"]:
+        names = [label(a, banks) + " " + tgl(d) for a, d, _ in s["mismatch"] + s["missing"]]
+        out.append("ℹ️ <i>Belum terbaca lengkap: " + e(", ".join(names)) + "</i>")
+    return "\n\n".join(out)
+
+
 def _usulan(conn, today: date) -> str:
     rows = conn.execute("SELECT id, created_at, title, detail, status FROM feature_requests ORDER BY CASE status WHEN 'baru' THEN 0 WHEN 'dikerjakan' THEN 1 ELSE 2 END, id DESC LIMIT 15").fetchall()
     if not rows:
@@ -255,7 +279,7 @@ def _usulan(conn, today: date) -> str:
 
 
 def build(conn, name: str, today: date) -> str:
-    fn = {"bantuan": lambda c, t: HELP, "rencana": _rencana, "tagihan": _tagihan, "cicilan": _cicilan,
+    fn = {"bantuan": lambda c, t: HELP, "rencana": _rencana, "tagihan": _tagihan, "belanja": _belanja, "cicilan": _cicilan,
           "anggaran": _anggaran, "peta": _peta, "kondisi": _kondisi, "data": _data, "usulan": _usulan}.get(name)
     if fn is None:
         raise ValueError("laporan tidak dikenal")

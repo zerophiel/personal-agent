@@ -24,7 +24,7 @@ from starlette.responses import JSONResponse, PlainTextResponse
 
 from pydantic import BaseModel, Field
 
-from . import card_installments, health, living, mutations, names, reports, rincian as rincian_text, roadmap, simulate, statement_pdf, statements, subscriptions, suggest, tools
+from . import card_installments, card_lines, health, living, mutations, names, reports, rincian as rincian_text, roadmap, simulate, statement_pdf, statements, subscriptions, suggest, tools
 from .ledger import connect
 from .money import format_idr
 from .payee_vault import PayeeVault, has_forbidden_card_data
@@ -42,7 +42,7 @@ MCP_TOOL_NAMES = ("upsert_card", "upsert_debt", "upsert_expense", "set_threshold
                   "health_check", "list_statements", "record_card_payment", "debt_free_roadmap",
                   "add_owner_name", "suggest_categories", "apply_suggestions", "living_cost_analysis",
                   "record_card_installments", "card_installments_status", "pending_statements", "skip_statement_file",
-                  "upsert_subscription", "subscriptions_status", "set_category_keyword", "link_card_payees", "ringkasan_data", "simulasi_skenario", "catat_usulan", "atur_jadwal_pot")
+                  "upsert_subscription", "subscriptions_status", "set_category_keyword", "link_card_payees", "ringkasan_data", "simulasi_skenario", "catat_usulan", "atur_jadwal_pot", "belanja_kartu")
 
 
 class Installment(BaseModel):
@@ -227,6 +227,8 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
                                 "atau subscriptions_status. Analisis dokumen besar dilakukan di luar chat: katakan ke pemilik.")
                     reread_times.append(now)
         dated = statement_pdf.count_transactions(parts)
+        with _LOCK:
+            card_lines.remember_file(conn, h, path)
         with _LOCK:    # remember what the document contains so record_mutations can tell if rows are missing
             conn.execute("INSERT OR REPLACE INTO ingest_checks VALUES (?,?,?,?)",
                          (h, dated, len(parts), datetime.now(timezone.utc).isoformat()))
@@ -345,6 +347,15 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
         Panggil tanpa setoran_awal untuk kembali ke pembagian rata. Hanya setelah pemilik menyetujui angkanya; sebelum itu
         coba dulu dengan simulasi_skenario (setoran_pot_awal / setoran_pot_awal_bulan)."""
         return tools.set_pot_schedule(conn, alias, setoran_awal, sampai_bulan, today())
+
+    @mcp.tool()
+    @locked
+    def belanja_kartu(siklus: int = 3) -> str:
+        """RINCIAN BELANJA KARTU dari baris tagihan yang sudah dibaca kode (JANGAN membaca PDF untuk ini): per siklus
+        tagihan, dipisah belanja (yang bisa diatur), langganan, cicilan, bunga, biaya, refund; belanja per kategori;
+        merchant terbesar; pembelian besar sekali. Pakai untuk "apa yang bisa dipotong", "belanja kartu 2 bulan terakhir
+        selain cicilan", "kenapa tagihan besar"."""
+        return card_lines.format_summary(card_lines.summary(conn, max(1, min(siklus, 12))))
 
     @mcp.tool()
     @locked
@@ -518,9 +529,16 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
                          total_due: int, minimum_due: int) -> dict:
         """Simpan hasil ekstraksi statement (tanggal YYYY-MM-DD, Rupiah bulat). Tool memeriksa
         rekonsiliasi; jika tidak cocok, statement ditandai dan harus dilaporkan ke pemilik."""
-        return statements.record_statement(conn, card_alias, file_hash, statement_date, due_date,
-                                           previous_balance, payments, charges, fees, total_due,
-                                           minimum_due)
+        out = statements.record_statement(conn, card_alias, file_hash, statement_date, due_date,
+                                          previous_balance, payments, charges, fees, total_due,
+                                          minimum_due)
+        if out.get("status") == "stored":
+            try:     # read every line of the statement by code, so spending questions never need the PDF again
+                with _LOCK:
+                    out["baris"] = card_lines.process_statement(conn, out["statement_id"], ingest_dir, statement_pdf.load_passwords(passwords_path))
+            except Exception as e:  # noqa: BLE001 - the statement itself is already stored
+                out["baris"] = {"status": "gagal", "note": type(e).__name__}
+        return out
 
     app = mcp.streamable_http_app()
 
