@@ -70,13 +70,26 @@ class InThePlan(unittest.TestCase):
         self.assertEqual((t["amount"], t["method"], t["pay_to"], t["due"]), (5_701_000, "autodebit", "mandiri-utama", "2026-11-02"))
         self.assertEqual(snap["cash_to_hold"], 42_000_000 - 5_701_000)            # the money is still reserved
         rem = " ".join(snap["reminders"])
-        self.assertIn("AUTODEBET cicilan-mobil", rem)
-        self.assertIn("mandiri-utama", rem)
-        self.assertIn("Rp 5.701.000", rem)
-        self.assertIn("2026-11-02", rem)
+        self.assertIn("AUTODEBET dari rekening mandiri-utama: cicilan-mobil Rp 5.701.000 (2026-11-02)", rem)
+        self.assertIn("Pastikan saldo minimal Rp 5.701.000 sebelum 2026-11-02", rem)
         text = tools.summarize_plan(snap)
         self.assertIn("autodebet, saldo harus cukup sebelum 2026-11-02", text)
         self.assertNotIn("8808", json.dumps(snap))
+
+    def test_debits_from_one_account_add_up_with_what_the_bank_holds_back(self):
+        """Owner 2026-10-28: Mandiri holds Rp 100.000; with SPayLater on the 1st and the car on the 2nd, a balance of only the
+        car instalment would let the car debit fail. One figure per account, before the first debit."""
+        conn = setup()
+        car(conn, pay_method="autodebit", debit_account_alias="mandiri-utama")
+        tools.upsert_debt(conn, "spaylater", "Shopee", 5 * 270_000, 270_000, 5, 1, None, pay_method="autodebit",
+                          debit_account_alias="mandiri-utama")
+        tools.set_threshold(conn, "saldo_ditahan:mandiri-utama", 100_000)
+        rem = [r for r in tools.generate_payday_plan(conn, TODAY)["reminders"] if r.startswith("AUTODEBET")]
+        self.assertEqual(len(rem), 1)
+        self.assertIn("spaylater Rp 270.000 (2026-11-01); cicilan-mobil Rp 5.701.000 (2026-11-02)", rem[0])
+        self.assertIn("ditambah saldo minimum yang ditahan bank Rp 100.000", rem[0])
+        self.assertIn("Pastikan saldo minimal Rp 6.071.000 sebelum 2026-11-01 dan jangan dipakai sampai 2026-11-02", rem[0])
+        self.assertIn("Rp 100.000", tools.data_overview(conn, TODAY))
 
     def test_plain_transfer_debt_unchanged(self):
         conn = setup()

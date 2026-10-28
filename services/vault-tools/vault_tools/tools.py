@@ -182,9 +182,10 @@ def data_overview(conn, today: date) -> str:
     L.append("PENGELUARAN TETAP")
     for e in conn.execute("SELECT alias, amount, due_day FROM fixed_expenses ORDER BY alias"):
         L.append(f"- {e['alias']} | {format_idr(e['amount'])} | tanggal {e['due_day']}")
-    L.append("REKENING MILIK PEMILIK")
+    L.append("REKENING MILIK PEMILIK (alias | bank | jenis | 4 digit | saldo minimum yang ditahan bank)")
     for a in conn.execute("SELECT alias, bank, kind, last4 FROM accounts ORDER BY alias"):
-        L.append(f"- {a['alias']} | {a['bank']} | {a['kind']} | {a['last4'] or '-'}")
+        held = get_threshold(conn, f"saldo_ditahan:{a['alias']}", 0) or 0
+        L.append(f"- {a['alias']} | {a['bank']} | {a['kind']} | {a['last4'] or '-'} | {format_idr(held) if held else '-'}")
     L.append(f"CICILAN KARTU AKTIF: {format_idr(card_installments.monthly_total(conn))} per bulan | "
              f"LANGGANAN AKTIF: {format_idr(subscriptions.active_total(conn))} per bulan")
     th = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM thresholds")}
@@ -767,11 +768,23 @@ def generate_payday_plan(conn, today: date, payday: date | None = None,
             f"sebelum gajian {payday.isoformat()}. Bayar minimal {format_idr(o.minimum)} (penuh {format_idr(o.amount)}) "
             f"dari saldo yang ada sekarang"
             + (" agar tidak kena denda; sisanya bisa setelah gajian." if o.amount > o.minimum else "."))
+    # auto-debits from one account add up: the account must hold all of them (plus what the bank holds back as a minimum
+    # balance) before the FIRST one, and keep it until the last one has gone; one figure per account, computed here
+    by_account: dict[str, list] = {}
     for t in snap["transfers"]:
         if t.get("method") == "autodebit":
-            snap["reminders"].append(
-                f"AUTODEBET {t['to_alias']}: pastikan saldo rekening {t.get('pay_to') or '(rekening belum diset)'} "
-                f"minimal {format_idr(t['amount'])} sebelum {t.get('due') or 'jatuh tempo'}; tidak perlu transfer ke kreditur.")
+            by_account.setdefault(t.get("pay_to") or "", []).append(t)
+    for acct, items in by_account.items():
+        items.sort(key=lambda t: t.get("due") or "")
+        held = get_threshold(conn, f"saldo_ditahan:{acct}", 0) or 0 if acct else 0
+        total = sum(t["amount"] for t in items) + held
+        parts = "; ".join(f"{t['to_alias']} {format_idr(t['amount'])} ({t.get('due') or 'jatuh tempo'})" for t in items)
+        first, last = items[0].get("due") or "jatuh tempo", items[-1].get("due") or "jatuh tempo"
+        snap["reminders"].append(
+            f"AUTODEBET dari rekening {acct or '(rekening belum diset)'}: {parts}"
+            + (f"; ditambah saldo minimum yang ditahan bank {format_idr(held)}" if held else "")
+            + f". Pastikan saldo minimal {format_idr(total)} sebelum {first}"
+            + (f" dan jangan dipakai sampai {last}" if last != first or held else "") + "; tidak perlu transfer ke kreditur.")
     for f in conn.execute("SELECT * FROM sinking_funds"):
         due = date.fromisoformat(f["due_date"])
         s = sinking_required(conn, f, payday, hol)

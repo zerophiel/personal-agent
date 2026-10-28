@@ -146,7 +146,8 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
     @locked
     def sisa_uang_harian(jumlah: int) -> str:
         """Catat SISA UANG HARIAN bulan lalu yang masih dipegang pemilik saat gajian (tanyakan sekali saat menyusun daftar bayar
-        tanggal 1, sebelum generate_payday_plan). Rencana gajian ini lalu hanya mengambil kekurangannya dari gaji: belanja kartu
+        tanggal 1, sebelum generate_payday_plan). jumlah = saldo yang BISA DIPAKAI: saldo dikurangi saldo minimum yang ditahan
+        bank (lihat kolom terakhir REKENING MILIK PEMILIK di ringkasan_data; mis. Mandiri menahan Rp 100.000). Rencana gajian ini lalu hanya mengambil kekurangannya dari gaji: belanja kartu
         yang dibayar dari uang harian tidak memotong pot. Berlaku untuk gajian yang sedang berjalan saja."""
         return tools.set_leftover_living_cash(conn, jumlah, today())
 
