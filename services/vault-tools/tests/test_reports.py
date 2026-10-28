@@ -83,11 +83,18 @@ class Reports(unittest.TestCase):
         text = reports.build(world(), "rencana", TODAY)
         self.assertIn("📅 <b>Rencana gajian", text)
         self.assertIn("(hari gajian)", text)
-        self.assertIn("• Hutang teman: <b>Rp 9.000.000</b>", text)
+        self.assertIn("• Hutang Teman: <b>Rp 9.000.000</b>", text)
+        self.assertIn("• IPL", text)
         self.assertNotIn("(tagihan kartu - ", text)
         self.assertNotIn("\n> ", text)
         self.assertNotIn("\n! ", text)
         self.assertNotRegex(text, r"\d{4}-\d{2}-\d{2}")       # no ISO dates
+
+    def test_the_same_card_is_one_line_per_day(self):
+        text = reports.build(world(), "rencana", TODAY)
+        self.assertEqual(text.count("BCA …1111: <b>Rp 8.000.000</b>"), 1)
+        self.assertIn("minimum + sisa tagihan, lunas", text)
+        self.assertNotIn("rekening rekening", text)
 
     def test_cicilan_lists_installments_and_subscriptions(self):
         text = reports.build(world(), "cicilan", TODAY)

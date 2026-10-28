@@ -38,10 +38,15 @@ def _banks(conn) -> dict[str, str]:
     return {r["alias"]: f"{show.get(r['bank'].lower(), r['bank'].title())} …{r['last4']}" for r in conn.execute("SELECT alias, bank, last4 FROM cards")}
 
 
+_WORDS = {"ipl": "IPL", "va": "VA", "spaylater": "SPayLater", "mtf": "MTF"}
+
+
+def _nice(alias: str) -> str:
+    return " ".join(_WORDS.get(w, w.capitalize()) for w in alias.replace("-", " ").split())
+
+
 def label(alias: str, banks: dict[str, str]) -> str:
-    if alias in banks:
-        return banks[alias]
-    return alias.replace("-", " ").capitalize()
+    return banks[alias] if alias in banks else _nice(alias)
 
 
 _ISO = re.compile(r"\b(20\d\d-\d\d-\d\d)\b")
@@ -51,10 +56,10 @@ def pretty(text: str, conn, banks: dict[str, str]) -> str:
     """Engine sentences carry technical aliases and ISO dates; show them the way the owner talks."""
     names = dict(banks)
     for r in conn.execute("SELECT alias, bank FROM accounts"):
-        names.setdefault(r["alias"], f"rekening {r['bank'].title()}")
+        names.setdefault(r["alias"], r["bank"].title())
     for tbl in ("debts", "fixed_expenses", "sinking_funds"):
         for r in conn.execute(f"SELECT alias FROM {tbl}"):
-            names.setdefault(r["alias"], r["alias"].replace("-", " ").capitalize())
+            names.setdefault(r["alias"], _nice(r["alias"]))
     for alias in sorted(names, key=len, reverse=True):
         text = re.sub(rf"(?<![\w-]){re.escape(alias)}(?![\w-])", names[alias], text)
     return _ISO.sub(lambda m: tgl(m.group(1)), text)
@@ -104,27 +109,37 @@ def _rencana(conn, today: date) -> str:
     banks = _banks(conn)
     out = [f"📅 {b('Rencana gajian ' + tgl(snap['payday']) + ' ' + str(date.fromisoformat(snap['payday']).year))}\n"
            f"Gaji {b(format_idr(snap['salary']))} · berlaku sampai {tgl(snap['next_payday'])}"]
-    by_date: dict[str, list] = {}
+    by_date: dict[str, dict[str, dict]] = {}
     for t in snap["transfers"]:
-        by_date.setdefault(t["date"], []).append(t)
+        row = by_date.setdefault(t["date"], {}).setdefault(t["to_alias"], {"amount": 0, "notes": []})
+        row["amount"] += t["amount"]
+        if _note(t) and _note(t) not in row["notes"]:
+            row["notes"].append(_note(t))
     for d in sorted(by_date):
         head = f"💰 {b('Bayar ' + tgl(d))}" + (" (hari gajian)" if d == snap["payday"] else "")
         rows = []
-        for t in by_date[d]:
-            note = _note(t)
-            rows.append(f"• {e(label(t['to_alias'], banks))}: {b(format_idr(t['amount']))}" + (f" <i>({e(note)})</i>" if note else ""))
+        for alias, r in by_date[d].items():
+            notes = [n for n in r["notes"]]
+            if "minimum" in " ".join(notes) and "bayar penuh" in " ".join(notes):
+                notes = ["minimum + sisa tagihan, lunas"]
+            note = "; ".join(notes)
+            rows.append(f"• {e(label(alias, banks))}: {b(format_idr(r['amount']))}" + (f" <i>({e(note)})</i>" if note else ""))
         out.append(head + "\n" + "\n".join(rows))
     if snap["unfunded"]:
         rows = [f"• {e(label(u['to_alias'], banks))}: {b(format_idr(u['amount']))} <i>(bunga ± {e(format_idr(u['est_delay_cost']))}/bulan)</i>" for u in snap["unfunded"]]
-        out.append(f"⚠️ {b('Belum terdanai (belum bisa dibayar penuh)')}\n" + "\n".join(rows))
+        out.append(f"⚠️ {b('Belum terdanai: sisa tagihan yang belum terbayar')}\n" + "\n".join(rows))
     if snap.get("reminders"):
         out.append(f"📌 {b('Pengingat')}\n" + "\n".join(f"• {e(pretty(r, conn, banks))}" for r in snap["reminders"]))
-    if snap.get("advice"):
-        out.append(f"💡 {b('Saran')}\n" + "\n".join(f"• {e(pretty(a, conn, banks))}" for a in snap["advice"]))
-    foot = f"💵 Kas ditahan {b(format_idr(snap['cash_to_hold']))} · jatah harian {b(format_idr(snap['daily_allowance']))}"
+    choices = [a for a in snap.get("advice", []) if a.startswith(("Opsi", "Jika tidak"))]
+    if choices:
+        out.append(f"💡 {b('Pilihan')}\n" + "\n".join(f"• {e(pretty(a, conn, banks))}" for a in choices))
     normal = tools.get_threshold(conn, "living_reserve")
-    if str(snap.get("reserve_source", "")).startswith("sementara") and normal:
-        foot += f"\nℹ️ <i>Cadangan siklus ini hanya bagian dari gaji. Uang tunai harian sebenarnya {e(format_idr(normal))}, termasuk saldo yang sudah Anda pegang.</i>"
+    if str(snap.get("reserve_source", "")).startswith("sementara") and normal and snap["daily_allowance"]:
+        days = max(1, round(snap["cash_to_hold"] / snap["daily_allowance"]))
+        foot = (f"💵 {b('Uang tunai harian')}: {b(format_idr(normal))} (sekitar {b(format_idr(normal // days))} per hari)\n"
+                f"    {e(format_idr(snap['cash_to_hold']))} dari gaji + saldo yang sudah Anda pegang")
+    else:
+        foot = f"💵 Kas ditahan {b(format_idr(snap['cash_to_hold']))} · jatah harian {b(format_idr(snap['daily_allowance']))}"
     out.append(foot)
     return "\n\n".join(out)
 
