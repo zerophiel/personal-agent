@@ -293,8 +293,8 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
     @locked
     def record_card_installments(card_alias: str, statement_date: str, items: list[Installment]) -> str:
         """Catat CICILAN KARTU yang tercetak di tagihan (tanda x/y, mis. 03/12 = cicilan ke-3 dari 12 bulan). Panggil
-        setiap membaca tagihan yang memuat cicilan, dengan statement_date tagihan itu. Cicilan yang tidak muncul lagi
-        di tagihan terbaru dianggap sudah selesai. Jangan tertukar dengan tanggal dd/mm: cicilan biasanya ada di
+        setiap membaca sebuah tagihan, dengan statement_date tagihan itu; items kosong = tagihan itu tidak memuat
+        cicilan. Cicilan yang tidak muncul di tagihan yang sudah dibaca dianggap selesai. Jangan tertukar dengan tanggal dd/mm: cicilan biasanya ada di
         kolom/keterangan 'cicilan' atau 'installment' dan jumlahnya sama tiap bulan."""
         return card_installments.record(conn, card_alias, statement_date, [i.model_dump() for i in items])
 

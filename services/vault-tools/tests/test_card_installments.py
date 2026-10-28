@@ -33,18 +33,19 @@ class Installments(unittest.TestCase):
                          (9, 9_000_000, "2027-07-05"))
         self.assertEqual(a["iPhone EZ Pay"]["left"], 1)
 
-    def test_a_newer_statement_refreshes_and_one_that_drops_an_item_finishes_it(self):
+    def test_only_a_scanned_statement_can_end_an_installment(self):
         conn = world()
         ci.record(conn, "bca-1", "2026-10-05", ITEMS)
         conn.execute("INSERT INTO statements(card_id,file_hash,statement_date,due_date,previous_balance,payments,charges,fees,total_due,"
                      "minimum_due,reconciled,recon_diff,ingested_at) VALUES (1,?,'2026-11-05','2026-11-25',0,0,5,0,5,1,1,0,'t')", ("9" * 64,))
         conn.commit()
-        self.assertEqual(len(ci.active(conn)), 0)                 # November statement refreshed nothing: both treated as finished
+        self.assertEqual(len(ci.active(conn)), 2)                 # November was never read for installments: proves nothing
         ci.record(conn, "bca-1", "2026-11-05", [{"description": "TOKOPEDIA CICILAN", "amount": 1_000_000, "seq": 4, "total": 12}])
-        act = ci.active(conn)
-        self.assertEqual([(x["description"], x["seq"]) for x in act], [("TOKOPEDIA CICILAN", 4)])
+        self.assertEqual([(x["description"], x["seq"]) for x in ci.active(conn)], [("TOKOPEDIA CICILAN", 4)])   # the other is gone
         ci.record(conn, "bca-1", "2026-10-05", [{"description": "TOKOPEDIA CICILAN", "amount": 1_000_000, "seq": 3, "total": 12}])
         self.assertEqual(ci.active(conn)[0]["seq"], 4)             # an older statement never rolls it back
+        ci.record(conn, "bca-1", "2026-12-05", [])                 # a statement with no installments at all
+        self.assertEqual(ci.active(conn), [])
 
     def test_same_installment_worded_differently_is_one_row(self):
         """Regression: 'Tokopedia 6/18' and 'Tokopedia 200244 6/18' were stored twice."""

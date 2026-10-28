@@ -19,8 +19,6 @@ def record(conn: sqlite3.Connection, card_alias: str, as_of: str, items: list[di
     card = conn.execute("SELECT id FROM cards WHERE alias=?", (card_alias,)).fetchone()
     if card is None:
         raise ValueError(f"kartu {card_alias} belum terdaftar (upsert_card dulu)")
-    if not items:
-        raise ValueError("items kosong")
     for it in items:
         check_idr(it["amount"])
         if it["amount"] <= 0:
@@ -28,6 +26,7 @@ def record(conn: sqlite3.Connection, card_alias: str, as_of: str, items: list[di
         if not (2 <= it["total"] <= MAX_TENOR and 1 <= it["seq"] <= it["total"]):
             raise ValueError(f"cicilan {it['seq']}/{it['total']} tidak masuk akal (tenor 2-{MAX_TENOR}, ke-x <= y)")
     stored = 0
+    conn.execute("INSERT OR IGNORE INTO card_installment_scans(card_id, statement_date) VALUES (?,?)", (card["id"], as_of))
     seen: dict[str, int] = {}
     for it in items:
         # identity = amount + tenor, never the description: the model words it differently on every statement
@@ -56,10 +55,12 @@ def _add_months(d: date, n: int) -> date:
 
 
 def active(conn: sqlite3.Connection) -> list[dict]:
-    """Installments still being billed: not finished and refreshed by the card's latest statement."""
+    """Installments still being billed: not finished and still printed on the card's latest statement THAT WAS READ
+    for installments (a newer statement nobody has scanned yet proves nothing)."""
     out = []
     for r in conn.execute(
-            "SELECT i.*, c.alias AS card, (SELECT MAX(statement_date) FROM statements s WHERE s.card_id=i.card_id) AS last_stmt"
+            "SELECT i.*, c.alias AS card,"
+            " COALESCE((SELECT MAX(statement_date) FROM card_installment_scans x WHERE x.card_id=i.card_id), i.as_of) AS last_stmt"
             " FROM card_installments i JOIN cards c ON c.id=i.card_id ORDER BY c.alias, i.as_of, i.description"):
         left = r["total"] - r["seq"]
         if left <= 0:

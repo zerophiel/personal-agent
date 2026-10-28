@@ -80,6 +80,8 @@ CREATE TABLE IF NOT EXISTS card_installments (   -- "03/12" on a card statement:
   seq INTEGER NOT NULL, total INTEGER NOT NULL CHECK (total >= 2 AND seq BETWEEN 1 AND total),
   as_of TEXT NOT NULL,                  -- statement date that printed seq/total
   PRIMARY KEY (card_id, key));
+CREATE TABLE IF NOT EXISTS card_installment_scans (   -- statements already read for installments (an empty one = none printed)
+  card_id INTEGER NOT NULL REFERENCES cards(id), statement_date TEXT NOT NULL, PRIMARY KEY (card_id, statement_date));
 CREATE TABLE IF NOT EXISTS subscriptions (
   alias TEXT PRIMARY KEY, name TEXT NOT NULL, {_money('amount')} NOT NULL,   -- IDR per month (USD ones: approximate)
   source TEXT NOT NULL,                 -- card or account alias it is charged to
