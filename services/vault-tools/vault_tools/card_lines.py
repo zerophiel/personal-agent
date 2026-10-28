@@ -21,6 +21,12 @@ _MONTHS = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "mei": 5, "jun": 6,
 _DATE = r"(?:\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?|\d{1,2}-[A-Za-z]{3}(?:-\d{2,4})?|\d{1,2}\s?[A-Za-z]{3}(?:\s\d{4})?)"
 _LINE = re.compile(rf"^\s*(?P<d1>{_DATE})\s+(?P<d2>{_DATE})\s+(?P<desc>.+?)\s+(?:Rp\.?\s*)?"
                    r"(?P<amt>\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)\s*(?P<cr>CR)?\s*$", re.I)
+_DATES_ONLY = re.compile(rf"^\s*(?P<d1>{_DATE})\s+(?P<d2>{_DATE})\s*$")
+# a line whose amount the number masking swallowed: "13-Feb-26 13-Feb-26 Telkomsel [[NUM:****8223]],514.00"
+_MASKED = re.compile(rf"^\s*(?P<d1>{_DATE})\s+(?P<d2>{_DATE})\s+(?P<desc>.+?)\s*\[\[NUM:\*+\d{{4}}\]\],(?P<tail>\d{{3}})(?:\.\d{{2}})?\s*(?P<cr>CR)?\s*$", re.I)
+# foreign purchases on some cards: "ANTHROPIC* CLAUDE SUB ANTHROPIC.COMUSA 364,119" with the dates on the next line
+_NODATE = re.compile(r"^\s*(?P<desc>[A-Za-z].*?)\s+(?:Rp\.?\s*)?(?P<amt>\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)\s*(?P<cr>CR)?\s*$", re.I)
+_SUMMARY = re.compile(r"total|sub ?-?t ?o ?t ?a ?l|tagihan|sebelumnya|batas|limit|minimum|saldo|poin|pagu|payments", re.I)
 ONE_OFF_FROM = 1_500_000            # a single purchase this big is shown apart: it distorts any monthly average
 
 # card merchants -> category. The owner's own words (category_keywords) are checked before these.
@@ -77,19 +83,32 @@ def _date(token: str, cycle: date, month_first: bool) -> str | None:
 
 
 def parse_text(text: str, cycle: date, month_first: bool = False) -> list[dict]:
+    raw = [ln for ln in text.splitlines() if ln.strip()]
     out = []
-    for raw in text.splitlines():
-        m = _LINE.match(raw)
-        if not m:
+    for i, line in enumerate(raw):
+        m = _LINE.match(line)
+        if m:
+            desc = " ".join(m.group("desc").split())
+            if len(re.findall(r"[A-Za-z]", desc)) < 2 or desc.lower().startswith("rp"):
+                continue                                       # summary rows ("Rp. 2,386,662 Rp. 201,221"), page markers
+            amount = parse_amount(m.group("amt"))
+            if amount:
+                out.append({"txn_date": _date(m.group("d1"), cycle, month_first), "description": desc[:120],
+                            "amount": -amount if m.group("cr") else amount})
             continue
-        desc = " ".join(m.group("desc").split())
-        if len(re.findall(r"[A-Za-z]", desc)) < 2 or desc.lower().startswith("rp"):
-            continue                                           # summary rows ("Rp. 2,386,662 Rp. 201,221"), page markers
-        amount = parse_amount(m.group("amt"))
-        if amount == 0:
+        m = _MASKED.match(line)
+        if m:
+            out.append({"txn_date": _date(m.group("d1"), cycle, month_first), "description": " ".join(m.group("desc").split())[:120],
+                        "amount": None, "tail": m.group("tail"), "credit": bool(m.group("cr"))})
             continue
-        out.append({"txn_date": _date(m.group("d1"), cycle, month_first), "description": desc[:120],
-                    "amount": -amount if m.group("cr") else amount})
+        m = _NODATE.match(line)
+        if m and not _SUMMARY.search(m.group("desc")):
+            nxt = _DATES_ONLY.match(raw[i + 1]) if i + 1 < len(raw) else None
+            if nxt:
+                amount = parse_amount(m.group("amt"))
+                if amount:
+                    out.append({"txn_date": _date(nxt.group("d1"), cycle, month_first), "description": " ".join(m.group("desc").split())[:120],
+                                "amount": -amount if m.group("cr") else amount})
     return out
 
 
@@ -127,14 +146,29 @@ def _tolerance(lines: list[dict]) -> int:
 
 def store(conn, statement_id: int, lines: list[dict]) -> dict:
     st = conn.execute("SELECT s.*, c.alias AS card FROM statements s JOIN cards c ON c.id = s.card_id WHERE s.id=?", (statement_id,)).fetchone()
+    masked = [x for x in lines if x.get("amount") is None]
+    lines = [x for x in lines if x.get("amount") is not None]
+    notes = []
     diff = reconcile(lines, st)
-    note = ""
-    if abs(diff) > _tolerance(lines) and diff < 0:
-        # a line whose amount the number-masking swallowed: fill it from the card's known instalments when it fits exactly
+    tol = _tolerance(lines)
+    # 1. one line whose amount the masking swallowed: the gap IS its amount, when the visible last digits agree
+    if len(masked) == 1 and abs(diff) > tol:
+        x, gap = masked[0], -diff
+        if (gap < 0) == x["credit"] and f"{abs(gap):d}".endswith(x["tail"]):
+            lines.append({"txn_date": x["txn_date"], "description": x["description"], "amount": gap})
+            diff, notes = reconcile(lines, st), notes + ["satu nominal yang tersamar dipulihkan dari selisih total"]
+    # 2. payments the card only shows as a summary ("TOTAL PAYMENTS"): take them from the statement itself
+    paid_lines = -sum(x["amount"] for x in lines if x["amount"] < 0 and classify(x["description"], x["amount"]) == "pembayaran")
+    missing_paid = st["payments"] - paid_lines
+    if missing_paid > 0 and abs(diff - missing_paid) <= tol:
+        lines.append({"txn_date": None, "description": "Pembayaran (dari ringkasan tagihan)", "amount": -missing_paid})
+        diff, notes = reconcile(lines, st), notes + ["pembayaran diambil dari ringkasan tagihan"]
+    # 3. an instalment line that cannot be read: fill it from the card's known instalments when it fits exactly
+    if abs(diff) > tol and diff < 0:
         for a in card_installments.active(conn) + _all_instalments(conn, st["card_id"]):
-            if a["card"] == st["card"] and abs(-diff - a["per_month"]) <= _tolerance(lines):
-                lines = lines + [{"txn_date": None, "description": f"{a['description']} (dari daftar cicilan)", "amount": a["per_month"]}]
-                diff, note = reconcile(lines, st), "satu baris cicilan diisi dari daftar cicilan"
+            if a["card"] == st["card"] and abs(-diff - a["per_month"]) <= tol:
+                lines.append({"txn_date": None, "description": f"{a['description']} (dari daftar cicilan)", "amount": a["per_month"]})
+                diff, notes = reconcile(lines, st), notes + ["satu baris cicilan diisi dari daftar cicilan"]
                 break
     ok = abs(diff) <= _tolerance(lines)
     conn.execute("DELETE FROM card_lines WHERE statement_id=?", (statement_id,))
@@ -147,7 +181,7 @@ def store(conn, statement_id: int, lines: list[dict]) -> dict:
                      (statement_id, st["card_id"], st["statement_date"], x["txn_date"], x["description"], x["amount"], kind, cat))
     conn.execute("UPDATE statements SET lines_status=?, lines_diff=? WHERE id=?", ("cocok" if ok else "selisih", diff, statement_id))
     conn.commit()
-    return {"lines": len(lines), "status": "cocok" if ok else "selisih", "diff": diff, "note": note}
+    return {"lines": len(lines), "status": "cocok" if ok else "selisih", "diff": diff, "note": "; ".join(notes)}
 
 
 def _all_instalments(conn, card_id: int) -> list[dict]:

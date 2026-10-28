@@ -167,6 +167,43 @@ class Store(unittest.TestCase):
         self.assertIn("🛒 Belanja: <b>Rp 3.040.845</b>", html)
 
 
+class Recovery(unittest.TestCase):
+    """Real layouts that hid an amount: the statement totals let the code recover it, but only when it is unambiguous."""
+
+    def test_foreign_purchase_with_its_dates_on_the_next_line(self):
+        text = "11/08/2026 12/08/2026 COWAY-IPG JAKARTA IDN 2,280,000\nANTHROPIC* CLAUDE SUB ANTHROPIC.COMUSA 364,119\n12/08/2026 13/08/2026\nUSD 20.000 @Rp. 18205.995"
+        lines = cl.parse_text(text, date(2026, 8, 22))
+        self.assertEqual([(x["description"][:9], x["amount"], x["txn_date"]) for x in lines],
+                         [("COWAY-IPG", 2_280_000, "2026-08-11"), ("ANTHROPIC", 364_119, "2026-08-12")])
+
+    def test_summary_rows_without_dates_are_never_lines(self):
+        text = "4201-94XX-XXXX-5855 NAMA S U B T O T AL 166,335\n12/08/2026 13/08/2026\nTOTAL PAYMENTS 445,077 CR\n12/08/2026 13/08/2026"
+        self.assertEqual(cl.parse_text(text, date(2026, 8, 22)), [])
+
+    def test_one_masked_amount_is_recovered_when_its_visible_digits_agree(self):
+        conn = card_world()
+        sid = add_statement(conn, debits=DEBITS + 223_514)
+        lines = cl.parse_text(STATEMENT + "\n13-OKT 13-OKT Telkomsel [[NUM:****8223]],514.00", date(2026, 10, 12))
+        out = cl.store(conn, sid, lines)
+        self.assertEqual(out["status"], "cocok")
+        self.assertIn("tersamar dipulihkan", out["note"])
+        self.assertEqual(conn.execute("SELECT amount FROM card_lines WHERE description LIKE 'Telkomsel%'").fetchone()[0], 223_514)
+
+    def test_a_masked_amount_that_does_not_fit_is_left_as_a_mismatch(self):
+        conn = card_world()
+        sid = add_statement(conn, debits=DEBITS + 223_999)                                   # digits disagree with ",514"
+        out = cl.store(conn, sid, cl.parse_text(STATEMENT + "\n13-OKT 13-OKT Telkomsel [[NUM:****8223]],514.00", date(2026, 10, 12)))
+        self.assertEqual(out["status"], "selisih")
+
+    def test_payments_shown_only_as_a_summary_come_from_the_statement(self):
+        conn = card_world()
+        sid = add_statement(conn, paid=445_077)
+        no_payment_line = [x for x in cl.parse_text(STATEMENT, date(2026, 10, 12)) if x["amount"] > 0]
+        out = cl.store(conn, sid, no_payment_line)
+        self.assertEqual(out["status"], "cocok")
+        self.assertEqual(conn.execute("SELECT amount, kind FROM card_lines WHERE description LIKE 'Pembayaran (dari%'").fetchone()[:], (-445_077, "pembayaran"))
+
+
 @unittest.skipUnless(HAVE_SERVER, "mcp/starlette not installed")
 class ThroughTheTools(unittest.TestCase):
     def test_recording_a_statement_reads_its_lines_without_the_model(self):
