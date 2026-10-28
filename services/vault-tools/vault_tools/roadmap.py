@@ -6,7 +6,7 @@ from __future__ import annotations
 import calendar
 from datetime import date
 
-from . import card_installments
+from . import card_installments, subscriptions
 from .money import format_idr
 from .tools import (DEFAULT_CARD_INTEREST_BP, bp_of_idr, get_threshold, id_holidays, next_payday,
                     last_working_day, sinking_required)
@@ -97,7 +97,8 @@ def roadmap(conn, today: date) -> dict:
         if reserve is None:
             from .health import estimate_living_reserve
             reserve = estimate_living_reserve(conn, payday, salary)
-        capacity = salary - fixed - inst - pot - reserve - sum(a["per_month"] for a in card_inst)   # next bills already carry them
+        recurring = subscriptions.active_total(conn)      # subscriptions and the like keep landing on the cards every month
+        capacity = salary - fixed - inst - pot - reserve - sum(a["per_month"] for a in card_inst) - recurring   # next bills already carry them
     card_total = sum(b for _, b, _ in cards)
     card_result = clear_cards(cards, capacity) if cards and capacity is not None else None
     card_end = None
@@ -144,5 +145,5 @@ def format_roadmap(r: dict) -> str:
         for d, amt, alias in r["freed"]:
             running += amt
             lines.append(f"- {d}: {alias} selesai, bebas {format_idr(amt)}/bulan (total terbebas {format_idr(running)}/bulan)")
-    lines.append("Asumsi: tidak ada pembelian kartu atau pinjaman baru, gaji tetap, kartu dilunasi dari bunga tertinggi.")
+    lines.append("Asumsi: tidak ada pembelian kartu atau pinjaman baru di luar cicilan dan langganan yang tercatat, gaji tetap, kartu dilunasi dari bunga tertinggi.")
     return "\n".join(lines)

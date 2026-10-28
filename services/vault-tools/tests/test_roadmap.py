@@ -50,6 +50,17 @@ class LatestStatement(unittest.TestCase):
         self.assertNotIn("40.000.000", tools.summarize_plan(snap))
 
 
+class Recurring(unittest.TestCase):
+    def test_subscriptions_shrink_the_card_capacity(self):
+        from vault_tools import subscriptions as sub
+        base = rm.roadmap(full_world(), TODAY)["capacity"]
+        conn = full_world()
+        sub.upsert(conn, "apple-one", "Apple One", 319_000, "hsbc-1")
+        sub.upsert(conn, "maybe", "Maybe", 500_000, "hsbc-1", status="unsure")        # not counted until confirmed
+        sub.upsert(conn, "old", "Old", 0, "hsbc-1", status="ended")
+        self.assertEqual(rm.roadmap(conn, TODAY)["capacity"], base - 319_000)
+
+
 class CardSimulation(unittest.TestCase):
     def test_avalanche_clears_and_counts_interest_on_the_remainder_only(self):
         r = rm.clear_cards([("A", 8_000_000, 275), ("B", 6_000_000, 225)], 13_000_000)
