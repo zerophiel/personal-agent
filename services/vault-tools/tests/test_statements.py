@@ -170,6 +170,17 @@ class RecordStatement(unittest.TestCase):
         self.assertEqual(record_statement(conn, file_hash=H, **OK)["status"], "duplicate")
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM statements").fetchone()[0], 1)
 
+    def test_same_bill_from_a_second_file_is_a_duplicate_and_keeps_the_payment(self):
+        """Regression: the October BCA bill arrived twice (different PDF bytes) and the copy lost the Rp 8.3M payment."""
+        conn = card_db()
+        record_statement(conn, file_hash=H, **OK)
+        conn.execute("UPDATE statements SET paid_amount=1000000")
+        other = record_statement(conn, file_hash="f" * 64, **OK)
+        self.assertEqual(other["status"], "duplicate")
+        self.assertEqual(conn.execute("SELECT COUNT(*), MAX(paid_amount) FROM statements").fetchone()[:], (1, 1_000_000))
+        record_statement(conn, file_hash="e" * 64, **{**OK, "statement_date": "2026-11-05", "due_date": "2026-11-20"})   # next month is new
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM statements").fetchone()[0], 2)
+
     def test_bad_inputs(self):
         conn = card_db()
         for patch in ({"card_alias": "ghost"}, {"minimum_due": 9_999_999}, {"payments": -1},

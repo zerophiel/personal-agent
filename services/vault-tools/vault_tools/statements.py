@@ -30,6 +30,9 @@ def record_statement(conn: sqlite3.Connection, card_alias: str, file_hash: str,
     dup = conn.execute("SELECT id, reconciled FROM statements WHERE file_hash=?", (file_hash,)).fetchone()
     if dup:
         return {"status": "duplicate", "statement_id": dup["id"], "reconciled": bool(dup["reconciled"])}
+    same = conn.execute("SELECT id, reconciled FROM statements WHERE card_id=? AND statement_date=?", (card["id"], statement_date)).fetchone()
+    if same:     # the same bill delivered twice (email and Telegram, different PDF bytes): keep the first, with its payments
+        return {"status": "duplicate", "statement_id": same["id"], "reconciled": bool(same["reconciled"])}
     r = reconcile(previous_balance, payments, charges, fees, total_due)
     cur = conn.execute(
         "INSERT INTO statements(card_id,file_hash,statement_date,due_date,previous_balance,payments,"
