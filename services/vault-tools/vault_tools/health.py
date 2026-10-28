@@ -61,13 +61,17 @@ def record_expense(conn: sqlite3.Connection, today: date, amount: int, merchant:
             if row is None:
                 raise ValueError(f"{table[:-1]} {alias} belum terdaftar")
             ids[label] = row["id"]
+    # the same money from the same account or card is a duplicate whatever the merchant text says: a new chat session
+    # describes a re-sent screenshot in other words ("Isi saldo Flazz" vs "Isi Flazz BCA"), and it remembers nothing
     same = [r for r in conn.execute(
-        "SELECT id, merchant FROM transactions WHERE source='receipt' AND txn_date=? AND amount=? AND merged_into IS NULL",
-        (txn_date, -amount)) if normalize(r["merchant"]) == key]
+        "SELECT id, merchant, account_id, card_id FROM transactions WHERE source='receipt' AND txn_date=? AND amount=? AND merged_into IS NULL",
+        (txn_date, -amount)) if normalize(r["merchant"]) == key
+        or (ids.get("account_id") is not None and r["account_id"] == ids.get("account_id"))
+        or (ids.get("card_id") is not None and r["card_id"] == ids.get("card_id"))]
     if same and not allow_duplicate:
-        return {"status": "possible_duplicate", "existing_id": same[0]["id"],
-                "message": "Belanja yang sama (tanggal, jumlah, merchant) sudah tercatat. Tanyakan ke pemilik; "
-                           "ulangi dengan allow_duplicate=true bila memang dua pembelian."}
+        return {"status": "possible_duplicate", "existing_id": same[0]["id"], "existing_merchant": same[0]["merchant"],
+                "message": f"Sudah tercatat belanja dengan tanggal dan jumlah yang sama dari sumber yang sama ('{same[0]['merchant']}'). "
+                           "Tanyakan ke pemilik; ulangi dengan allow_duplicate=true HANYA bila pemilik bilang memang dua pembelian."}
     rule = conn.execute("SELECT category FROM category_rules WHERE pattern=?", (key,)).fetchone()
     cat = clean_text(category, 40).lower() if category else (rule["category"] if rule else None)
     dedupe = hashlib.sha256(f"receipt|{txn_date}|{amount}|{key}|{len(same) + 1}".encode()).hexdigest()

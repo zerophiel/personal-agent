@@ -46,6 +46,17 @@ class RecordExpense(unittest.TestCase):
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0], 2)
         self.assertEqual(spend(conn, 50_000, "KOPI KENANGAN", day="2026-11-06")["status"], "stored")   # other day: fine
 
+    def test_a_resent_screenshot_described_in_other_words_is_still_a_duplicate(self):
+        """Regression 2026-10-28: after /new the bot re-read the same Flazz top-up screenshot, named it differently and stored
+        it a second time (the merchant text was the only key)."""
+        conn = planned()
+        conn.execute("INSERT OR IGNORE INTO accounts(alias,bank,kind,last4) VALUES ('mandiri-utama','Mandiri','main','2701')")
+        conn.commit()
+        self.assertEqual(spend(conn, 100_000, "Isi saldo Flazz (tol)", account_alias="mandiri-utama")["status"], "stored")
+        dup = spend(conn, 100_000, "Isi Flazz BCA (tol)", account_alias="mandiri-utama")
+        self.assertEqual((dup["status"], dup["existing_merchant"]), ("possible_duplicate", "Isi saldo Flazz (tol)"))
+        self.assertEqual(spend(conn, 100_000, "Parkir mall")["status"], "stored")          # no source given: merchant decides
+
     def test_validation(self):
         conn = planned()
         for kw in ({"amount": 0}, {"amount": -5}, {"merchant": "  "}, {"txn_date": "2027-01-01"},
