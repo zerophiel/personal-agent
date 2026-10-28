@@ -22,6 +22,11 @@ November: kesehatan 500k, makan 200k, game-digital 250k, belanja-online 300k, la
 Biggest avoidable costs: game/digital top-ups (PlayStation, Steam, Apple non-One, AWS) and Rp 1.5-2.1M a month of late/overlimit fees and interest. Autodebit or minimum on time on all 7 cards.
 Fixed this session: the current bill is the latest by statement date; the same card+statement date is one bill (duplicates from email + Telegram).
 
+## Notion
+Snapshot pages created 2026-10-28 (private): `Agent` > `Finance` (Rencana gajian, Tagihan kartu, Cicilan kartu dan langganan, Peta jalan bebas utang, Anggaran dan batas) and `Agent` > `General` (empty). Written from the ledger summaries by Claude Code through the Notion connector; no card/account numbers.
+NOT automated yet: a recurring sync needs a Notion integration token (owner runs `make secret-set`), the `Agent` page shared with that integration, and an exporter job in vault-tools that renders the same pages deterministically. Until then the pages are a manual snapshot (refresh by asking).
+Card budgets are `kartu:<category>` (count only rows paid by a card, via `record_expense card_alias`); cash budgets (listrik, internet, transport) count account payments.
+
 ## Open questions for the owner (resume here)
 1. Google One: statements show Rp 175.380 a month on Jenius (Jul-Sep), the owner said 309.000. Which is right?
 2. Anthropic on Jenius Sep: three charges the same day (USD 5.55, 11.10, 22.20); also DeepSeek and Moonshot AI top-ups. Subscription or one-off credits?
