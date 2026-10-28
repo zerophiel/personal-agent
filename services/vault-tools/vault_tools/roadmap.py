@@ -28,16 +28,16 @@ def next_due(due_day: int, today: date) -> date:
     return d if d >= today else add_months(d, 1, due_day)
 
 
-def clear_cards(balances: list[tuple[str, int, int]], capacity: int) -> dict:
+def clear_cards(balances: list[tuple[str, int, int]], capacity: int, extra=None) -> dict:
     """balances: [(alias, outstanding, monthly_interest_bp)]. Each month: pay by highest interest first with
-    `capacity`, then interest accrues on what is left. Returns months needed (None if it never clears) and
-    the total interest paid along the way."""
+    `capacity` (+ `extra(month)`, the cash freed by installments that have ended by then), then interest accrues on
+    what is left. Returns months needed (None if it never clears) and the total interest paid along the way."""
     bal = {a: b for a, b, _ in balances if b > 0}
     rate = {a: r for a, _, r in balances}
     interest = months = 0
     while bal and months < MAX_MONTHS:
         months += 1
-        cap = max(0, capacity)
+        cap = max(0, capacity + (extra(months) if extra else 0))
         for a in sorted(bal, key=lambda k: -rate[k]):
             pay = min(bal[a], cap)
             bal[a] -= pay
@@ -49,7 +49,7 @@ def clear_cards(balances: list[tuple[str, int, int]], capacity: int) -> dict:
                 i = bp_of_idr(bal[a], rate[a])
                 bal[a] += i
                 interest += i
-        if capacity <= 0:
+        if capacity <= 0 and not extra:
             break
     return {"months": months if not bal else None, "interest": interest, "left": sum(bal.values())}
 
@@ -100,7 +100,14 @@ def roadmap(conn, today: date) -> dict:
         recurring = subscriptions.active_total(conn)      # subscriptions and the like keep landing on the cards every month
         capacity = salary - fixed - inst - pot - reserve - sum(a["per_month"] for a in card_inst) - recurring   # next bills already carry them
     card_total = sum(b for _, b, _ in cards)
-    card_result = clear_cards(cards, capacity) if cards and capacity is not None else None
+    first_month = date(payday.year, payday.month, 1)
+
+    def extra(k: int) -> int:
+        """Cash freed by liabilities that ended before the k-th month (1 = this payday's month)."""
+        start = add_months(first_month, k - 1)
+        return sum(amt for d, amt, _ in freed if d < start)
+
+    card_result = clear_cards(cards, capacity, extra) if cards and capacity is not None else None
     card_end = None
     if card_result and card_result["months"]:
         card_end = add_months(date(payday.year, payday.month, 1), card_result["months"] - 1).strftime("%Y-%m")

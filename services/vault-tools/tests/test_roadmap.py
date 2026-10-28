@@ -50,6 +50,20 @@ class LatestStatement(unittest.TestCase):
         self.assertNotIn("40.000.000", tools.summarize_plan(snap))
 
 
+class GrowingCapacity(unittest.TestCase):
+    def test_cash_freed_by_ended_installments_clears_the_cards_sooner(self):
+        flat = rm.clear_cards([("A", 30_000_000, 200)], 500_000)
+        self.assertIsNone(flat["months"])                                         # interest 600k a month beats the 500k capacity
+        grow = rm.clear_cards([("A", 30_000_000, 200)], 500_000, lambda k: 0 if k <= 3 else 3_000_000)
+        self.assertIsNotNone(grow["months"])
+        self.assertLess(grow["months"], 15)
+        self.assertGreater(grow["months"], 3)
+
+    def test_the_card_balance_does_not_clear_while_capacity_is_below_interest(self):
+        r = rm.clear_cards([("A", 10_000_000, 225)], 100_000, lambda k: 0)
+        self.assertIsNone(r["months"])
+
+
 class Recurring(unittest.TestCase):
     def test_subscriptions_shrink_the_card_capacity(self):
         from vault_tools import subscriptions as sub
@@ -129,17 +143,27 @@ class Roadmap(unittest.TestCase):
         self.assertNotIn("Kartu:", rm.format_roadmap(r))
 
     def test_cards_that_cannot_be_cleared_mean_no_debt_free_date(self):
+        conn = connect(":memory:")                                                   # nothing ends later to free any cash
+        tools.set_threshold(conn, "net_salary", 3_000_000)
+        tools.set_threshold(conn, "living_reserve", 3_000_000)                       # capacity 0
+        tools.upsert_card(conn, "bca-1", "BCA", "1111", 5, 25, 10_000_000)
+        statement(conn, 1, 5_000_000, 500_000)
+        r = rm.roadmap(conn, TODAY)
+        self.assertLessEqual(r["capacity"], 0)
+        self.assertIsNone(r["card_result"]["months"])
+        self.assertIsNone(r["debt_free_date"])
+        text = rm.format_roadmap(r)
+        self.assertIn("TIDAK cukup untuk melunasi", text)
+        self.assertIn("belum bisa ditentukan", text)
+
+    def test_negative_capacity_now_but_cards_clear_once_the_pot_and_the_car_end(self):
         conn = full_world()
         tools.set_threshold(conn, "net_salary", 20_100_000)                          # capacity 20.1 - 11.115 - 5.701 - 9 - 3 < 0
         tools.upsert_card(conn, "bca-1", "BCA", "1111", 5, 25, 10_000_000)
         statement(conn, 1, 5_000_000, 500_000)
         r = rm.roadmap(conn, TODAY)
         self.assertLess(r["capacity"], 0)
-        self.assertIsNone(r["card_result"]["months"])
-        self.assertIsNone(r["debt_free_date"])
-        text = rm.format_roadmap(r)
-        self.assertIn("TIDAK cukup untuk melunasi", text)
-        self.assertIn("belum bisa ditentukan", text)
+        self.assertGreater(r["card_result"]["months"], 14)                           # only after the pot ends (Jan 2028)
 
     def test_unknown_salary_does_not_invent_a_date_when_cards_exist(self):
         conn = connect(":memory:")
