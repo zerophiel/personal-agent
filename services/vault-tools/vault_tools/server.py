@@ -357,7 +357,7 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
         rows = conn.execute("SELECT c.alias, s.statement_date, s.due_date, s.total_due, s.minimum_due, s.reconciled, s.paid_at,"
                             " s.paid_amount, s.file_hash"
                             " FROM statements s JOIN cards c ON c.id = s.card_id WHERE (? IS NULL OR c.alias = ?)"
-                            " ORDER BY s.id DESC LIMIT ?",
+                            " ORDER BY s.statement_date DESC, s.id DESC LIMIT ?",
                             (card_alias, card_alias, max(1, min(limit, 30)))).fetchall()
         def ref(h: str) -> str:
             return f" | file_ref {h}.pdf" if os.path.isfile(os.path.join(ingest_dir, h + ".pdf")) else ""

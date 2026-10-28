@@ -85,7 +85,7 @@ def roadmap(conn, today: date) -> dict:
     cards = [(r["alias"], r["owed"], r["rate"] if r["rate"] is not None else default_rate) for r in conn.execute(
         "SELECT c.alias, s.total_due - s.paid_amount AS owed, c.interest_bp_month AS rate FROM statements s"
         " JOIN cards c ON c.id = s.card_id WHERE s.paid_at IS NULL AND s.total_due - s.paid_amount > 0"
-        " AND s.id = (SELECT MAX(id) FROM statements WHERE card_id = s.card_id)")]
+        " AND s.id = (SELECT id FROM statements WHERE card_id = s.card_id ORDER BY statement_date DESC, id DESC LIMIT 1)")]
 
     salary = get_threshold(conn, "net_salary")
     capacity = None

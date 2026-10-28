@@ -32,6 +32,24 @@ class Dates(unittest.TestCase):
         self.assertEqual(rm.next_due(27, date(2026, 10, 27)), date(2026, 10, 27))        # due today still counts
 
 
+class LatestStatement(unittest.TestCase):
+    def test_an_older_statement_entered_later_never_becomes_the_current_bill(self):
+        """Regression: back-filling Jan-Sep after Oct made the September bill look like the open one (49.8M vs 25.6M)."""
+        conn = full_world()
+        tools.upsert_card(conn, "j-1", "Jenius", "0480", 26, 13, 30_000_000)
+        ins = ("INSERT INTO statements(card_id,file_hash,statement_date,due_date,previous_balance,payments,charges,fees,total_due,"
+               "minimum_due,reconciled,recon_diff,ingested_at) VALUES (1,?,?,?,0,0,?,0,?,?,1,0,'t')")
+        conn.execute(ins, ("a" * 64, "2026-10-26", "2026-11-13", 9_000_000, 9_000_000, 2_000_000))     # entered first (newest)
+        conn.execute(ins, ("b" * 64, "2026-09-26", "2026-10-13", 40_000_000, 40_000_000, 4_000_000))   # back-filled later (older)
+        conn.commit()
+        r = rm.roadmap(conn, TODAY)
+        self.assertEqual(r["card_total"], 9_000_000)
+        self.assertEqual(hl.debt_load(conn)["total_debt"], 19 * 5_701_000 + 9_000_000)
+        snap = tools.generate_payday_plan(conn, TODAY)
+        self.assertIn("Rp 9.000.000", " ".join(snap["advice"] + snap["warnings"] + [tools.summarize_plan(snap)]))
+        self.assertNotIn("40.000.000", tools.summarize_plan(snap))
+
+
 class CardSimulation(unittest.TestCase):
     def test_avalanche_clears_and_counts_interest_on_the_remainder_only(self):
         r = rm.clear_cards([("A", 8_000_000, 275), ("B", 6_000_000, 225)], 13_000_000)

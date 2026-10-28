@@ -194,7 +194,7 @@ def debt_load(conn) -> dict:
     cards = conn.execute(
         "SELECT COALESCE(SUM(MAX(0, s.minimum_due - s.paid_amount)),0), COALESCE(SUM(s.total_due - s.paid_amount),0)"
         " FROM statements s WHERE s.paid_at IS NULL"
-        " AND s.id = (SELECT MAX(id) FROM statements WHERE card_id = s.card_id)").fetchone()
+        " AND s.id = (SELECT id FROM statements WHERE card_id = s.card_id ORDER BY statement_date DESC, id DESC LIMIT 1)").fetchone()
     outstanding = conn.execute("SELECT COALESCE(SUM(outstanding),0) FROM debts WHERE tenor_left > 0").fetchone()[0]
     salary = _th(conn, "net_salary")
     monthly = installments + cards[0]

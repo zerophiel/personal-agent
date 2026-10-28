@@ -126,7 +126,7 @@ def record_card_payment(conn, today: date, card_alias: str, amount: int) -> str:
     if amount <= 0:
         raise ValueError("amount harus > 0")
     s = conn.execute("SELECT s.id, s.total_due, s.paid_amount FROM statements s JOIN cards c ON c.id = s.card_id"
-                     " WHERE c.alias=? AND s.paid_at IS NULL ORDER BY s.id DESC LIMIT 1", (card_alias,)).fetchone()
+                     " WHERE c.alias=? AND s.paid_at IS NULL ORDER BY s.statement_date DESC, s.id DESC LIMIT 1", (card_alias,)).fetchone()
     if s is None:
         raise ValueError(f"tidak ada tagihan {card_alias} yang belum dibayar")
     paid = s["paid_amount"] + amount
@@ -293,7 +293,7 @@ def card_advice(conn, snap: dict, payday: date, holidays) -> list[str]:
         "SELECT c.alias, c.interest_bp_month, s.total_due - s.paid_amount AS total_due,"
         " MAX(0, s.minimum_due - s.paid_amount) AS minimum_due FROM statements s JOIN cards c ON c.id = s.card_id"
         " WHERE s.paid_at IS NULL AND s.total_due - s.paid_amount > 0"
-        " AND s.id = (SELECT MAX(id) FROM statements WHERE card_id = s.card_id)"
+        " AND s.id = (SELECT id FROM statements WHERE card_id = s.card_id ORDER BY statement_date DESC, id DESC LIMIT 1)"
         " ORDER BY COALESCE(c.interest_bp_month, ?) DESC", (get_threshold(conn, "default_card_interest_bp", DEFAULT_CARD_INTEREST_BP),)).fetchall()
     default_rate = get_threshold(conn, "default_card_interest_bp", DEFAULT_CARD_INTEREST_BP)
     carried, carried_cost = 0, 0
@@ -448,7 +448,7 @@ def collect_obligations(conn, payday: date, nxt: date, holidays=()) -> list[Obli
             " s.total_due - s.paid_amount AS total_due, MAX(0, s.minimum_due - s.paid_amount) AS minimum_due"
             " FROM statements s JOIN cards c ON c.id = s.card_id"
             " WHERE s.paid_at IS NULL AND s.total_due - s.paid_amount > 0"
-            " AND s.id = (SELECT MAX(id) FROM statements WHERE card_id = s.card_id)"):
+            " AND s.id = (SELECT id FROM statements WHERE card_id = s.card_id ORDER BY statement_date DESC, id DESC LIMIT 1)"):
         obs.append(Obligation("card", r["alias"], date.fromisoformat(r["due_date"]),
                               r["total_due"], r["minimum_due"],
                               late_cost_bp=r["interest_bp_month"] if r["interest_bp_month"] is not None else default_rate,
@@ -546,7 +546,7 @@ def generate_payday_plan(conn, today: date, payday: date | None = None,
                                 "transaksi agar bisa diestimasi). Tanpa itu, seluruh sisa gaji dianggap boleh dipakai melunasi kartu.")
     for r in conn.execute(
             "SELECT c.alias FROM statements s JOIN cards c ON c.id = s.card_id WHERE s.reconciled = 0"
-            " AND s.paid_at IS NULL AND s.id = (SELECT MAX(id) FROM statements WHERE card_id = s.card_id)"):
+            " AND s.paid_at IS NULL AND s.id = (SELECT id FROM statements WHERE card_id = s.card_id ORDER BY statement_date DESC, id DESC LIMIT 1)"):
         snap["warnings"].append(f"Statement {r['alias']} belum cocok saat rekonsiliasi; angka tagihan perlu diperiksa.")
     conn.execute("INSERT INTO plans(payday,snapshot_json,created_at) VALUES (?,?,?)",
                  (payday.isoformat(), json.dumps(snap), datetime.now(timezone.utc).isoformat()))
