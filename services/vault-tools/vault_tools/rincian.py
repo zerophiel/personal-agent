@@ -43,6 +43,12 @@ def build(conn, vault, snap: dict) -> str:
         d["amount"] += t["amount"]
         d["parts"] += 1
 
+    lt = snap.get("living_transfer")
+    if lt and lt.get("pay_to"):                 # the living money to the owner's daily account: one more transfer to make
+        d = transfers.setdefault(lt["pay_to"], {"to": lt["to_alias"], "amount": 0, "parts": 0})
+        d["amount"] += lt["amount"]
+        d["parts"] += 1
+
     def describe(key: str, to_alias: str) -> tuple[str, str]:
         meta = conn.execute("SELECT kind, bank FROM payee_secrets WHERE alias=?", (key,)).fetchone()
         card = cards.get(to_alias)
@@ -69,6 +75,9 @@ def build(conn, vault, snap: dict) -> str:
     out += rows or ["Tidak ada transfer."]
     if missing:
         out.append("*⚠️ Tujuan belum didaftarkan (nomor belum ada)*\n" + "\n".join(missing))
+    if lt and lt.get("pay_to") and lt.get("also_move"):
+        out.append(f"_Tambahan: sisa uang harian {format_idr(lt['also_move'])} yang sudah kamu pegang, bila masih di rekening lain, "
+                   "pindahkan juga ke rekening uang harian (tidak termasuk total di bawah)._")
     out.append(f"*🧾 Total transfer: {format_idr(total)}*" + (f"\n_Belum terdanai (tidak termasuk): {format_idr(sum(u['amount'] for u in snap['unfunded']))}_" if snap.get("unfunded") else ""))
     if app_menu:
         lines = []

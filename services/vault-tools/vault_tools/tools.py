@@ -182,6 +182,9 @@ def data_overview(conn, today: date) -> str:
     where = (f"; disetor ke {EMERGENCY_PAYEE} ({dest['bank']} {dest['last4']})" if dest
              else f"; nomor tujuan belum didaftarkan (/rekening {EMERGENCY_PAYEE} <bank> <nomor>)")
     L.append("DANA DARURAT: " + (f"{format_idr(e['saved'])} dari {format_idr(e['target'])}, {format_idr(e['monthly'])} per gajian{where}" if e else "belum diatur"))
+    daily = conn.execute("SELECT bank, last4 FROM payee_secrets WHERE alias=?", (LIVING_PAYEE,)).fetchone()
+    L.append("REKENING UANG HARIAN: " + (f"{LIVING_PAYEE} ({daily['bank']} {daily['last4']}); uang harian tiap gajian ditransfer ke sini dan belanja harian "
+                                          "hanya dari rekening ini" if daily else f"belum didaftarkan (/rekening {LIVING_PAYEE} <bank> <nomor>)"))
     L.append("PENGELUARAN TETAP")
     for e in conn.execute("SELECT alias, amount, due_day FROM fixed_expenses ORDER BY alias"):
         L.append(f"- {e['alias']} | {format_idr(e['amount'])} | tanggal {e['due_day']}")
@@ -616,11 +619,16 @@ def set_pot_balance(conn, alias: str, balance: int, today: date) -> str:
 # ---- emergency fund: a small buffer so a surprise lands here, not on a credit card ----------
 
 EMERGENCY_PAYEE = "dana-darurat"     # payee alias of the emergency pocket's account number (sent by the owner with /rekening)
+LIVING_PAYEE = "uang-harian"         # payee alias of the account the owner spends daily from (living money only)
+
+
+def _payee(conn, alias: str) -> str | None:
+    row = conn.execute("SELECT alias FROM payee_secrets WHERE alias=? AND kind IN ('account','va')", (alias,)).fetchone()
+    return row["alias"] if row else None
 
 
 def emergency_destination(conn) -> str | None:
-    row = conn.execute("SELECT alias FROM payee_secrets WHERE alias=? AND kind IN ('account','va')", (EMERGENCY_PAYEE,)).fetchone()
-    return row["alias"] if row else None
+    return _payee(conn, EMERGENCY_PAYEE)
 
 
 def emergency_status(conn) -> dict | None:
@@ -828,6 +836,20 @@ def generate_payday_plan(conn, today: date, payday: date | None = None,
                 snap["warnings"].append(
                     f"{f['alias']}: dengan pola ini pot diperkirakan KURANG {format_idr(pr['gap'])} pada {f['due_date']}. Pilihan: kurangi "
                     "langganan/belanja, tambah pemasukan, hitung gaji di hari tenggat, atau bicarakan jadwal dengan penerima.")
+    # the living money goes to the owner's daily account (he spends only from there); kept outside `transfers`, which hold
+    # the salary's obligations, so the cash kept and the spending pace still read the living money as before
+    daily = _payee(conn, LIVING_PAYEE)
+    if daily and snap["reserve"] and snap["cash_to_hold"] > 0:
+        amount = min(snap["reserve"], snap["cash_to_hold"])
+        normal = get_threshold(conn, "living_reserve") or 0
+        elsewhere = normal - snap["reserve"] if str(reserve_source).startswith("sementara") and normal > snap["reserve"] else 0
+        snap["living_transfer"] = {"to_alias": LIVING_PAYEE, "amount": amount, "pay_to": daily, "date": payday.isoformat(),
+                                   "also_move": elsewhere}
+        snap["reminders"].append(
+            f"UANG HARIAN: transfer {format_idr(amount)} dari gaji ke rekening harian ({LIVING_PAYEE})"
+            + (f"; pindahkan juga sisa uang harian {format_idr(elsewhere)} bila masih di rekening lain, supaya seluruh "
+               f"{format_idr(normal)} ada di rekening harian" if elsewhere else "")
+            + ". Belanja harian hanya dari rekening itu.")
     snap["advice"] = card_advice(conn, snap, payday, hol)
     if reserve_source == "belum diset" and snap["advice"]:     # only matters when cards or savings are in play
         snap["warnings"].append("Cadangan hidup harian belum diset: set_threshold living_reserve (atau verifikasi kategori "
@@ -871,6 +893,9 @@ def summarize_plan(snap: dict) -> str:
     if snap.get("reserve"):
         lines.append(f"Cadangan hidup harian: {format_idr(snap['reserve'])} ({snap.get('reserve_source')})")
     lines += [f"> {a}" for a in snap.get("advice", [])]
+    lt = snap.get("living_transfer")
+    if lt:
+        lines.append(f"- {lt['date']} {lt['to_alias']}: {format_idr(lt['amount'])} (uang harian ke rekening harian)")
     lines.append(f"Kas ditahan: {format_idr(snap['cash_to_hold'])}; jatah harian {format_idr(snap['daily_allowance'])}")
     lines += [f"Peringatan: {w}" for w in snap["warnings"]]
     return "\n".join(lines)

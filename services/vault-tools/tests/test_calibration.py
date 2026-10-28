@@ -166,6 +166,29 @@ class LeftoverLivingCash(unittest.TestCase):
             tools.set_leftover_living_cash(conn, -1, NOV_1)
 
 
+class DailyAccount(unittest.TestCase):
+    def test_the_living_money_is_a_transfer_to_the_daily_account_once_registered(self):
+        conn = full_world()                                               # living money 3M
+        tools.set_pot_schedule(conn, "hutang-teman", None, None, NOV_1, pace="sisa")
+        before = tools.generate_payday_plan(conn, NOV_1)
+        self.assertNotIn("living_transfer", before)
+        self.assertIn("REKENING UANG HARIAN: belum didaftarkan", tools.data_overview(conn, NOV_1))
+        vault = PayeeVault(conn, bytes(range(32)))
+        vault.store("uang-harian", "account", "Jago", "103000008786")      # what /rekening does
+        tools.set_leftover_living_cash(conn, 1_200_000, NOV_1)            # last cycle's cash, still in the main account
+        snap = tools.generate_payday_plan(conn, NOV_1)
+        self.assertEqual((snap["living_transfer"]["amount"], snap["living_transfer"]["also_move"]), (1_800_000, 1_200_000))
+        self.assertEqual(snap["cash_to_hold"], 1_800_000)                 # the obligations' arithmetic is unchanged
+        self.assertTrue(any("UANG HARIAN: transfer Rp 1.800.000" in r and "pindahkan juga sisa uang harian Rp 1.200.000" in r
+                            for r in snap["reminders"]))
+        text = rincian.build(conn, vault, snap)
+        self.assertIn("Uang Harian (Jago)", text)
+        self.assertIn("103000008786", text)
+        self.assertIn("Tambahan: sisa uang harian Rp 1.200.000", text)
+        self.assertIn("uang-harian: Rp 1.800.000 (uang harian ke rekening harian)", tools.summarize_plan(snap))
+        self.assertNotIn("103000008786", str(snap) + tools.data_overview(conn, NOV_1))
+
+
 class PotBalance(unittest.TestCase):
     def test_the_balance_read_in_the_bank_app_is_the_new_truth(self):
         conn = full_world()
