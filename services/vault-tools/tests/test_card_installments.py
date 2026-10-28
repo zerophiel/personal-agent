@@ -22,6 +22,33 @@ ITEMS = [{"description": "TOKOPEDIA CICILAN", "amount": 1_000_000, "seq": 3, "to
          {"description": "iPhone EZ Pay", "amount": 2_500_000, "seq": 11, "total": 12}]
 
 
+class Overview(unittest.TestCase):
+    def test_shows_what_is_recorded_without_any_full_number(self):
+        from datetime import date
+        conn = world()
+        conn.execute("UPDATE statements SET paid_amount=total_due, paid_at='2026-10-28' WHERE card_id=1")
+        conn.commit()
+        text = tools.data_overview(conn, date(2026, 10, 28))
+        self.assertIn("bca-1 | BCA | 1111", text)
+        self.assertIn("LUNAS", text)
+        self.assertIn("cicilan-mobil | MTF | Rp 5.701.000 | 19 | autodebit | mandiri-utama", text)
+        self.assertIn("hutang-teman", text)
+        self.assertIn("ipl", text)
+        self.assertNotIn("106879418405", text)
+
+
+class OneCardOneAlias(unittest.TestCase):
+    def test_the_same_card_cannot_be_registered_under_a_second_alias(self):
+        """Regression: 'bca-blibli' and 'jenius-kk' duplicated the BCA and Jenius cards, doubling bills and installments."""
+        conn = world()
+        with self.assertRaises(ValueError) as cm:
+            tools.upsert_card(conn, "bca-blibli", "bca", "1111", 5, 25, 10_000_000)
+        self.assertIn("bca-1", str(cm.exception))
+        tools.upsert_card(conn, "bca-1", "BCA", "1111", 5, 25, 12_000_000)                      # updating the same alias is fine
+        tools.upsert_card(conn, "cimb-1111", "CIMB", "1111", 5, 20, 5_000_000)                   # same digits, other bank: allowed
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM cards").fetchone()[0], 2)
+
+
 class LinkPayees(unittest.TestCase):
     def test_cards_are_pointed_at_the_numbers_the_owner_registered(self):
         from vault_tools.payee_vault import PayeeVault

@@ -104,6 +104,9 @@ def upsert_card(conn: sqlite3.Connection, alias: str, bank: str, last4: str,
         if not 0 <= interest_bp_month <= 1000:
             raise ValueError("interest_bp_month harus 0..1000 (basis poin per bulan, mis. 225 = 2,25%)")
     method, pay_to = resolve_pay(conn, bank, pay_method, pay_to_alias)
+    twin = conn.execute("SELECT alias FROM cards WHERE lower(bank)=lower(?) AND last4=? AND alias != ?", (bank, last4, alias)).fetchone()
+    if twin:      # the same physical card under a second alias would count its bill and installments twice
+        raise ValueError(f"kartu {bank} berakhiran {last4} sudah terdaftar sebagai {twin['alias']}; pakai alias itu")
     conn.execute(
         "INSERT INTO cards(alias,bank,last4,statement_day,due_day,credit_limit,pay_method,pay_to_alias,interest_bp_month)"
         " VALUES (?,?,?,?,?,?,?,?,?)"
@@ -138,6 +141,38 @@ def record_card_payment(conn, today: date, card_alias: str, amount: int) -> str:
     over = f" (kelebihan {format_idr(paid - s['total_due'])}: cek apakah ada salah ketik)" if paid > s["total_due"] else ""
     return (f"{card_alias}: LUNAS{over}." if closed else
             f"{card_alias}: dibayar {format_idr(paid)} dari {format_idr(s['total_due'])}; sisa {format_idr(left)}.")
+
+
+def data_overview(conn, today: date) -> str:
+    """Everything the ledger holds about cards, debts and commitments, as aliases, last 4 digits and amounts. The bot
+    reads this before asking the owner anything, so it never asks for what is already recorded or invents a duplicate."""
+    from . import card_installments, subscriptions
+    L = ["KARTU (alias | bank | 4 digit | limit | cara bayar | tujuan bayar | tagihan terbaru: cetak, jatuh tempo, sisa, status)"]
+    for c in conn.execute("SELECT * FROM cards ORDER BY alias"):
+        s = conn.execute("SELECT * FROM statements WHERE card_id=? ORDER BY statement_date DESC, id DESC LIMIT 1", (c["id"],)).fetchone()
+        bill = (f"{s['statement_date']}, {s['due_date']}, sisa {format_idr(max(0, s['total_due'] - s['paid_amount']))}, "
+                f"{'LUNAS' if s['total_due'] - s['paid_amount'] <= 0 else 'belum lunas'}") if s else "belum ada tagihan"
+        L.append(f"- {c['alias']} | {c['bank']} | {c['last4']} | {format_idr(c['credit_limit'])} | "
+                 f"{'menu aplikasi' if c['pay_method'] == 'app_menu' else 'transfer'} | {c['pay_to_alias'] or 'belum terhubung'} | {bill}")
+    L.append("UTANG / CICILAN BIASA (alias | pemberi | per bulan | sisa angsuran | cara bayar | rekening debet)")
+    for d in conn.execute("SELECT * FROM debts ORDER BY alias"):
+        L.append(f"- {d['alias']} | {d['lender']} | {format_idr(d['installment'])} | {d['tenor_left']} | {d['pay_method']} | {d['debit_account_alias'] or d['pay_to_alias'] or '-'}")
+    L.append("DANA TERIKAT")
+    for f in conn.execute("SELECT * FROM sinking_funds ORDER BY alias"):
+        L.append(f"- {f['alias']} | target {format_idr(f['target'])} | jatuh tempo {f['due_date']} | terkumpul {format_idr(f['saved_so_far'])}")
+    L.append("PENGELUARAN TETAP")
+    for e in conn.execute("SELECT alias, amount, due_day FROM fixed_expenses ORDER BY alias"):
+        L.append(f"- {e['alias']} | {format_idr(e['amount'])} | tanggal {e['due_day']}")
+    L.append("REKENING MILIK PEMILIK")
+    for a in conn.execute("SELECT alias, bank, kind, last4 FROM accounts ORDER BY alias"):
+        L.append(f"- {a['alias']} | {a['bank']} | {a['kind']} | {a['last4'] or '-'}")
+    L.append(f"CICILAN KARTU AKTIF: {format_idr(card_installments.monthly_total(conn))} per bulan | "
+             f"LANGGANAN AKTIF: {format_idr(subscriptions.active_total(conn))} per bulan")
+    th = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM thresholds")}
+    L.append(f"GAJI: {format_idr(th['net_salary']) if 'net_salary' in th else 'belum diset'} | CADANGAN KAS HARIAN: "
+             f"{format_idr(th['living_reserve']) if 'living_reserve' in th else 'belum diset'}")
+    L.append("ANGGARAN: " + ("; ".join(f"{k[7:]} {format_idr(v)}" for k, v in sorted(th.items()) if k.startswith("budget:")) or "belum ada"))
+    return "\n".join(L)
 
 
 def link_card_payees(conn) -> list[str]:

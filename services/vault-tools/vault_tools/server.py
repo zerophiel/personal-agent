@@ -38,7 +38,7 @@ MCP_TOOL_NAMES = ("upsert_card", "upsert_debt", "upsert_expense", "set_threshold
                   "health_check", "list_statements", "record_card_payment", "debt_free_roadmap",
                   "add_owner_name", "suggest_categories", "apply_suggestions", "living_cost_analysis",
                   "record_card_installments", "card_installments_status", "pending_statements", "skip_statement_file",
-                  "upsert_subscription", "subscriptions_status", "set_category_keyword", "link_card_payees")
+                  "upsert_subscription", "subscriptions_status", "set_category_keyword", "link_card_payees", "ringkasan_data")
 
 
 class Installment(BaseModel):
@@ -289,6 +289,14 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
         (simulasi bunga), perkiraan tanggal bebas utang, dan arus kas yang terbebas tiap kewajiban selesai.
         Dihitung kode dengan asumsi yang tertulis di hasilnya; gunakan untuk menjelaskan tujuan jangka panjang."""
         return roadmap.format_roadmap(roadmap.roadmap(conn, today()))
+
+    @mcp.tool()
+    @locked
+    def ringkasan_data() -> str:
+        """RINGKASAN SEMUA DATA TERSIMPAN: kartu (alias, 4 digit, cara bayar, tagihan terbaru dan statusnya), utang dan
+        cicilan, dana terikat, pengeluaran tetap, rekening, langganan, gaji, cadangan, anggaran. WAJIB dipanggil sebelum
+        menanyakan sesuatu ke pemilik, sebelum mencatat kartu/utang/pengeluaran tetap, dan sebelum menyebut sisa tagihan."""
+        return tools.data_overview(conn, today())
 
     @mcp.tool()
     @locked
