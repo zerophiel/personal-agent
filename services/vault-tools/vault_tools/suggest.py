@@ -31,7 +31,8 @@ DEBIT_RULES: list[tuple[str, str]] = [
               r"yakiniku|sushi|ayam|bakso|pizza|burger|bakery|roti|\bfood\b|kantin|mie "),
     ("langganan", r"netflix|spotify|youtube|disney|apple\.com|google (one|play)|icloud|canva|openai|chatgpt"),
     ("belanja-harian", r"indomaret|alfamart|alfamidi|superindo|hypermart|lotte ?mart|ranch market|farmers"),
-    ("kesehatan", r"apotek|apotik|klinik|rumah sakit|\brs\b|kimia farma|guardian|halodoc"),
+    ("kesehatan", r"apotek|apotik|klinik|rumah sakit|\brs\b|\bhos(pital)?\b|siloam|mandaya|hermina|kimia farma|guardian|halodoc"),
+    ("donasi", r"kolekt|katedral|gereja|paroki|\bpgdp\b|persembahan|zakat|infaq"),
     ("utilitas", r"\bpln\b|listrik|pdam|indihome|telkom|biznet|pulsa|paket data"),
 ]
 CREDIT_RULES: list[tuple[str, str]] = [
@@ -84,7 +85,7 @@ def suggest_category(normalized: str, amount: int, owners: list[str], own_last4:
 def groups(conn) -> dict[str, dict]:
     """Uncategorized rows grouped by normalized descriptor: count, total in/out, and the suggestion."""
     owners = owner_names(conn)
-    own_last4 = [r[0] for r in conn.execute("SELECT last4 FROM accounts WHERE last4 IS NOT NULL AND kind != 'pool'")]
+    own_last4 = [r[0] for r in conn.execute("SELECT last4 FROM accounts WHERE last4 IS NOT NULL AND kind != 'pool' UNION SELECT last4 FROM cards")]   # own accounts and own cards
     out: dict[str, dict] = defaultdict(lambda: {"n": 0, "out": 0, "in": 0, "cats": defaultdict(int)})
     for r in conn.execute("SELECT merchant, amount FROM transactions WHERE source IN ('mutation','receipt')"
                           " AND category IS NULL AND merged_into IS NULL"):

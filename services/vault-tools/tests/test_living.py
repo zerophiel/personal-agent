@@ -212,6 +212,20 @@ class Suggestions(unittest.TestCase):
         for desc, sign, want in cases:
             self.assertEqual(sg.suggest_category(desc, sign * 1000, owners, mine), want, desc)
 
+    def test_card_payments_hospitals_and_church_collections(self):
+        mine = ["5855", "5915", "5685"]
+        cases = [
+            ("transfer bi fast ke mega ****5855", -1, "transfer_internal"),
+            ("transfer ke bank lain bank hsbc ****5915", -1, "transfer_internal"),
+            ("transfer bi fast ke dbs ****5685", -1, "transfer_internal"),
+            ("transfer bi fast ke bca ****1234", -1, None),
+            ("transaksi debit qr siloam hos", -1, "kesehatan"),
+            ("pembayaran qr ke pgdp kosambibaru kolekt", -1, "donasi"),
+            ("pembayaran qr ke pgdp katedral kolekte", -1, "donasi"),
+        ]
+        for desc, sign, want in cases:
+            self.assertEqual(sg.suggest_category(desc, sign * 1000, ["danuarta wiratama"], mine), want, desc)
+
     def test_a_pocket_name_is_not_the_event(self):
         """Regression: a pocket called "Gaji Pak Darja" made pocket moves look like salary and interest like income."""
         cases = [
