@@ -24,7 +24,7 @@ from starlette.responses import JSONResponse, PlainTextResponse
 
 from pydantic import BaseModel, Field
 
-from . import card_installments, health, living, mutations, names, reports, rincian as rincian_text, roadmap, statement_pdf, statements, subscriptions, suggest, tools
+from . import card_installments, health, living, mutations, names, reports, rincian as rincian_text, roadmap, simulate, statement_pdf, statements, subscriptions, suggest, tools
 from .ledger import connect
 from .money import format_idr
 from .payee_vault import PayeeVault, has_forbidden_card_data
@@ -42,7 +42,7 @@ MCP_TOOL_NAMES = ("upsert_card", "upsert_debt", "upsert_expense", "set_threshold
                   "health_check", "list_statements", "record_card_payment", "debt_free_roadmap",
                   "add_owner_name", "suggest_categories", "apply_suggestions", "living_cost_analysis",
                   "record_card_installments", "card_installments_status", "pending_statements", "skip_statement_file",
-                  "upsert_subscription", "subscriptions_status", "set_category_keyword", "link_card_payees", "ringkasan_data")
+                  "upsert_subscription", "subscriptions_status", "set_category_keyword", "link_card_payees", "ringkasan_data", "simulasi_skenario", "catat_usulan")
 
 
 class Installment(BaseModel):
@@ -317,6 +317,37 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
         cicilan, dana terikat, pengeluaran tetap, rekening, langganan, gaji, cadangan, anggaran. WAJIB dipanggil sebelum
         menanyakan sesuatu ke pemilik, sebelum mencatat kartu/utang/pengeluaran tetap, dan sebelum menyebut sisa tagihan."""
         return tools.data_overview(conn, today())
+
+    @mcp.tool()
+    @locked
+    def simulasi_skenario(belanja_kartu_per_bulan: int = 0, tunda_pot_bulan: int = 0, bayar_ekstra_sekarang: int = 0,
+                          hemat_per_bulan: int = 0, cadangan_kas: int | None = None, bulan: int = 12) -> str:
+        """SIMULASI "bagaimana kalau" (dihitung kode, jangan dihitung sendiri). Isi hanya yang berubah:
+        belanja_kartu_per_bulan = belanja kartu baru tiap bulan (0 = tidak belanja kartu); tunda_pot_bulan = setoran pot
+        hutang ditunda N bulan; bayar_ekstra_sekarang = uang sekali untuk melunasi kartu (mis. hasil jual barang, saldo
+        yang sudah dipegang); hemat_per_bulan = penghematan tetap per bulan (mis. stop langganan, potong belanja online);
+        cadangan_kas = ganti cadangan kas harian. Hasil: lunas kapan, total bunga, sisa bulanan, arah saldo kartu."""
+        today_ = today()
+        base = simulate.simulate(conn, today_, months=max(1, min(bulan, 36)))
+        sc = simulate.simulate(conn, today_, belanja_kartu=belanja_kartu_per_bulan, tunda_pot=tunda_pot_bulan,
+                               ekstra_sekarang=bayar_ekstra_sekarang, hemat=hemat_per_bulan, reserve=cadangan_kas, months=max(1, min(bulan, 36)))
+        return simulate.format_result(base, sc)
+
+    @mcp.tool()
+    @locked
+    def catat_usulan(judul: str, kebutuhan: str) -> str:
+        """Catat USULAN bila kamu menabrak batas (butuh alat/perhitungan/perintah yang belum ada). Jangan mencari jalan
+        memutar. judul: satu kalimat; kebutuhan: apa yang diminta pemilik dan apa yang kurang. Pemilik memutuskan, manusia
+        yang membuatnya; kamu tidak bisa mengubah alat atau instruksimu sendiri."""
+        title, detail = " ".join(str(judul).split())[:120], " ".join(str(kebutuhan).split())[:600]
+        if not title or not detail:
+            raise ValueError("judul dan kebutuhan wajib")
+        dup = conn.execute("SELECT id FROM feature_requests WHERE lower(title)=lower(?) AND status IN ('baru','dikerjakan')", (title,)).fetchone()
+        if dup:
+            return f"Usulan serupa sudah tercatat (#{dup['id']})."
+        cur = conn.execute("INSERT INTO feature_requests(created_at,title,detail) VALUES (?,?,?)", (datetime.now(timezone.utc).isoformat(), title, detail))
+        conn.commit()
+        return f"Usulan #{cur.lastrowid} tercatat: {title}. Katakan ke pemilik bahwa ini menunggu dikerjakan; lihat daftar di /usulan."
 
     @mcp.tool()
     @locked

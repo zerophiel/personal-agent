@@ -10,7 +10,7 @@ from datetime import date
 from . import card_installments, health, roadmap, subscriptions, tools
 from .money import format_idr
 
-NAMES = ("bantuan", "rencana", "tagihan", "cicilan", "anggaran", "peta", "kondisi", "data")
+NAMES = ("bantuan", "rencana", "tagihan", "cicilan", "anggaran", "peta", "kondisi", "data", "usulan")
 
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des")
 
@@ -96,6 +96,7 @@ Tujuan kita: bebas pinjaman dan keuangan yang membaik bertahap.
 <code>/peta</code> peta jalan bebas utang
 <code>/kondisi</code> penilaian kesehatan keuangan
 <code>/data</code> semua data yang tersimpan
+<code>/usulan</code> kemampuan baru yang saya minta dibuatkan
 <code>/rincian</code> nomor tujuan transfer lengkap (terhapus 24 jam)
 <code>/rekening</code> dan <code>/va</code> simpan nomor: <code>/rekening alias bank nomor</code>
 <code>/new</code> percakapan baru (data tidak hilang)
@@ -243,9 +244,19 @@ def _data(conn, today: date) -> str:
     return "\n\n".join(out)
 
 
+def _usulan(conn, today: date) -> str:
+    rows = conn.execute("SELECT id, created_at, title, detail, status FROM feature_requests ORDER BY CASE status WHEN 'baru' THEN 0 WHEN 'dikerjakan' THEN 1 ELSE 2 END, id DESC LIMIT 15").fetchall()
+    if not rows:
+        return f"💡 {b('Usulan')}\nBelum ada. Kalau saya menabrak batas, saya catat di sini agar bisa dibuatkan."
+    mark = {"baru": "🆕", "dikerjakan": "🔧", "selesai": "✅", "ditolak": "⛔"}
+    out = [f"💡 {b('Usulan kemampuan baru')}\n<i>Saya tidak bisa mengubah alat sendiri; usulan ini menunggu dikerjakan manusia.</i>"]
+    out += [f"{mark[r['status']]} {b('#' + str(r['id']) + ' ' + r['title'])}\n    {e(r['detail'][:200])}\n    <i>{e(r['status'])} · {e(tgl(r['created_at']))}</i>" for r in rows]
+    return "\n\n".join(out)
+
+
 def build(conn, name: str, today: date) -> str:
     fn = {"bantuan": lambda c, t: HELP, "rencana": _rencana, "tagihan": _tagihan, "cicilan": _cicilan,
-          "anggaran": _anggaran, "peta": _peta, "kondisi": _kondisi, "data": _data}.get(name)
+          "anggaran": _anggaran, "peta": _peta, "kondisi": _kondisi, "data": _data, "usulan": _usulan}.get(name)
     if fn is None:
         raise ValueError("laporan tidak dikenal")
     return fn(conn, today)
