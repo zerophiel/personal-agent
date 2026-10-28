@@ -140,6 +140,23 @@ def record_card_payment(conn, today: date, card_alias: str, amount: int) -> str:
             f"{card_alias}: dibayar {format_idr(paid)} dari {format_idr(s['total_due'])}; sisa {format_idr(left)}.")
 
 
+def link_card_payees(conn) -> list[str]:
+    """Point each transfer-paid card at the payee the owner has registered for it: a stored card number with the same
+    last 4 digits, and for Jenius the owner's Jenius account. Cards already linked are left alone."""
+    out = []
+    for c in conn.execute("SELECT alias, bank, last4 FROM cards WHERE pay_method='transfer' AND pay_to_alias IS NULL").fetchall():
+        if c["bank"].lower().startswith("jenius"):
+            hit = conn.execute("SELECT alias FROM payee_secrets WHERE kind='account' AND lower(bank) IN ('jenius','btpn','smbc')"
+                               " ORDER BY created_at DESC LIMIT 1").fetchone()
+        else:
+            hit = conn.execute("SELECT alias FROM payee_secrets WHERE kind='card' AND last4=? ORDER BY created_at DESC LIMIT 1", (c["last4"],)).fetchone()
+        if hit:
+            conn.execute("UPDATE cards SET pay_to_alias=? WHERE alias=?", (hit["alias"], c["alias"]))
+            out.append(f"{c['alias']} -> {hit['alias']}")
+    conn.commit()
+    return out or ["Tidak ada kartu yang bisa dihubungkan: nomor kartu atau rekening tujuan belum didaftarkan."]
+
+
 def upsert_debt(conn, alias: str, lender: str, outstanding: int, installment: int,
                 tenor_left: int, due_day: int, rate_bp: int | None = None,
                 pay_method: str | None = None, pay_to_alias: str | None = None,

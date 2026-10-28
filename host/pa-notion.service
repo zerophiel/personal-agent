@@ -1,0 +1,6 @@
+[Unit]
+Description=Notion snapshot of the finance picture (no LLM)
+After=docker.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker exec personal-agent-vault-tools-1 python -m vault_tools.notion_sync

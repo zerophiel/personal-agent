@@ -1,0 +1,7 @@
+[Unit]
+Description=Notion snapshot daily 06:30 WIB (after the 06:00 statement ingest)
+[Timer]
+OnCalendar=*-*-* 06:30:00 Asia/Jakarta
+Persistent=true
+[Install]
+WantedBy=timers.target

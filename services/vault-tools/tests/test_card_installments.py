@@ -22,6 +22,23 @@ ITEMS = [{"description": "TOKOPEDIA CICILAN", "amount": 1_000_000, "seq": 3, "to
          {"description": "iPhone EZ Pay", "amount": 2_500_000, "seq": 11, "total": 12}]
 
 
+class LinkPayees(unittest.TestCase):
+    def test_cards_are_pointed_at_the_numbers_the_owner_registered(self):
+        from vault_tools.payee_vault import PayeeVault
+        conn = world()
+        tools.upsert_card(conn, "jenius-0480", "Jenius", "0480", 26, 13, 30_000_000)
+        tools.upsert_card(conn, "mandiri-4365", "Mandiri", "4365", 16, 5, 10_000_000)               # paid through the app: left alone
+        self.assertIn("belum didaftarkan", tools.link_card_payees(conn)[0])
+        v = PayeeVault(conn, bytes(range(32)))
+        v.store("num-1111", "card", "?", "4111111111111111")                                         # matches bca-1 (last4 1111)
+        v.store("jenius-akun", "account", "Jenius", "123456784375")
+        out = tools.link_card_payees(conn)
+        self.assertEqual(sorted(out), ["bca-1 -> num-1111", "jenius-0480 -> jenius-akun"])
+        got = {r["alias"]: r["pay_to_alias"] for r in conn.execute("SELECT alias, pay_to_alias FROM cards")}
+        self.assertEqual((got["bca-1"], got["jenius-0480"], got["mandiri-4365"]), ("num-1111", "jenius-akun", None))
+        self.assertIn("belum didaftarkan", tools.link_card_payees(conn)[0])                         # idempotent
+
+
 class Installments(unittest.TestCase):
     def test_records_and_derives_remaining_months_and_end(self):
         conn = world()

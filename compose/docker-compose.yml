@@ -50,9 +50,9 @@ services:
     <<: *hardened
     build: ../services/vault-tools
     environment:
-      HTTPS_PROXY: http://squid-vault:3128   # Notion sync (later); everything else stays internal
+      HTTPS_PROXY: http://squid-vault:3128   # Notion sync only (api.notion.com); everything else stays internal
       NO_PROXY: localhost,127.0.0.1
-    secrets: [vault_tools_key, vault_tools_mcp_token, vault_tools_internal_token, pdf_passwords]
+    secrets: [vault_tools_key, vault_tools_mcp_token, vault_tools_internal_token, pdf_passwords, notion_token]
     volumes:
       - /opt/personal-agent-data/vault-tools:/data
       - /opt/personal-agent-data/ingest:/ingest:ro   # statement drop folder: ingest writes, vault-tools reads
@@ -137,3 +137,5 @@ secrets:
     file: /opt/personal-agent-secrets/gmail_ingest_client
   pdf_passwords:   # JSON {"bank": ["password", ...]}; set with `make secret-set NAME=pdf_passwords`
     file: /opt/personal-agent-secrets/pdf_passwords
+  notion_token:    # internal integration token; set with `make secret-set NAME=notion_token`
+    file: /opt/personal-agent-secrets/notion_token
