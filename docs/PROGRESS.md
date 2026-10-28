@@ -74,8 +74,21 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 - Verified live: payday-list one-shot (numbers exact, asked for leftover living cash, ran the audit, recorded nothing) and a
   receipt-image one-shot (Sonnet vision read Rp 125.000 correctly).
 
+## Accuracy layers (2026-10-28, owner: "akurasi 99,99%, tidak boleh salah hitung")
+- Self-checks (`vault_tools/invariants.py`) run inside every payday plan and simulation: transfers + cash kept = salary, whole
+  positive rupiah, nothing above a bill, paid + unfunded = bill, living money never used for saving-type items, card books balance,
+  pots within target. A violation raises CalculationError: the numbers are refused, never shown.
+- Property tests: 200 random ledgers in the suite; a one-off stress run of 3000 found 0 violations. The property test found one real
+  bug first: an overdue card's balance above the minimum outranked the living money (fixed: only the minimum is urgent).
+- Number guard (cardguard plugin hooks `pre_llm_call`, `post_tool_call`, `transform_llm_output`): every 'Rp ...' in the bot's answer
+  must match a tool result or the owner's own words in that session, else a visible 'Cek angka' warning is appended. Live test:
+  tool numbers pass with no warning; asked for a sum, the bot refused to calculate (SOUL).
+- Duplicate expenses: same date + amount + source account/card is a duplicate whatever the merchant text (a re-sent Flazz
+  screenshot was stored twice after /new; corrected in the ledger, nothing deleted). Transfers to own accounts are not spending.
+- Owner decided on 2026-10-28 (via the bot) to count the 31 Jan 2028 salary: `due_payday=1`; projection 133.539.315, short 1.460.685.
+
 ## Open questions for the owner (resume here)
-1. Count the 31 Jan 2028 salary for the pot (`atur_jadwal_pot ... pakai_gaji_hari_tenggat=true`)? Risk: salary a day late = transfer late.
+1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
 2. Closing the pot gap without the children's needs: games (owner's own), apps not marked `wajib`, or talking to the friend.
 3. Mark each app `wajib` or cuttable: Anthropic Max (kept on purpose), Google One, Apple One, Netflix, Spotify, Microsoft 365,
    Squarespace workspace + domain (email), Telkomsel.
