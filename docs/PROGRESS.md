@@ -36,10 +36,10 @@ Roadmap now subtracts confirmed subscriptions and grows the card-clearing capaci
 
 ## Bot calibration from the owner's real chat (2026-10-28)
 Findings and fixes: the bot invented its own totals ("defisit 23 juta") -> `simulasi_skenario` (code-computed what-if: pot deferral, extra money now, savings, new card spending) and three labelled numbers in SOUL; it said "no simulation tool" three times -> simulator; it refused changes silently -> `catat_usulan` + `/usulan` (the bot cannot modify its own tools by design: prompt-injection risk; a human builds approved requests); it answered bare "1"/"ya" with the previous answer again -> SOUL rule; it said "alat" and mixed Anda/kamu -> "kamu", no tool jargon; it scanned documents in chat -> read guard (3 re-reads per 30 min). Owner preferences now in SOUL: health costs are covered by the employer, children's school/lessons untouchable, Claude Max kept on purpose, card use nearly stopped for 2 months.
-Facts from the chat now in the ledger: Coway schedule (400k to Jan 2027, 270k to Jun 2027, two 270k to Aug 2028, recorded flat at 1.21M), Anthropic Max 1.95M/month active, Netflix 186k kept, Google One ~309k, Catchplay/GoPro/AWS/Steam/PlayStation ended. Active subscriptions 6.25M/month; roadmap capacity is about -3.1M/month, so card balances rise until installments end (simulator baseline: ~44.8M after 12 months). Next: model the Coway step-downs per month (the flat 1.21M overstates Feb 2027 onwards).
+Facts from the chat now in the ledger: Coway schedule (400k to Jan 2027, 270k to Jun 2027, two 270k to Aug 2028, recorded flat at 1.21M), Anthropic Max 1.95M/month active, Netflix 186k kept, Google One ~309k, Catchplay/GoPro/AWS/Steam/PlayStation ended. Active subscriptions 6.25M/month. SUPERSEDED: the "-3.1M/month" capacity and the rising card balance (~44.8M) were a double count (the open statements already held that month's instalments and subscriptions); see Recalibration v2.
 
 ## Pot = goal with a deadline (2026-10-28)
-The friend's debt is a single transfer of Rp 135M on 31 Jan 2028; the pot deposits are flexible. `sinking_funds.low_amount/low_until` hold an optional low phase; `tools.pot_schedule` spreads the rest evenly afterwards so the target is still met; plan, roadmap (capacity steps) and simulator (`setoran_pot_awal`, `setoran_pot_awal_bulan`) all use it; bot tool `atur_jadwal_pot` saves it after the owner agrees. Real-data comparison (16 cycles, no new card spending, Coway flat 1.21M): even 9M -> card balance ~40M in Jan 2028, interest ~12.6M; 5M until Jun 2027 then ~15M -> ~32.8M, ~5.3M interest (best of those tried); 3M or 0M early clears the cards by ~May 2027 but the catch-up (18-22.5M/month) pushes balances back up. No pattern fixes the ~3M/month gap (subscriptions 6.25M incl. Claude Max and Coway) until installments end. No schedule saved yet: owner decides.
+The friend's debt is a single transfer of Rp 135M on 31 Jan 2028; the pot deposits are flexible. `sinking_funds.low_amount/low_until` hold an optional low phase; `tools.pot_schedule` spreads the rest evenly afterwards so the target is still met; plan, roadmap (capacity steps) and simulator (`setoran_pot_awal`, `setoran_pot_awal_bulan`) all use it; bot tool `atur_jadwal_pot` saves it after the owner agrees. Real-data comparison (16 cycles, no new card spending, Coway flat 1.21M): even 9M -> card balance ~40M in Jan 2028, interest ~12.6M; 5M until Jun 2027 then ~15M -> ~32.8M, ~5.3M interest (best of those tried); 3M or 0M early clears the cards by ~May 2027 but the catch-up (18-22.5M/month) pushes balances back up. SUPERSEDED by Recalibration v2 (these numbers carried the double count).
 
 ## Notion
 Snapshot pages created 2026-10-28 (private): `Agent` > `Finance` (Rencana gajian, Tagihan kartu, Cicilan kartu dan langganan, Peta jalan bebas utang, Anggaran dan batas) and `Agent` > `General` (empty). Written from the ledger summaries by Claude Code through the Notion connector; no card/account numbers.
@@ -47,21 +47,48 @@ AUTOMATED since 2026-10-28: `vault_tools/notion_sync.py` (no LLM) rewrites the f
 Card payment targets: Mandiri via app menu; BCA, HSBC, CIMB, Mega, DBS transfer to the card number; Jenius transfer to the owner's Jenius account. The owner registers numbers in the vault bot (card number as a plain message, `/rekening` for the Jenius account); `link_card_payees` then fills `cards.pay_to_alias` by last 4 digits. A leftover test payee `num-1111` exists from the early spike (not deleted automatically).
 Card budgets are `kartu:<category>` (count only rows paid by a card, via `record_expense card_alias`); cash budgets (listrik, internet, transport) count account payments.
 
+## Recalibration v2 (2026-10-28; owner: accuracy first, effort high approved)
+- Simulator is statement-based (cycle 1 pays the open statements; later cycles = carry + interest + that statement month's
+  instalments and subscriptions + card spending beyond the living money). Roadmap, `sinking_status` and the payday plan use it.
+- Payday window: asked within 7 days after payday (the owner pays everything on the 1st) the plan is for the salary just
+  received (`current_payday`). The living reserve now protects the pot and the emergency fund too (a pot can never squeeze it).
+- Pot pattern `sisa` (cards first, pot takes the rest), set on `hutang-teman` (owner asked for small-first, growing deposits and
+  never being squeezed). Real data: cards clean after the Dec 2026 bill, card interest ~23k total (even 9M: ~7.2M interest,
+  cards at ~33M). Projection on 31 Jan 2028: 121.437.703, short 13.562.297; counting the 31 Jan 2028 salary (Monday, the due
+  date itself; `due_payday`, NOT set: owner's decision): 133.539.315, short 1.460.685. Card spending beyond the 7.5M living money
+  is the big risk (+1M/month -> short 27.6M).
+- Emergency fund: `emergency_target` 3M, `emergency_monthly` 500k, `emergency_saved` set only via `dana_darurat(saldo)`.
+- New tools: `periksa_data` (+ `/periksa`; also feeds "Data:" warnings into the payday plan), `saldo_pot`, `dana_darurat`,
+  `sisa_uang_harian` (this payday only), `atur_jadwal_pot(pola, pakai_gaji_hari_tenggat)`, `upsert_subscription(berakhir, wajib)`,
+  `simulasi_skenario(pola_pot, gaji_hari_tenggat)`.
+- Data: Coway split per contract with end months (coway-cs 400k to 2027-01, unit-1 270k to 2027-06, unit-2 540k to 2028-08);
+  `rockstar-gym` marked `essential` (Gracia's gym). Card lines: 63/63 statements `cocok` after the re-read; instalments matched by
+  exact amount (IPREG 152.097, MID*Tokopedia 378.922), M-BCA credits are payments, purchases credited back are netted (Aug 2026:
+  22.26M).
+- Bot: `reasoning_effort: high`, vision and compression on claude-sonnet-5-5 (titles stay Haiku). Evidence: 197 replies / 256 tool
+  calls on 27-28 Oct, 1 tool error (vision on a PDF), 2 "answer first, check later" slips; all 63 model-recorded statement totals
+  reconcile with the code-read lines. Spend: Telegram 3.4-6 USD/day on the two setup days; calibration one-shots cost more than that.
+  Hermes shows `cost_status: unknown` for Sonnet 5.5: the USD 45 vault limit must be checked in the Console.
+- Owner rules (SOUL): children's needs never proposed as cuts; games are the owner's own spending; apps asked per app.
+- Calibration is manual on request: `docs/calibration.md` + `ops/calibration/` (no scheduler, by the owner's choice).
+- Verified live: payday-list one-shot (numbers exact, asked for leftover living cash, ran the audit, recorded nothing) and a
+  receipt-image one-shot (Sonnet vision read Rp 125.000 correctly).
+
 ## Open questions for the owner (resume here)
-1. Google One: statements show Rp 175.380 a month on Jenius (Jul-Sep), the owner said 309.000. Which is right?
-2. Anthropic on Jenius Sep: three charges the same day (USD 5.55, 11.10, 22.20); also DeepSeek and Moonshot AI top-ups. Subscription or one-off credits?
-3. Squarespace workspace (304k), Catchplay, AWS: still used? GoPro and domain: owner wants to stop them.
-4. SPayLater installment of 312.668 in November: tenor, total remaining; Coway monthly total (three charges seen in Oct).
-5. Listrik (token, ~2.3M), internet (~0.54M): due day and how paid, to become fixed expenses; transport ~1M budget.
-6. BCA October mutation as text PDF; BCA card Sep/Oct and Jenius Oct statements for installment scan.
-7. Sender allowlist: rejected senders are notification addresses (DBS, Mandiri, Mega) and `consumer@collection.cimbniaga.co.id` (CIMB collections: the owner should check whether it is a late-payment notice). Do not widen without the owner.
-8. Notion sync: needs a Notion integration token (owner runs `make secret-set`) and the Agent/Finance page shared with the integration; exporter not built yet.
-9. Decide the card/pot strategy (reduce new card spending, or Option B deferral) and then set the real `living_reserve`.
+1. Count the 31 Jan 2028 salary for the pot (`atur_jadwal_pot ... pakai_gaji_hari_tenggat=true`)? Risk: salary a day late = transfer late.
+2. Closing the pot gap without the children's needs: games (owner's own), apps not marked `wajib`, or talking to the friend.
+3. Mark each app `wajib` or cuttable: Anthropic Max (kept on purpose), Google One, Apple One, Netflix, Spotify, Microsoft 365,
+   Squarespace workspace + domain (email), Telkomsel.
+4. Google One Oct 2.69M (owner: downgraded to ~300k from next month) and Coway on Mega (760k x2 + 400k in Oct vs 1.21M recorded):
+   check on the November statements (the audit flags them again if they repeat).
+5. MID*Tokopedia 204.071 every month on HSBC: an instalment that is not recorded yet?
+6. Listrik and internet as fixed expenses (due day, how paid); sender allowlist (CIMB collections address) only with the owner.
 
 ## Next steps
-- Verify Google One / Anthropic from statements, record confirmed subscriptions, add listrik/internet as fixed expenses.
-- Recompute `living_cost_analysis` with cards and subscriptions separated; propose and set the final `living_reserve`; regenerate the payday plan.
-- Build the Notion exporter; tune per-card `interest_bp_month`; remaining plan: M3 front/control/applier, M4 comms, M2 gate checks (`docs/assumptions.md`).
+- Owner: `/new` in Telegram. On 1 Nov ask for the payday list and give the leftover living cash; after paying, tell the bot (card
+  payments, pot balance, emergency fund balance).
+- After the November statements: calibration per `docs/calibration.md` (Google One, Apple, Coway, bot quality, spend).
+- Remaining plan: M3 front/control/applier, M4 comms, M2 gate checks (`docs/assumptions.md`).
 
 ## Operating notes
 - Deploy: `rsync` from the worktree ROOT (never a subfolder: `--delete` wipes the server tree), back up `ledger.db` first, rebuild `vault-tools`, restart `vault`. Owner must `/new` in Telegram after tool or SOUL changes (owner plans to do it once data and system are done).

@@ -279,7 +279,9 @@ def reserve_for(conn, payday: date) -> tuple[int | None, str]:
     last cycle) applies only to paydays up to `living_reserve_override_until` (YYYYMMDD); later plans use the normal one."""
     ov, until = get_threshold(conn, "living_reserve_override"), get_threshold(conn, "living_reserve_override_until")
     if ov is not None and until and int(payday.strftime("%Y%m%d")) <= until:
-        return ov, f"sementara (saldo awal ikut dipakai), berlaku sampai {str(until)[:4]}-{str(until)[4:6]}-{str(until)[6:]}"
+        normal = get_threshold(conn, "living_reserve")
+        return ov, (f"sementara: dari gaji ini hanya diambil {format_idr(ov)}, karena pemilik masih memegang sisa uang harian yang sudah "
+                    f"dicatat; total uang harian tetap {format_idr(normal or ov)}; berlaku sampai {str(until)[:4]}-{str(until)[4:6]}-{str(until)[6:]}")
     return get_threshold(conn, "living_reserve"), "diset pemilik"
 
 
