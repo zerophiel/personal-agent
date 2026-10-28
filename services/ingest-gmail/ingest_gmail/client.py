@@ -82,6 +82,20 @@ class GmailClient:
                 break
         return ids[:limit]
 
+    def search_message_ids(self, query: str, limit: int = 200) -> list[str]:
+        """Message ids matching a Gmail search (no label needed)."""
+        ids, token = [], None
+        while len(ids) < limit:
+            params = {"q": query, "maxResults": 100}
+            if token:
+                params["pageToken"] = token
+            page = self._get("messages", params)
+            ids += [m["id"] for m in page.get("messages", [])]
+            token = page.get("nextPageToken")
+            if not token:
+                break
+        return ids[:limit]
+
     def get_message(self, message_id: str) -> dict:
         return self._get(f"messages/{message_id}", {"format": "full"})
 

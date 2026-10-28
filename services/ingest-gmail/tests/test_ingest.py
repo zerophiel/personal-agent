@@ -101,6 +101,20 @@ class FakeClient:
         return self.atts[aid]
 
 
+class SearchedClient(FakeClient):
+    """Statements the owner never labelled are found by a sender search instead."""
+    def __init__(self, labelled, unlabelled, **kw):
+        super().__init__({**labelled, **unlabelled}, **kw)
+        self.labelled, self.queries = list(labelled), []
+
+    def list_message_ids(self, label_id):
+        return list(self.labelled)
+
+    def search_message_ids(self, query, limit=200):
+        self.queries.append(query)
+        return [m for m in self.msgs if m not in self.labelled]
+
+
 class SenderConfig(unittest.TestCase):
     def test_shipped_config_loads_and_covers_mega_variants(self):
         from ingest_gmail.__main__ import load_senders
@@ -136,6 +150,22 @@ class Run(unittest.TestCase):
 
     def pdfs(self):
         return sorted(f for f in os.listdir(self.drop) if f.endswith(".pdf"))
+
+    def test_unlabelled_statement_is_found_by_the_sender_search_and_still_checked(self):
+        self.cfg.search_senders = [DBS]
+        spoof = message(frm="bank@evil.example", ar="mx.google.com; dkim=pass header.d=evil.example; dmarc=pass header.from=evil.example")
+        c = SearchedClient({}, {"m1": message(), "m2": spoof})
+        s = runmod.run(c, self.cfg)
+        self.assertEqual(s["errors"], 0)
+        self.assertIn(f"from:({DBS}) has:attachment filename:pdf newer_than:400d", c.queries)
+        types = sorted(e["type"] + ":" + e.get("reason", e.get("bank", "")) for e in self.events())
+        self.assertEqual(types, ["new_statement:dbs", "rejected:sender_not_allowlisted"])       # the spoofer gains nothing
+        self.assertEqual(len([n for n in os.listdir(self.drop) if n.endswith(".pdf")]), 1)
+
+    def test_without_search_senders_nothing_is_searched(self):
+        c = SearchedClient({}, {"m1": message()})
+        runmod.run(c, self.cfg)
+        self.assertEqual((c.queries, self.events()), ([], []))
 
     def test_good_email_stores_hash_named_pdf_and_event(self):
         s = runmod.run(FakeClient({"m1": message()}), self.cfg)

@@ -18,6 +18,7 @@ from .client import GmailError, TokenError
 LABEL = "Keuangan/Kartu Kredit"
 MAX_ATTACHMENT = 15 * 1024 * 1024
 RETENTION_DAYS = 90
+SEARCH_DAYS = 400
 
 
 @dataclass
@@ -28,6 +29,8 @@ class Config:
     org_domains: dict[str, str] = field(default_factory=dict)   # bank key -> parent domain
     label: str = LABEL
     retention_days: int = RETENTION_DAYS
+    search_days: int = SEARCH_DAYS
+    search_senders: list[str] = field(default_factory=list)   # also look up these allowlisted senders without a label
 
 
 def emit(cfg: Config, event: dict, now=time.time) -> None:
@@ -121,7 +124,16 @@ def run(client, cfg: Config, now=time.time) -> dict:
             return summary
         state = _state(cfg)
         done = {r[0] for r in state.execute("SELECT message_id FROM processed")}
-        for mid in client.list_message_ids(label_id):
+        ids = list(client.list_message_ids(label_id))
+        if cfg.search_senders:
+            # statements are not always labelled; the sender allowlist plus the DKIM/DMARC check is the real gate
+            q = f"from:({' OR '.join(cfg.search_senders)}) has:attachment filename:pdf newer_than:{cfg.search_days}d"
+            try:
+                ids += [m for m in client.search_message_ids(q) if m not in ids]
+            except GmailError:
+                emit(cfg, {"type": "error", "reason": "gmail_error"}, now)
+                summary["errors"] += 1
+        for mid in ids:
             if mid in done:
                 continue
             try:

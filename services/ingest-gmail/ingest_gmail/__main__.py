@@ -28,6 +28,7 @@ def main() -> int:
                  org_domains={k: b["org_domain"] for k, b in banks.items()},
                  drop_dir=os.environ.get("DROP_DIR", "/ingest"),
                  state_db=os.environ.get("STATE_DB", "/state/ingest.db"))
+    cfg.search_senders = sorted(cfg.senders)
     summary = run(GmailClient(load("gmail_ingest_client"), load("gmail_ingest_token")), cfg)
     print(f"ingest-gmail: {summary}")
     return 1 if summary["errors"] else 0
