@@ -35,7 +35,9 @@ class Reconcile(unittest.TestCase):
         for _ in range(300):
             p, pay, ch, fee = (rng.randint(0, 9_000_000) for _ in range(4))
             self.assertTrue(reconcile(p, pay, ch, fee, p - pay + ch + fee).ok)
-            self.assertFalse(reconcile(p, pay, ch, fee, p - pay + ch + fee + 1).ok)
+            self.assertTrue(reconcile(p, pay, ch, fee, p - pay + ch + fee + 3).ok)           # cents rounding
+            self.assertFalse(reconcile(p, pay, ch, fee, p - pay + ch + fee + 4).ok)
+            self.assertFalse(reconcile(p, pay, ch, fee, p - pay + ch + fee - 4).ok)
 
 
 class Ledger(unittest.TestCase):

@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from .money import check_idr
 
 
+ROUNDING_TOLERANCE = 3     # Rp: statements print cents, the figures are whole Rupiah; a diff this small is rounding
+
+
 @dataclass(frozen=True)
 class Reconciliation:
     ok: bool
@@ -24,4 +27,4 @@ def reconcile(previous_balance: int, payments: int, charges: int, fees: int,
         check_idr(v)
     expected = previous_balance - payments + charges + fees
     diff = stated_total - expected
-    return Reconciliation(diff == 0, expected, diff)
+    return Reconciliation(abs(diff) <= ROUNDING_TOLERANCE, expected, diff)
