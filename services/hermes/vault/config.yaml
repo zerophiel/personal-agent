@@ -76,3 +76,8 @@ mcp_servers:
     tools:
       resources: false
       prompts: false
+
+# /new, /clear, /reset and /undo only drop the chat context (the ledger is untouched) and only the owner can send them:
+# no confirmation prompt. The bot cannot save this itself because config.yaml is mounted read-only.
+approvals:
+  destructive_slash_confirm: false
