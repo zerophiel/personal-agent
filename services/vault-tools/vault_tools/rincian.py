@@ -24,13 +24,16 @@ def build(conn, vault, snap: dict) -> str:
     transfers: dict[str, dict] = {}          # destination key -> {title, kind, amount, parts}
     app_menu: dict[str, int] = {}
     autodebit: list[dict] = []
-    savings = 0
+    savings = emergency = 0
     for t in snap["transfers"]:
         if t.get("method") == "autodebit":
             autodebit.append(t)
             continue
         if t["reason"] == "tabungan":
             savings += t["amount"]
+            continue
+        if t["reason"] == "dana darurat":
+            emergency += t["amount"]
             continue
         if t.get("method") == "app_menu":
             app_menu[t["to_alias"]] = app_menu.get(t["to_alias"], 0) + t["amount"]
@@ -89,6 +92,8 @@ def build(conn, vault, snap: dict) -> str:
             src = f"rekening {_bank(acct['bank'])}" if acct else "rekening yang diset"
             lines.append(f"• {_nice(t['to_alias'])}: *{format_idr(t['amount'])}* dari {src}")
         out.append("*🔄 Autodebet (tidak perlu transfer, pastikan saldo cukup)*\n" + "\n".join(lines))
+    if emergency:
+        out.append(f"*🛟 Sisihkan ke dana darurat*\n{format_idr(emergency)} ke rekening/kantong darurat milik sendiri, terpisah dari uang harian")
     if savings:
         out.append(f"*🐖 Sisihkan ke tabungan sendiri*\n{format_idr(savings)} (tidak ada nomor tujuan)")
     return "\n\n".join(out)

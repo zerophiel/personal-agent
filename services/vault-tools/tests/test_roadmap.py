@@ -50,51 +50,28 @@ class LatestStatement(unittest.TestCase):
         self.assertNotIn("40.000.000", tools.summarize_plan(snap))
 
 
-class GrowingCapacity(unittest.TestCase):
-    def test_cash_freed_by_ended_installments_clears_the_cards_sooner(self):
-        flat = rm.clear_cards([("A", 30_000_000, 200)], 500_000)
-        self.assertIsNone(flat["months"])                                         # interest 600k a month beats the 500k capacity
-        grow = rm.clear_cards([("A", 30_000_000, 200)], 500_000, lambda k: 0 if k <= 3 else 3_000_000)
-        self.assertIsNotNone(grow["months"])
-        self.assertLess(grow["months"], 15)
-        self.assertGreater(grow["months"], 3)
-
-    def test_the_card_balance_does_not_clear_while_capacity_is_below_interest(self):
-        r = rm.clear_cards([("A", 10_000_000, 225)], 100_000, lambda k: 0)
-        self.assertIsNone(r["months"])
-
-
 class Recurring(unittest.TestCase):
-    def test_subscriptions_shrink_the_card_capacity(self):
+    def test_subscriptions_do_not_shrink_this_paydays_cash(self):
+        """Regression: subscriptions sit inside the open card statements; subtracting them again from the same month's cash
+        invented a deficit."""
         from vault_tools import subscriptions as sub
         base = rm.roadmap(full_world(), TODAY)["capacity"]
         conn = full_world()
         sub.upsert(conn, "apple-one", "Apple One", 319_000, "hsbc-1")
-        sub.upsert(conn, "maybe", "Maybe", 500_000, "hsbc-1", status="unsure")        # not counted until confirmed
-        sub.upsert(conn, "old", "Old", 0, "hsbc-1", status="ended")
-        self.assertEqual(rm.roadmap(conn, TODAY)["capacity"], base - 319_000)
+        self.assertEqual(rm.roadmap(conn, TODAY)["capacity"], base)
 
 
-class CardSimulation(unittest.TestCase):
-    def test_avalanche_clears_and_counts_interest_on_the_remainder_only(self):
-        r = rm.clear_cards([("A", 8_000_000, 275), ("B", 6_000_000, 225)], 13_000_000)
-        # month 1: A 8.0M and B 5.0M paid, B keeps 1.0M -> interest 22,500; month 2 clears it
+class CardPath(unittest.TestCase):
+    def test_avalanche_and_interest_on_the_remainder_only(self):
+        conn = full_world()
+        tools.set_threshold(conn, "net_salary", 13_000_000 + 11_115_000 + 5_701_000 + 3_000_000 + 9_000_000)   # 13M for the cards
+        tools.upsert_card(conn, "a", "BCA", "1111", 5, 25, 10_000_000, interest_bp_month=275)
+        tools.upsert_card(conn, "b", "CIMB", "2222", 5, 5, 10_000_000, interest_bp_month=225)
+        statement(conn, 1, 8_000_000, 800_000)
+        statement(conn, 2, 6_000_000, 600_000)
+        r = rm.roadmap(conn, TODAY)["card_result"]
+        # cycle 1: A 8.0M and B 5.0M paid, B keeps 1.0M -> interest 22,500; cycle 2 clears it
         self.assertEqual((r["months"], r["interest"], r["left"]), (2, 22_500, 0))
-
-    def test_one_month_when_capacity_covers_everything(self):
-        r = rm.clear_cards([("A", 8_000_000, 275), ("B", 6_000_000, 225)], 14_000_000)
-        self.assertEqual((r["months"], r["interest"]), (1, 0))
-
-    def test_highest_rate_is_paid_first_even_if_listed_last(self):
-        r = rm.clear_cards([("cheap", 5_000_000, 100), ("dear", 5_000_000, 300)], 5_000_000)
-        # month 1: dear cleared, cheap 5.0M -> +50,000; month 2: 5.0M paid, 50,000 left -> +500; month 3 clears
-        self.assertEqual((r["months"], r["interest"]), (3, 50_500))                      # the dear card never accrues
-
-    def test_never_clears_when_capacity_does_not_beat_interest(self):
-        for cap in (0, -5, 200_000):                                                     # 10M at 2.25% = 225,000 a month
-            r = rm.clear_cards([("A", 10_000_000, 225)], cap)
-            self.assertIsNone(r["months"], cap)
-            self.assertGreater(r["left"], 0)
 
 
 def full_world():
@@ -125,14 +102,14 @@ class Roadmap(unittest.TestCase):
         self.assertEqual((by["cicilan-mobil"]["ends"], by["cicilan-mobil"]["remaining"]), ("2028-05-02", 108_319_000))
         self.assertEqual((by["hutang-teman"]["ends"], by["hutang-teman"]["remaining"], by["hutang-teman"]["per_month"]),
                          ("2028-01-31", 135_000_000, 9_000_000))
-        self.assertEqual(r["capacity"], 42_000_000 - 11_115_000 - 5_701_000 - 9_000_000 - 3_000_000)       # 13,184,000
-        self.assertEqual((r["card_result"]["months"], r["card_result"]["interest"], r["card_end"]), (2, 18_360, "2026-11"))
+        self.assertEqual(r["capacity"], 42_000_000 - 11_115_000 - 5_701_000 - 3_000_000)       # 22.184.000 before the pot
+        self.assertEqual((r["card_result"]["months"], r["card_result"]["interest"], r["card_end"]), (2, 18_360, "2026-12"))
         self.assertEqual(r["debt_free_date"], "2028-05-02")
         self.assertEqual(r["freed"], [("2028-01-31", 9_000_000, "hutang-teman"), ("2028-05-02", 5_701_000, "cicilan-mobil")])
         self.assertEqual(r["total_remaining"], 108_319_000 + 135_000_000 + 14_000_000)
         text = rm.format_roadmap(r)
         self.assertIn("Perkiraan bebas utang: 2028-05-02", text)
-        self.assertIn("lunas dalam 2 bulan (sekitar 2026-11)", text)
+        self.assertIn("lunas penuh dalam 2 gajian (bulan tagihan 2026-12)", text)
         self.assertIn("2028-05-02: cicilan-mobil selesai, bebas Rp 5.701.000/bulan (total terbebas Rp 14.701.000/bulan)", text)
         self.assertIn("Asumsi:", text)
 
@@ -162,8 +139,8 @@ class Roadmap(unittest.TestCase):
         tools.upsert_card(conn, "bca-1", "BCA", "1111", 5, 25, 10_000_000)
         statement(conn, 1, 5_000_000, 500_000)
         r = rm.roadmap(conn, TODAY)
-        self.assertLess(r["capacity"], 0)
-        self.assertGreater(r["card_result"]["months"], 14)                           # only after the pot ends (Jan 2028)
+        self.assertEqual(r["capacity"], 284_000)                                     # all of it goes to the set pot deposit
+        self.assertGreater(r["card_result"]["months"], 15)                           # only after the pot ends (Jan 2028)
 
     def test_unknown_salary_does_not_invent_a_date_when_cards_exist(self):
         conn = connect(":memory:")

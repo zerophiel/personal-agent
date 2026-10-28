@@ -42,7 +42,8 @@ MCP_TOOL_NAMES = ("upsert_card", "upsert_debt", "upsert_expense", "set_threshold
                   "health_check", "list_statements", "record_card_payment", "debt_free_roadmap",
                   "add_owner_name", "suggest_categories", "apply_suggestions", "living_cost_analysis",
                   "record_card_installments", "card_installments_status", "pending_statements", "skip_statement_file",
-                  "upsert_subscription", "subscriptions_status", "set_category_keyword", "link_card_payees", "ringkasan_data", "simulasi_skenario", "catat_usulan", "atur_jadwal_pot", "belanja_kartu")
+                  "upsert_subscription", "subscriptions_status", "set_category_keyword", "link_card_payees", "ringkasan_data", "simulasi_skenario", "catat_usulan", "atur_jadwal_pot", "belanja_kartu",
+                  "saldo_pot", "dana_darurat", "periksa_data", "sisa_uang_harian")
 
 
 class Installment(BaseModel):
@@ -131,8 +132,43 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
     @mcp.tool()
     @locked
     def sinking_status(alias: str | None = None) -> str:
-        """Progres dana terikat: terkumpul, kurang, dan setoran per bulan yang dibutuhkan."""
+        """Progres dana terikat (pot): terkumpul, kurang, pola setoran, dan perkiraan saldo pada tenggat."""
         return tools.sinking_status(conn, today(), alias)
+
+    @mcp.tool()
+    @locked
+    def saldo_pot(alias: str, saldo: int) -> str:
+        """Catat SALDO POT yang pemilik baca di aplikasi bank (mis. 'pot Jago sekarang 4,3 juta'). Ini menjadi angka resmi
+        mulai hari ini; setoran berikutnya dihitung dari sini. Panggil setelah pemilik bilang sudah menyetor ke pot."""
+        return tools.set_pot_balance(conn, alias, saldo, today())
+
+    @mcp.tool()
+    @locked
+    def sisa_uang_harian(jumlah: int) -> str:
+        """Catat SISA UANG HARIAN bulan lalu yang masih dipegang pemilik saat gajian (tanyakan sekali saat menyusun daftar bayar
+        tanggal 1, sebelum generate_payday_plan). Rencana gajian ini lalu hanya mengambil kekurangannya dari gaji: belanja kartu
+        yang dibayar dari uang harian tidak memotong pot. Berlaku untuk gajian yang sedang berjalan saja."""
+        return tools.set_leftover_living_cash(conn, jumlah, today())
+
+    @mcp.tool()
+    @locked
+    def periksa_data() -> str:
+        """PERIKSA SILANG DATA oleh kode: tagihan yang tidak rekonsiliasi atau barisnya tidak cocok, tagihan kartu yang belum
+        diunggah, tagihan lewat jatuh tempo yang belum tercatat dibayar, langganan tercatat vs yang benar-benar ditagih kartu,
+        tagihan berulang yang belum tercatat, cicilan yang hilang dari tagihan, saldo pot yang lama. Panggil SEBELUM memberi
+        kesimpulan besar atau daftar bayar, dan sampaikan setiap MASALAH/PERHATIAN apa adanya."""
+        from . import audit
+        return audit.format_audit(audit.run(conn, today()))
+
+    @mcp.tool()
+    @locked
+    def dana_darurat(saldo: int | None = None) -> str:
+        """DANA DARURAT (bantalan kecil supaya kejadian tak terduga tidak lari ke kartu kredit): status, atau catat SALDO
+        yang pemilik baca di aplikasi bank (setelah menyetor atau setelah memakainya). Target dan setoran per gajian diatur
+        dengan set_threshold emergency_target / emergency_monthly, hanya setelah pemilik setuju."""
+        if saldo is not None:
+            return tools.set_emergency_balance(conn, saldo)
+        return tools.format_emergency(conn)
 
     @mcp.tool()
     @locked
@@ -169,14 +205,16 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
     @locked
     def set_threshold(key: str, value: int) -> str:
         """Set ambang/angka tetap, mis. net_salary, cash_buffer, dsr_max_bp."""
-        if key in ("reread_open_until", "ingest_events_cursor") or key.startswith("living_reserve_override"):
+        if key in ("reread_open_until", "ingest_events_cursor", "emergency_saved") or key.startswith("living_reserve_override"):
             raise ValueError("kunci ini diatur oleh sistem, bukan lewat chat")
         return tools.set_threshold(conn, key, value)
 
     @mcp.tool()
     @locked
     def generate_payday_plan(payday: str | None = None) -> str:
-        """Hitung rencana gajian (deterministik). payday opsional, format YYYY-MM-DD."""
+        """Hitung rencana gajian (deterministik). Tanpa payday: gajian yang sedang berjalan; sampai 7 hari setelah gajian
+        (mis. pemilik bertanya tanggal 1) itu gajian yang BARU LEWAT, jadi daftar bayar tanggal 1 memakai gaji akhir bulan
+        lalu. payday opsional, format YYYY-MM-DD."""
         snap = tools.generate_payday_plan(conn, today(), date.fromisoformat(payday) if payday else None)
         return tools.summarize_plan(snap)
 
@@ -323,30 +361,37 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
     @mcp.tool()
     @locked
     def simulasi_skenario(belanja_kartu_per_bulan: int = 0, tunda_pot_bulan: int = 0, bayar_ekstra_sekarang: int = 0,
-                          hemat_per_bulan: int = 0, cadangan_kas: int | None = None, bulan: int = 12,
-                          setoran_pot_awal: int | None = None, setoran_pot_awal_bulan: int = 0) -> str:
-        """SIMULASI "bagaimana kalau" (dihitung kode, jangan dihitung sendiri). Isi hanya yang berubah:
-        belanja_kartu_per_bulan = belanja kartu baru tiap bulan (0 = tidak belanja kartu); tunda_pot_bulan = setoran pot
-        hutang ditunda N bulan; bayar_ekstra_sekarang = uang sekali untuk melunasi kartu (mis. hasil jual barang, saldo
-        yang sudah dipegang); hemat_per_bulan = penghematan tetap per bulan (mis. stop langganan, potong belanja online);
-        cadangan_kas = ganti cadangan kas harian; setoran_pot_awal + setoran_pot_awal_bulan = setoran pot kecil dulu selama N
-        bulan lalu otomatis mengejar target (pot adalah tujuan dengan tenggat, jumlahnya boleh berubah tiap bulan). Hasil: lunas kapan, total bunga, sisa bulanan, arah saldo kartu."""
+                          hemat_per_bulan: int = 0, cadangan_kas: int | None = None, bulan: int | None = None,
+                          setoran_pot_awal: int | None = None, setoran_pot_awal_bulan: int = 0, pola_pot: str | None = None,
+                          gaji_hari_tenggat: bool | None = None) -> str:
+        """SIMULASI "bagaimana kalau" per gajian (dihitung kode dari tagihan kartu, jangan dihitung sendiri). Isi hanya yang
+        berubah: belanja_kartu_per_bulan = belanja kartu DI LUAR uang harian tiap bulan (belanja kartu di dalam uang harian
+        dibayar dari uang harian, tidak perlu diisi); hemat_per_bulan = penghematan tetap mulai tagihan berikutnya (mis. stop
+        langganan); bayar_ekstra_sekarang = uang sekali (mis. hasil jual barang); cadangan_kas = ganti uang harian;
+        pola_pot = 'sisa' (kartu dulu, pot dari sisa) atau 'rata' (setoran tetap); setoran_pot_awal + setoran_pot_awal_bulan /
+        tunda_pot_bulan = variasi pola rata; gaji_hari_tenggat = true/false: apakah gaji yang masuk pada hari tenggat pot ikut
+        dipakai. bulan kosong = sampai tenggat pot. Hasil: kapan kartu lunas, total bunga, isi pot pada tenggat (cukup atau
+        kurang berapa), dana darurat, dan jalur per gajian."""
         today_ = today()
-        base = simulate.simulate(conn, today_, months=max(1, min(bulan, 36)))
+        n = simulate.horizon(conn, today_) if bulan is None else max(1, min(bulan, 36))
+        base = simulate.simulate(conn, today_, months=n)
         sc = simulate.simulate(conn, today_, belanja_kartu=belanja_kartu_per_bulan, tunda_pot=tunda_pot_bulan,
-                               ekstra_sekarang=bayar_ekstra_sekarang, hemat=hemat_per_bulan, reserve=cadangan_kas, months=max(1, min(bulan, 36)),
-                               pot_awal=setoran_pot_awal, pot_awal_bulan=setoran_pot_awal_bulan)
+                               ekstra_sekarang=bayar_ekstra_sekarang, hemat=hemat_per_bulan, reserve=cadangan_kas, months=n,
+                               pot_awal=setoran_pot_awal, pot_awal_bulan=setoran_pot_awal_bulan, pola_pot=pola_pot,
+                               gaji_hari_tenggat=gaji_hari_tenggat)
         return simulate.format_result(base, sc)
 
     @mcp.tool()
     @locked
-    def atur_jadwal_pot(alias: str, setoran_awal: int | None = None, sampai_bulan: str | None = None) -> str:
-        """Atur JADWAL setoran dana terikat (pot hutang). Pot adalah TUJUAN dengan tenggat (mis. Rp 135 juta ke teman pada
-        31 Jan 2028), bukan cicilan tetap: setoran boleh kecil dulu lalu besar. setoran_awal = jumlah per gajian pada fase
-        awal; sampai_bulan = YYYY-MM terakhir fase awal. Sisanya otomatis dikejar rata setelahnya agar target tetap tercapai.
-        Panggil tanpa setoran_awal untuk kembali ke pembagian rata. Hanya setelah pemilik menyetujui angkanya; sebelum itu
-        coba dulu dengan simulasi_skenario (setoran_pot_awal / setoran_pot_awal_bulan)."""
-        return tools.set_pot_schedule(conn, alias, setoran_awal, sampai_bulan, today())
+    def atur_jadwal_pot(alias: str, pola: str | None = None, setoran_awal: int | None = None, sampai_bulan: str | None = None,
+                        pakai_gaji_hari_tenggat: bool | None = None) -> str:
+        """Atur CARA MENGISI pot (dana terikat dengan tenggat, mis. Rp 135 juta ke teman pada 31 Jan 2028).
+        pola='sisa': KARTU DULU, tiap gajian tagihan kartu dilunasi dulu dan pot mendapat sisanya (setoran kecil di awal,
+        membesar setelah kartu bersih; uang harian tidak pernah dipotong). pola='rata' atau setoran_awal + sampai_bulan
+        (YYYY-MM): setoran tetap per gajian, boleh kecil dulu lalu mengejar. pakai_gaji_hari_tenggat=true: gaji yang masuk pada
+        hari tenggat itu sendiri ikut dihitung (risiko: gaji telat sehari). Hanya setelah pemilik menyetujui; coba dulu dengan
+        simulasi_skenario (pola_pot, gaji_hari_tenggat)."""
+        return tools.set_pot_schedule(conn, alias, setoran_awal, sampai_bulan, today(), pola, pakai_gaji_hari_tenggat)
 
     @mcp.tool()
     @locked
@@ -392,11 +437,14 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
     @mcp.tool()
     @locked
     def upsert_subscription(alias: str, name: str, monthly_amount: int, source: str, status: str = "active",
-                            note: str | None = None) -> str:
+                            note: str | None = None, berakhir: str | None = None, wajib: bool | None = None) -> str:
         """Catat/ubah LANGGANAN digital (Google One, Apple, Anthropic, Netflix, dll). status: active (masih berjalan),
         ended (sudah berhenti, supaya tidak dianggap lagi), unsure (belum pasti, tanyakan pemilik). source = alias kartu
-        atau rekening. Catat HANYA setelah pemilik mengonfirmasi, kecuali status unsure. Langganan dolar: perkiraan rupiah."""
-        return subscriptions.upsert(conn, alias, name, monthly_amount, source, status, note)
+        atau rekening. Catat HANYA setelah pemilik mengonfirmasi, kecuali status unsure. Langganan dolar: perkiraan rupiah.
+        berakhir = YYYY-MM tagihan terakhir untuk kontrak yang selesai sendiri (mis. sewa/cicilan Coway); kosong = tanpa akhir.
+        wajib = true untuk yang TIDAK BOLEH diusulkan dipotong (aturan pemilik: semua kebutuhan anak, mis. Rockstar Gym Gracia);
+        kosong = tidak mengubah tanda yang tersimpan."""
+        return subscriptions.upsert(conn, alias, name, monthly_amount, source, status, note, berakhir, wajib)
 
     @mcp.tool()
     @locked

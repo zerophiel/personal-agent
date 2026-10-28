@@ -7,7 +7,7 @@ model:
 
 agent:
   max_turns: 40
-  reasoning_effort: medium
+  reasoning_effort: high      # owner's choice 2026-10-28: accuracy over cost; real chats showed 'answer first, check later' slips at medium
   disabled_toolsets:        # finance zone: no shell, code, browser, web, files, delegation, cron, memory
     - terminal
     - code_execution
@@ -27,15 +27,15 @@ agent:
     - connections
 
 auxiliary:
-  compression:
+  compression:               # the summary carries money figures and decisions into later turns: the stronger model
+    provider: anthropic
+    model: claude-sonnet-5-5
+  title_generation:          # harmless: never feeds a number
     provider: anthropic
     model: claude-haiku-5-5
-  title_generation:
+  vision:                    # amounts on receipts and transfer screenshots
     provider: anthropic
-    model: claude-haiku-5-5
-  vision:
-    provider: anthropic
-    model: claude-haiku-5-5
+    model: claude-sonnet-5-5
 
 compression:
   threshold_tokens: 60000

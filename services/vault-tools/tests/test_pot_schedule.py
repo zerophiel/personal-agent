@@ -81,15 +81,14 @@ class Consumers(unittest.TestCase):
         statement(conn, 1, 20_000_000, 2_000_000)
         return conn
 
-    def test_simulator_low_phase_raises_early_free_cash_and_lowers_it_later(self):
+    def test_simulator_low_phase_pays_the_cards_now_and_catches_up_later(self):
         a = simulate.simulate(self.world(), TODAY, months=15)
         b = simulate.simulate(self.world(), TODAY, pot_awal=2_000_000, pot_awal_bulan=8, months=15)
-        self.assertEqual(b["rows"][0]["free"], a["rows"][0]["free"] + 7_000_000)
         self.assertEqual(b["rows"][0]["pot"], 2_000_000)
-        self.assertGreater(b["rows"][9]["pot"], 9_000_000)
-        self.assertLess(b["rows"][9]["free"], a["rows"][9]["free"])
+        self.assertEqual(b["rows"][0]["paid"], 20_000_000)                            # 7M more went to the 20M bill: cleared
+        self.assertEqual(b["rows"][9]["pot"], 17_000_000)                             # (135M - 8 x 2M) / 7 remaining paydays
         self.assertLess(b["interest"], a["interest"])                                 # the cards are paid down while the pot waits
-        self.assertAlmostEqual(sum(r["pot"] for r in b["rows"]), 135_000_000, delta=10_000)   # the whole target is still saved
+        self.assertEqual(sum(r["pot"] for r in b["rows"]), 135_000_000)               # the whole target is still saved
 
     def test_the_stored_schedule_is_used_by_the_simulator_and_the_roadmap(self):
         conn = self.world()
@@ -98,14 +97,15 @@ class Consumers(unittest.TestCase):
         self.assertEqual(r["rows"][0]["pot"], 2_000_000)
         rd = rm.roadmap(conn, TODAY)
         flat = rm.roadmap(self.world(), TODAY)
-        self.assertEqual(rd["capacity"], flat["capacity"] + 7_000_000)               # more room now (the pot waits) ...
-        self.assertIsNotNone(rd["card_result"])
+        self.assertEqual(rd["capacity"], flat["capacity"])                            # the same cash before the pot ...
+        self.assertEqual({i["alias"]: i for i in rd["items"]}["hutang-teman"]["per_month"], 2_000_000)
+        self.assertLess(rd["card_result"]["interest"], flat["card_result"]["interest"])   # ... more of it reaches the cards
 
     def test_the_text_shows_both_deposit_levels(self):
         conn = self.world()
         text = simulate.format_result(simulate.simulate(conn, TODAY), simulate.simulate(conn, TODAY, pot_awal=2_000_000, pot_awal_bulan=6))
         self.assertIn("setoran pot awal Rp 2.000.000/bulan selama 6 bulan", text)
-        self.assertIn("Setoran pot per bulan:", text)
+        self.assertIn("pot 2,00 jt (terkumpul 2,00 jt)", text)
 
 
 if __name__ == "__main__":

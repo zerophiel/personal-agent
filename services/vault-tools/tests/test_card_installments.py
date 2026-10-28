@@ -118,12 +118,14 @@ class Installments(unittest.TestCase):
         with self.assertRaises(ValueError):
             ci.record(conn, "bca-1", "2026-10-05", [{"description": "X", "amount": 0, "seq": 1, "total": 3}])
 
-    def test_roadmap_counts_them_and_shrinks_card_capacity(self):
+    def test_roadmap_counts_them_without_double_counting(self):
+        from vault_tools import simulate
         base = rm.roadmap(world(), TODAY)
         conn = world()
         ci.record(conn, "bca-1", "2026-10-05", ITEMS)
         r = rm.roadmap(conn, TODAY)
-        self.assertEqual(r["capacity"], base["capacity"] - 3_500_000)
+        self.assertEqual(r["capacity"], base["capacity"])                 # this month's instalments are inside the open bill
+        self.assertEqual(simulate.simulate(conn, TODAY)["rows"][1]["new"], 3_500_000)   # and on the next one (12/12 + 4/12)
         by = {i["alias"]: i for i in r["items"]}
         self.assertEqual(by["bca-1: TOKOPEDIA CICILAN"]["kind"], "cicilan kartu")
         self.assertEqual(r["total_remaining"], base["total_remaining"] + 9_000_000 + 2_500_000)

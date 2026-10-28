@@ -147,7 +147,7 @@ def _sweeper_loop() -> None:
 
 # ---- report commands and the "/" menu --------------------------------------------------------
 
-REPORTS = ("bantuan", "rencana", "tagihan", "belanja", "cicilan", "anggaran", "peta", "kondisi", "data", "usulan")
+REPORTS = ("bantuan", "rencana", "tagihan", "belanja", "cicilan", "anggaran", "peta", "kondisi", "data", "periksa", "usulan")
 _REPORT_CMD = re.compile(r"^/(" + "|".join(REPORTS) + r")(?:@\w+)?\s*$", re.I)
 MENU = [
     ("bantuan", "Apa saja yang bisa saya lakukan"),
@@ -159,6 +159,7 @@ MENU = [
     ("peta", "Peta jalan bebas utang"),
     ("kondisi", "Penilaian kesehatan keuangan"),
     ("data", "Ringkasan semua data yang tersimpan"),
+    ("periksa", "Periksa silang data: tagihan, pembayaran, langganan, cicilan"),
     ("usulan", "Kemampuan baru yang saya minta dibuatkan"),
     ("rincian", "Nomor tujuan transfer lengkap (terhapus 24 jam)"),
     ("rekening", "Simpan rekening: /rekening alias bank nomor"),

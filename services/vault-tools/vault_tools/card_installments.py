@@ -68,7 +68,7 @@ def active(conn: sqlite3.Connection) -> list[dict]:
         if r["last_stmt"] and date.fromisoformat(r["as_of"]) < date.fromisoformat(r["last_stmt"]) - timedelta(days=STALE_DAYS):
             continue
         out.append({"card": r["card"], "description": r["description"], "per_month": r["per_month"], "seq": r["seq"],
-                    "total": r["total"], "left": left, "remaining": left * r["per_month"],
+                    "total": r["total"], "left": left, "remaining": left * r["per_month"], "as_of": r["as_of"],
                     "ends": _add_months(date.fromisoformat(r["as_of"]), left).isoformat()})
     return out
 

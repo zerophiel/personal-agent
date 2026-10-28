@@ -46,6 +46,21 @@ def id_holidays(year: int) -> frozenset[date]:
     return frozenset(h.keys()) | _cuti_bersama()
 
 
+PAYDAY_LOOKBACK_DAYS = 7   # the owner pays everything on the 1st, a day or two AFTER the salary (last working day)
+
+
+def current_payday(today: date, holidays=None) -> date:
+    """The payday a plan made today belongs to. Up to PAYDAY_LOOKBACK_DAYS after a payday it is still the current one
+    (asked on Nov 1, the plan is the Oct 30 salary's and pays the bills due in early November); otherwise the coming one."""
+    hol = frozenset(holidays) if holidays is not None else id_holidays(today.year)
+    p = last_working_day(today.year, today.month, hol)
+    if p > today:
+        y, m = (today.year - 1, 12) if today.month == 1 else (today.year, today.month - 1)
+        prev = last_working_day(y, m, hol)
+        return prev if (today - prev).days <= PAYDAY_LOOKBACK_DAYS else p
+    return p if (today - p).days <= PAYDAY_LOOKBACK_DAYS else next_payday(p, hol)
+
+
 def _day_in_month(year: int, month: int, day: int) -> date:
     return date(year, month, min(day, calendar.monthrange(year, month)[1]))
 
@@ -157,9 +172,13 @@ def data_overview(conn, today: date) -> str:
     L.append("UTANG / CICILAN BIASA (alias | pemberi | per bulan | sisa angsuran | cara bayar | rekening debet)")
     for d in conn.execute("SELECT * FROM debts ORDER BY alias"):
         L.append(f"- {d['alias']} | {d['lender']} | {format_idr(d['installment'])} | {d['tenor_left']} | {d['pay_method']} | {d['debit_account_alias'] or d['pay_to_alias'] or '-'}")
-    L.append("DANA TERIKAT")
+    L.append("DANA TERIKAT (pot)")
     for f in conn.execute("SELECT * FROM sinking_funds ORDER BY alias"):
-        L.append(f"- {f['alias']} | target {format_idr(f['target'])} | jatuh tempo {f['due_date']} | terkumpul {format_idr(f['saved_so_far'])}")
+        L.append(f"- {f['alias']} | target {format_idr(f['target'])} | jatuh tempo {f['due_date']} | terkumpul {format_idr(sinking_saved(conn, f))} | "
+                 f"pola {'kartu dulu, pot dari sisa' if f['pace'] == 'sisa' else 'setoran tetap (rata)'}"
+                 + (" | gaji di hari tenggat ikut dihitung" if f["due_payday"] else ""))
+    e = emergency_status(conn)
+    L.append("DANA DARURAT: " + (f"{format_idr(e['saved'])} dari {format_idr(e['target'])}, {format_idr(e['monthly'])} per gajian" if e else "belum diatur"))
     L.append("PENGELUARAN TETAP")
     for e in conn.execute("SELECT alias, amount, due_day FROM fixed_expenses ORDER BY alias"):
         L.append(f"- {e['alias']} | {format_idr(e['amount'])} | tanggal {e['due_day']}")
@@ -262,6 +281,25 @@ def reserve_for(conn, payday: date) -> tuple[int | None, str]:
     if ov is not None and until and int(payday.strftime("%Y%m%d")) <= until:
         return ov, f"sementara (saldo awal ikut dipakai), berlaku sampai {str(until)[:4]}-{str(until)[4:6]}-{str(until)[6:]}"
     return get_threshold(conn, "living_reserve"), "diset pemilik"
+
+
+def set_leftover_living_cash(conn, amount: int, today: date) -> str:
+    """On payday the owner still holds `amount` of last cycle's living money (card purchases inside the living money are
+    paid from it). This payday's plan then takes only the top-up to living_reserve from the salary; the next payday is
+    planned normally again."""
+    check_idr(amount)
+    normal = get_threshold(conn, "living_reserve")
+    if not normal:
+        raise ValueError("living_reserve belum diset")
+    if amount < 0:
+        raise ValueError("jumlah harus >= 0")
+    payday = current_payday(today)
+    reserve = max(0, normal - amount)
+    set_threshold(conn, "living_reserve_override", reserve)
+    set_threshold(conn, "living_reserve_override_until", int(payday.strftime("%Y%m%d")))
+    extra = f" Kelebihan {format_idr(amount - normal)} tidak dihitung di rencana (tetap di rekening)." if amount > normal else ""
+    return (f"Sisa uang harian {format_idr(amount)} dicatat untuk gajian {payday.isoformat()}: uang harian yang diambil dari gaji ini "
+            f"{format_idr(reserve)}, jadi total uang harian tetap {format_idr(normal)}.{extra}")
 
 
 def list_uploads(upload_dir: str, limit: int = 10) -> list[str]:
@@ -454,10 +492,11 @@ def sinking_saved(conn, fund) -> int:
     return fund["saved_so_far"] + row[0]
 
 
-def sinking_paydays_left(payday: date, due: date, holidays) -> int:
-    """Paydays from `payday` on which a contribution can still land before the due date."""
+def sinking_paydays_left(payday: date, due: date, holidays, buffer_days: int = SINKING_BUFFER_DAYS) -> int:
+    """Paydays from `payday` on which a contribution can still land before the due date (`buffer_days` before it;
+    0 when the owner counts a salary that arrives on the due date itself)."""
     holidays = frozenset(holidays) | id_holidays(due.year) | id_holidays(due.year - 1)   # cover the whole horizon
-    last, n, p = due - timedelta(days=SINKING_BUFFER_DAYS), 0, payday
+    last, n, p = due - timedelta(days=buffer_days), 0, payday
     while p <= last:
         n += 1
         p = next_payday(p, holidays)
@@ -489,35 +528,59 @@ def pot_schedule(remaining: int, left: int, low_amount: int | None = None, low_c
     return out
 
 
+def fund_buffer_days(fund) -> int:
+    return 0 if fund["due_payday"] else SINKING_BUFFER_DAYS
+
+
 def sinking_required(conn, fund, payday: date, holidays) -> dict:
     saved = sinking_saved(conn, fund)
     remaining = max(0, fund["target"] - saved)
-    left = sinking_paydays_left(payday, date.fromisoformat(fund["due_date"]), holidays)
+    left = sinking_paydays_left(payday, date.fromisoformat(fund["due_date"]), holidays, fund_buffer_days(fund))
+    if fund["pace"] == "sisa":     # no set amount: on each payday the pot takes what is left after the card bills
+        return {"saved": saved, "remaining": remaining, "paydays_left": left, "schedule": [], "per_month": 0,
+                "low_cycles": 0, "later_per_month": None, "pace": "sisa"}
     low = _low_cycles(fund, payday)
     sched = pot_schedule(remaining, left, fund["low_amount"], low) if left else []
     low_on = fund["low_amount"] is not None and 0 < low < left
     return {"saved": saved, "remaining": remaining, "paydays_left": left, "schedule": sched,
             "per_month": sched[0] if sched and remaining else 0,
-            "low_cycles": low if low_on else 0, "later_per_month": sched[low] if low_on and remaining else None}
+            "low_cycles": low if low_on else 0, "later_per_month": sched[low] if low_on and remaining else None, "pace": "rata"}
 
 
-def set_pot_schedule(conn, alias: str, amount: int | None, until_month: str | None, today: date) -> str:
-    """Owner's choice: deposit `amount` per payday until `until_month` (YYYY-MM), then the catch-up. amount=None clears it
-    (back to an even split)."""
+def set_pot_schedule(conn, alias: str, amount: int | None, until_month: str | None, today: date,
+                     pace: str | None = None, due_payday: bool | None = None) -> str:
+    """Owner's choice of how the pot is filled.
+    pace='sisa': cards first, the pot takes what is left on each payday (no set amount).
+    amount + until_month: a set deposit `amount` per payday until `until_month` (YYYY-MM), then the catch-up ('rata').
+    Neither: back to an even split ('rata'). `due_payday` alone only changes whether a salary arriving on the due date counts."""
     fund = conn.execute("SELECT * FROM sinking_funds WHERE alias=?", (alias,)).fetchone()
     if fund is None:
         raise ValueError(f"dana terikat {alias} tidak ada")
+    if pace not in (None, "rata", "sisa"):
+        raise ValueError("pola: 'sisa' (kartu dulu, pot dari sisa) atau 'rata' (setoran tetap)")
+    if due_payday is not None:
+        conn.execute("UPDATE sinking_funds SET due_payday=? WHERE alias=?", (1 if due_payday else 0, alias))
+        if pace is None and amount is None:
+            conn.commit()
+            return (f"{alias}: gaji yang masuk pada hari tenggat {'IKUT' if due_payday else 'TIDAK'} dihitung. "
+                    + sinking_status(conn, today, alias))
+    if pace == "sisa":
+        if amount is not None:
+            raise ValueError("pola sisa tidak memakai setoran_awal: pot mendapat sisa setelah kartu tiap gajian")
+        conn.execute("UPDATE sinking_funds SET pace='sisa', low_amount=NULL, low_until=NULL WHERE alias=?", (alias,))
+        conn.commit()
+        return f"{alias}: pola KARTU DULU disimpan (tiap gajian kartu dilunasi dulu, pot mendapat sisanya). " + sinking_status(conn, today, alias)
     if amount is None:
-        conn.execute("UPDATE sinking_funds SET low_amount=NULL, low_until=NULL WHERE alias=?", (alias,))
+        conn.execute("UPDATE sinking_funds SET pace='rata', low_amount=NULL, low_until=NULL WHERE alias=?", (alias,))
         conn.commit()
         return f"{alias}: jadwal kembali rata. " + sinking_status(conn, today, alias)
     check_idr(amount)
     if amount < 0 or not until_month or len(until_month) != 7 or until_month[4] != "-":
         raise ValueError("setoran_awal >= 0 dan sampai_bulan format YYYY-MM")
     hol = id_holidays(today.year) | id_holidays(today.year + 1) | id_holidays(today.year + 2)
-    p = last_working_day(today.year, today.month, hol)
-    payday = p if p >= today else next_payday(p, hol)
+    payday = current_payday(today, hol)
     probe = dict(fund)
+    probe["pace"] = "rata"
     probe["low_amount"], probe["low_until"] = amount, until_month
     s = sinking_required(conn, probe, payday, hol)
     low = _low_cycles(probe, payday)
@@ -525,9 +588,52 @@ def set_pot_schedule(conn, alias: str, amount: int | None, until_month: str | No
         raise ValueError("sampai_bulan sudah lewat")
     if low >= s["paydays_left"]:
         raise ValueError("fase awal tidak boleh menutup semua gajian: sisakan bulan untuk mengejar target sebelum jatuh tempo")
-    conn.execute("UPDATE sinking_funds SET low_amount=?, low_until=? WHERE alias=?", (amount, until_month, alias))
+    conn.execute("UPDATE sinking_funds SET pace='rata', low_amount=?, low_until=? WHERE alias=?", (amount, until_month, alias))
     conn.commit()
     return f"{alias}: jadwal disimpan. " + sinking_status(conn, today, alias)
+
+
+def set_pot_balance(conn, alias: str, balance: int, today: date) -> str:
+    """The owner read the pot's balance in the bank app: it is the truth from today on. Deposits categorized
+    'sinking:<alias>' in mutations dated after today still add to it."""
+    check_idr(balance)
+    if balance < 0:
+        raise ValueError("saldo harus >= 0")
+    if conn.execute("SELECT 1 FROM sinking_funds WHERE alias=?", (alias,)).fetchone() is None:
+        raise ValueError(f"dana terikat {alias} tidak ada")
+    conn.execute("UPDATE sinking_funds SET saved_so_far=?, saved_asof=? WHERE alias=?",
+                 (balance, (today + timedelta(days=1)).isoformat(), alias))
+    conn.commit()
+    return f"{alias}: saldo pot dicatat {format_idr(balance)} per {today.isoformat()}. " + sinking_status(conn, today, alias)
+
+
+# ---- emergency fund: a small buffer so a surprise lands here, not on a credit card ----------
+
+def emergency_status(conn) -> dict | None:
+    target = get_threshold(conn, "emergency_target")
+    if not target:
+        return None
+    saved = get_threshold(conn, "emergency_saved", 0) or 0
+    monthly = get_threshold(conn, "emergency_monthly") or target
+    return {"target": target, "monthly": monthly, "saved": saved, "next": max(0, min(monthly, target - saved))}
+
+
+def set_emergency_balance(conn, balance: int) -> str:
+    check_idr(balance)
+    if balance < 0:
+        raise ValueError("saldo harus >= 0")
+    set_threshold(conn, "emergency_saved", balance)
+    return format_emergency(conn)
+
+
+def format_emergency(conn) -> str:
+    e = emergency_status(conn)
+    if e is None:
+        return "Dana darurat belum diatur (emergency_target dan emergency_monthly, setelah pemilik setuju)."
+    head = f"Dana darurat: {format_idr(e['saved'])} dari {format_idr(e['target'])}"
+    head += " (PENUH)." if e["saved"] >= e["target"] else f"; setoran berikutnya {format_idr(e['next'])} per gajian, sebelum pot dan pelunasan sisa kartu."
+    return (head + " Hanya untuk kejadian tak terduga (sakit, servis mobil, kebutuhan sekolah mendadak), bukan untuk menutup belanja"
+            " kartu. Setelah dipakai, laporkan saldo barunya; rencana gajian berikutnya mengisinya lagi.")
 
 
 def sinking_status(conn, today: date, alias: str | None = None) -> str:
@@ -537,15 +643,24 @@ def sinking_status(conn, today: date, alias: str | None = None) -> str:
         return "Belum ada dana terikat."
     hol = id_holidays(today.year) | id_holidays(today.year + 1) | id_holidays(today.year + 2)
     out = []
+    p = current_payday(today, hol)
+    proj = None
     for f in funds:
-        p = last_working_day(today.year, today.month, hol)
-        if p < today:
-            p = next_payday(p, hol)
         s = sinking_required(conn, f, p, hol)
         pct = min(100, s["saved"] * 100 // f["target"])
         line = (f"{f['alias']}: target {format_idr(f['target'])} jatuh tempo {f['due_date']}; terkumpul "
                 f"{format_idr(s['saved'])} ({pct}%); kurang {format_idr(s['remaining'])}")
-        if s["low_cycles"] and s["later_per_month"] is not None:
+        if s["pace"] == "sisa" and s["remaining"]:
+            if proj is None:
+                from . import simulate   # local import: simulate -> tools
+                proj = simulate.pot_projection(conn, today)
+            pr = proj.get(f["alias"])
+            line += (f"; pola KARTU DULU: tiap gajian kartu dilunasi dulu, pot mendapat sisanya ({s['paydays_left']} gajian tersisa"
+                     + (", termasuk gaji di hari tenggat" if f["due_payday"] else "") + ")")
+            if pr and pr["at_due"] is not None:
+                line += (f"; perkiraan terkumpul {format_idr(pr['at_due'])} pada tenggat"
+                         + (f", KURANG {format_idr(pr['gap'])}" if pr["gap"] > 0 else ", cukup"))
+        elif s["low_cycles"] and s["later_per_month"] is not None:
             line += (f"; setoran fase awal {format_idr(s['per_month'])}/bulan sampai {f['low_until']} ({s['low_cycles']} gajian), "
                      f"lalu sekitar {format_idr(s['later_per_month'])}/bulan sampai jatuh tempo ({s['paydays_left']} gajian tersisa)")
         elif s["remaining"] and s["paydays_left"]:
@@ -558,9 +673,15 @@ def sinking_status(conn, today: date, alias: str | None = None) -> str:
 
 def collect_obligations(conn, payday: date, nxt: date, holidays=()) -> list[Obligation]:
     obs: list[Obligation] = []
+    e = emergency_status(conn)
+    if e and e["next"]:
+        obs.append(Obligation("emergency", "dana-darurat", payday, e["next"]))
     for f in conn.execute("SELECT * FROM sinking_funds"):
         s = sinking_required(conn, f, payday, holidays)
-        if s["per_month"]:
+        if s["pace"] == "sisa":
+            if s["remaining"] and s["paydays_left"]:
+                obs.append(Obligation("pool_rest", f["alias"], payday, s["remaining"], from_account="main", pay_to=f["pool_pay_to"]))
+        elif s["per_month"]:
             obs.append(Obligation("pool", f["alias"], payday, s["per_month"], from_account="main",
                                   pay_to=f["pool_pay_to"]))
     # cards: latest unpaid statement per card (overdue if due before payday)
@@ -608,9 +729,7 @@ def generate_payday_plan(conn, today: date, payday: date | None = None,
                          salary: int | None = None) -> dict:
     hol = id_holidays(today.year) | id_holidays(today.year + 1)
     if payday is None:
-        payday = last_working_day(today.year, today.month, hol)
-        if payday < today:  # this month's payday already passed -> plan the next one
-            payday = next_payday(payday, hol)
+        payday = current_payday(today, hol)   # asked on the 1st: the salary that came on the last working day
     if salary is None:
         salary = get_threshold(conn, "net_salary")
         if salary is None:
@@ -667,6 +786,22 @@ def generate_payday_plan(conn, today: date, payday: date | None = None,
                                         f"{format_idr(f['target'])}; kurang {format_idr(f['target'] - s['saved'] - planned)}.")
         elif due >= nxt and s["paydays_left"] == 0 and s["remaining"]:
             snap["warnings"].append(f"{f['alias']}: tidak ada gajian tersisa sebelum jatuh tempo; kurang {format_idr(s['remaining'])}.")
+    sisa = conn.execute("SELECT * FROM sinking_funds WHERE pace='sisa'").fetchall()
+    if sisa:
+        from . import simulate   # local import: simulate -> tools
+        proj = simulate.pot_projection(conn, today)
+        for f in sisa:
+            pr = proj.get(f["alias"])
+            if not pr or pr["at_due"] is None or date.fromisoformat(f["due_date"]) < nxt:
+                continue
+            planned = sum(t["amount"] for t in snap["transfers"] if t["to_alias"] == f["alias"])
+            snap["reminders"].append(
+                f"Pot {f['alias']} (kartu dulu, pot dari sisa): setoran gajian ini {format_idr(planned)}; perkiraan terkumpul "
+                f"{format_idr(pr['at_due'])} dari {format_idr(f['target'])} pada {f['due_date']}.")
+            if pr["gap"] > 0:
+                snap["warnings"].append(
+                    f"{f['alias']}: dengan pola ini pot diperkirakan KURANG {format_idr(pr['gap'])} pada {f['due_date']}. Pilihan: kurangi "
+                    "langganan/belanja, tambah pemasukan, hitung gaji di hari tenggat, atau bicarakan jadwal dengan penerima.")
     snap["advice"] = card_advice(conn, snap, payday, hol)
     if reserve_source == "belum diset" and snap["advice"]:     # only matters when cards or savings are in play
         snap["warnings"].append("Cadangan hidup harian belum diset: set_threshold living_reserve (atau verifikasi kategori "
@@ -675,6 +810,10 @@ def generate_payday_plan(conn, today: date, payday: date | None = None,
             "SELECT c.alias FROM statements s JOIN cards c ON c.id = s.card_id WHERE s.reconciled = 0"
             " AND s.paid_at IS NULL AND s.id = (SELECT id FROM statements WHERE card_id = s.card_id ORDER BY statement_date DESC, id DESC LIMIT 1)"):
         snap["warnings"].append(f"Statement {r['alias']} belum cocok saat rekonsiliasi; angka tagihan perlu diperiksa.")
+    from . import audit     # local import: audit -> card_installments
+    for level, text in audit.run(conn, today):
+        if level in ("bad", "warn") and "tidak rekonsiliasi" not in text:
+            snap["warnings"].append("Data: " + text)
     conn.execute("INSERT INTO plans(payday,snapshot_json,created_at) VALUES (?,?,?)",
                  (payday.isoformat(), json.dumps(snap), datetime.now(timezone.utc).isoformat()))
     conn.commit()

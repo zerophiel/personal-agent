@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 10  # 10: card_lines, doc_files, statements.lines_status/lines_diff, sinking_funds.low_*; 9: card_installments, skipped_files; 8: statements.paid_amount; 7: cards.interest_bp_month; 6: transactions.merged_into, net_snapshots; 5: debts.pay_method/pay_to_alias/debit_account_alias; 2: cards.pay_method/pay_to_alias; 3: transaction dedupe, mutation_files, category_rules; 4: sinking_funds
+SCHEMA_VERSION = 11  # 11: subscriptions.ends/essential, sinking_funds.pace/due_payday; 10: card_lines, doc_files, statements.lines_status/lines_diff, sinking_funds.low_*; 9: card_installments, skipped_files; 8: statements.paid_amount; 7: cards.interest_bp_month; 6: transactions.merged_into, net_snapshots; 5: debts.pay_method/pay_to_alias/debit_account_alias; 2: cards.pay_method/pay_to_alias; 3: transaction dedupe, mutation_files, category_rules; 4: sinking_funds
 
 
 def _money(col: str, nullable: bool = False) -> str:
@@ -66,7 +66,9 @@ CREATE TABLE IF NOT EXISTS sinking_funds (
   pool_pay_to TEXT NOT NULL,            -- payee alias of the pool account number (contributions go here)
   creditor_pay_to TEXT,                 -- payee alias of the creditor's account (final payment)
   {_money('saved_so_far')} NOT NULL, saved_asof TEXT NOT NULL, note TEXT,
-  low_amount INTEGER, low_until TEXT);   -- optional low phase: deposit `low_amount` per payday up to month `low_until` (YYYY-MM), then spread the rest
+  low_amount INTEGER, low_until TEXT,   -- optional low phase: deposit `low_amount` per payday up to month `low_until` (YYYY-MM), then spread the rest
+  pace TEXT NOT NULL DEFAULT 'rata' CHECK (pace IN ('rata','sisa')),   -- rata: a set deposit per payday; sisa: cards first, the pot gets what is left
+  due_payday INTEGER NOT NULL DEFAULT 0 CHECK (due_payday IN (0,1)));   -- 1: a payday on (or just before) the due date still counts
 CREATE TABLE IF NOT EXISTS net_snapshots (
   month TEXT PRIMARY KEY, {_money('total_debt')} NOT NULL, {_money('accounts_balance', True)},
   {_money('saved_funds')} NOT NULL, created_at TEXT NOT NULL);
@@ -97,7 +99,9 @@ CREATE TABLE IF NOT EXISTS feature_requests (   -- what the bot could not do; th
 CREATE TABLE IF NOT EXISTS subscriptions (
   alias TEXT PRIMARY KEY, name TEXT NOT NULL, {_money('amount')} NOT NULL,   -- IDR per month (USD ones: approximate)
   source TEXT NOT NULL,                 -- card or account alias it is charged to
-  status TEXT NOT NULL CHECK (status IN ('active','ended','unsure')), note TEXT, updated_at TEXT NOT NULL);
+  status TEXT NOT NULL CHECK (status IN ('active','ended','unsure')), note TEXT, updated_at TEXT NOT NULL,
+  ends TEXT,                            -- YYYY-MM of the last charge (a contract with an end); NULL = no end
+  essential INTEGER NOT NULL DEFAULT 0 CHECK (essential IN (0,1)));   -- 1: never proposed as a cut (the owner's rule, e.g. for the children)
 CREATE TABLE IF NOT EXISTS skipped_files (   -- ingest files the owner chose not to record (out of range, duplicate, unreadable)
   file_ref TEXT PRIMARY KEY, reason TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS plans (
@@ -161,7 +165,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
         if col not in scols2:
             conn.execute(f"ALTER TABLE statements ADD COLUMN {col} {typ}")
     fcols = {r["name"] for r in conn.execute("PRAGMA table_info(sinking_funds)")}
-    for col, typ in (("low_amount", "INTEGER"), ("low_until", "TEXT")):
+    for col, typ in (("low_amount", "INTEGER"), ("low_until", "TEXT"),
+                     ("pace", "TEXT NOT NULL DEFAULT 'rata' CHECK (pace IN ('rata','sisa'))"),                 # v11
+                     ("due_payday", "INTEGER NOT NULL DEFAULT 0 CHECK (due_payday IN (0,1))")):
         if col not in fcols:
             conn.execute(f"ALTER TABLE sinking_funds ADD COLUMN {col} {typ}")
+    scols3 = {r["name"] for r in conn.execute("PRAGMA table_info(subscriptions)")}
+    if "ends" not in scols3:                                                                     # v11
+        conn.execute("ALTER TABLE subscriptions ADD COLUMN ends TEXT")
+    if "essential" not in scols3:
+        conn.execute("ALTER TABLE subscriptions ADD COLUMN essential INTEGER NOT NULL DEFAULT 0 CHECK (essential IN (0,1))")
     conn.commit()

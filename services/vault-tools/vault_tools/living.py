@@ -13,7 +13,7 @@ from statistics import median
 
 from .health import is_discretionary
 from .money import format_idr
-from .tools import get_threshold, id_holidays, last_working_day, sinking_required
+from .tools import current_payday, get_threshold, id_holidays, sinking_required
 
 MIN_COVERAGE_PCT = 80      # share of a month's money out that must be categorized for the month to count
 MARGIN_PCT = 10            # recommended reserve = median + 10%
@@ -59,10 +59,10 @@ def card_charges(conn) -> dict[str, int]:
 
 def commitments(conn, today: date) -> dict:
     hol = id_holidays(today.year) | id_holidays(today.year + 1) | id_holidays(today.year + 2)
-    payday = last_working_day(today.year, today.month, hol)
+    payday = current_payday(today, hol)
     fixed = conn.execute("SELECT COALESCE(SUM(amount),0) FROM fixed_expenses").fetchone()[0]
     inst = conn.execute("SELECT COALESCE(SUM(installment),0) FROM debts WHERE tenor_left > 0").fetchone()[0]
-    pot = sum(sinking_required(conn, f, payday, hol)["per_month"] for f in conn.execute("SELECT * FROM sinking_funds"))
+    pot = sum(sinking_required(conn, f, payday, hol)["per_month"] for f in conn.execute("SELECT * FROM sinking_funds"))   # 0 for a 'sisa' pot
     return {"fixed": fixed, "installments": inst, "pot": pot, "total": fixed + inst + pot}
 
 

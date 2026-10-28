@@ -32,19 +32,27 @@ ONE_OFF_FROM = 1_500_000            # a single purchase this big is shown apart:
 # card merchants -> category. The owner's own words (category_keywords) are checked before these.
 CARD_RULES: list[tuple[str, str]] = [
     ("langganan", r"netflix|spotify|youtube|disney|apple\.com|itunes|google ?(one|g1)|icloud|canva|openai|chatgpt|anthropic|"
-                  r"claude|microsoft|msbill|catchplay|gopro|sqsp|squarespace|\baws\b|amazon web|rockstar ?gym|coway|telkomsel"),
+                  r"claude|microsoft|msbill|catchplay|gopro|sqsp|squarespace|\baws\b|amazon web|rockstar ?gym|coway|telkomsel|cursor"),
     ("game-digital", r"steam|playstation|\bpsn\b|nintendo|xbox|google ?play|garena|codashop|unipin|mobile ?legends"),
     ("top-up e-wallet", r"gopay|\bovo\b|\bdana\b|shopeepay|linkaja"),
-    ("belanja-online", r"tokopedia|shopee|lazada|blibli|bukalapak|tiktok|zalora"),
-    ("kesehatan", r"halodoc|apotek|apotik|klinik|rumah ?sakit|hospital|siloam|mandaya|hermina|kimia ?farma|guardian"),
+    ("belanja-online", r"tokopedia|shopee|lazada|blibli|bukalapak|tiktok|zalora|alp\*|alipay|aliexpress|amazon(?! web)|\btemu\b"),
+    ("kesehatan", r"halodoc|apotek|apotik|klinik|rumah ?sakit|hospital|siloam|mandaya|hermina|kimia ?farma|guardian|watsons|century"),
     ("makan", r"restaurant|resto|\besb\b|cafe|coffee|kopi|boost ?juice|food|bakery|starbucks|mcdonald|\bkfc\b|chagee|"
-              r"janji ?jiwa|pizza|burger|sushi|bakmi|warung|warteg"),
-    ("transport", r"\bgrab\b|gojek|pertamina|\bshell\b|\btol\b|parkir|bluebird|\bmrt\b|\bkrl\b|kai ?access|petado"),
-    ("belanja-harian", r"indomaret|\bidm\b|alfamart|alfamidi|superindo|hypermart|lotte ?mart|ranch ?market|aeon"),
-    ("liburan", r"traveloka|tiket\.com|agoda|booking\.com|airbnb|garuda|lion ?air|airasia|citilink"),
+              r"janji ?jiwa|pizza|burger|sushi|bakmi|warung|warteg|soto|steak|sate|\bnasi\b|ayam|bebek|ramen|padang|chatime|fore ?coffee"),
+    ("transport", r"\bgrab\b|gojek|pertamina|\bshell\b|\bspbu\b|\bbp\b|vivo ?energy|\btol\b|parkir|bluebird|\bmrt\b|\bkrl\b|kai ?access|petado|\bdidi\b"),
+    ("otomotif", r"\bban\b|bengkel|auto ?2000|astra|oli |car ?wash|cuci ?mobil|spare ?part|cemara ?jaya"),
+    ("listrik", r"\bpln\b|token ?listrik"),
+    ("belanja-harian", r"indomaret|\bidm\b|alfamart|alfamidi|superindo|hypermart|lotte ?mart|ranch ?market|aeon|\bhero\b|grand ?lucky|"
+                       r"farmers ?market|transmart|carrefour|\bgiant\b|total ?buah"),
+    ("liburan", r"traveloka|tiket\.com|agoda|booking\.com|airbnb|garuda|lion ?air|airasia|citilink|cathay|singapore ?air|scoot|jetstar|"
+                r"klook|trip\.com|hotel|airport|weixin|wechat"),
+    ("elektronik", r"samsung|erafone|\bibox\b|digimap|electronic ?city|best ?denki|xiaomi|apple ?store"),
+    ("pakaian-perawatan", r"adidas|\bnike\b|uniqlo|\bh&m\b|\bzara\b|sociolla|body ?shop|\btbs\b|decathlon|sephora|matahari"),
+    ("hobi", r"pop ?mart|gramedia|\blego\b|toys|hobby"),
     ("telepon-internet", r"xl ?axiata|indosat|\bsmartfren\b|\bby\.u\b|biznet|indihome|first ?media"),
 ]
-_PAYMENT = re.compile(r"pembayaran|payment|\bpmt\b|bayar|bi-?fast|transfer|autodebet|cash ?management|livin", re.I)
+_PAYMENT = re.compile(r"pembayaran|payment|\bpmt\b|bayar|bi-?fast|transfer|autodebet|cash ?management|livin|m-?bca|klik ?bca", re.I)
+CONVERSION_DAYS = 62     # a purchase credited back in full on the same card within this many days: cancelled or turned into instalments
 _INSTALMENT = re.compile(r"cicilan|instal{1,2}ment|instlmnt|\b\d{1,3}\s*(?:of|dari)\s*\d{1,3}\b|\(\d{3}/\d{3}\)|\bke \d+ dari \d+", re.I)
 _INTEREST = re.compile(r"bunga|interest|finance ?charge", re.I)
 _FEE = re.compile(r"biaya|(?<!cof)fee|materai|meterai|stamp|iuran|overlimit|terlambat|late ?charge|chrge|charge|administration|"
@@ -172,8 +180,14 @@ def store(conn, statement_id: int, lines: list[dict]) -> dict:
                 break
     ok = abs(diff) <= _tolerance(lines)
     conn.execute("DELETE FROM card_lines WHERE statement_id=?", (statement_id,))
+    # an instalment printed without the words "cicilan" or "x/y" (e.g. "MID*Tokopedia", "IPREG...") is recognised by its exact
+    # amount: the same card, the same rupiah as one of its recorded instalments; each instalment matches one line at most
+    plans = [a["per_month"] for a in _all_instalments(conn, st["card_id"]) if a["per_month"] >= 50_000]
     for x in lines:
         kind = classify(x["description"], x["amount"])
+        if kind == "belanja" and x["amount"] in plans:
+            plans.remove(x["amount"])
+            kind = "cicilan"
         cat = categorize(conn, x["description"]) if kind == "belanja" else kind
         if kind == "belanja" and cat == "langganan":
             kind = "langganan"
@@ -231,14 +245,37 @@ def process_statement(conn, statement_id: int, ingest_dir: str, passwords: dict)
 
 # ---- answers ---------------------------------------------------------------------------------------------------
 
+def _netted(conn) -> set[int]:
+    """Ids of purchases credited back in full on the same card within CONVERSION_DAYS (cancelled, returned or converted
+    into instalments), and of those credits. Counting both would inflate purchases and refunds alike."""
+    rows = conn.execute("SELECT id, card_id, amount, kind, COALESCE(txn_date, cycle) d FROM card_lines"
+                        " WHERE kind IN ('belanja','langganan','refund') ORDER BY d, id").fetchall()
+    credits = [r for r in rows if r["kind"] == "refund"]
+    out: set[int] = set()
+    for b in (r for r in rows if r["amount"] > 0):
+        for c in credits:
+            if c["id"] in out or c["card_id"] != b["card_id"] or c["amount"] != -b["amount"]:
+                continue
+            gap = (date.fromisoformat(c["d"][:10]) - date.fromisoformat(b["d"][:10])).days
+            if 0 <= gap <= CONVERSION_DAYS:
+                out.update((b["id"], c["id"]))
+                break
+    return out
+
+
 def summary(conn, cycles: int = 3) -> dict:
     months = [r[0] for r in conn.execute("SELECT DISTINCT substr(cycle,1,7) m FROM card_lines ORDER BY m DESC LIMIT ?", (max(1, cycles),))]
     months.sort()
     out = {"months": months, "by_month": {}, "missing": [], "mismatch": []}
+    netted = _netted(conn)
     for m in months:
         rows = conn.execute("SELECT l.*, c.alias AS card FROM card_lines l JOIN cards c ON c.id = l.card_id WHERE substr(l.cycle,1,7)=?", (m,)).fetchall()
         kinds, cats, merchants, big = defaultdict(int), defaultdict(int), defaultdict(int), []
+        cancelled = 0
         for r in rows:
+            if r["id"] in netted:
+                cancelled += max(0, r["amount"])
+                continue
             kinds[r["kind"]] += r["amount"]
             if r["kind"] == "belanja":
                 cats[r["category"]] += r["amount"]
@@ -248,7 +285,8 @@ def summary(conn, cycles: int = 3) -> dict:
                     big.append((r["description"], r["amount"], r["card"]))
         cards = [r[0] for r in conn.execute("SELECT DISTINCT c.alias FROM card_lines l JOIN cards c ON c.id=l.card_id WHERE substr(l.cycle,1,7)=?", (m,))]
         out["by_month"][m] = {"kinds": dict(kinds), "categories": dict(sorted(cats.items(), key=lambda kv: -kv[1])),
-                              "merchants": sorted(merchants.items(), key=lambda kv: -kv[1])[:6], "big": big, "cards": cards}
+                              "merchants": sorted(merchants.items(), key=lambda kv: -kv[1])[:6], "big": big, "cards": cards,
+                              "cancelled": cancelled}
     for r in conn.execute("SELECT c.alias, s.statement_date, s.lines_status, s.lines_diff FROM statements s JOIN cards c ON c.id = s.card_id"
                           " WHERE s.statement_date >= ? AND IFNULL(s.lines_status,'') != 'cocok' ORDER BY s.statement_date",
                           ((months[0] + "-01") if months else "0000",)):
@@ -266,6 +304,8 @@ def format_summary(s: dict) -> str:
         lines.append(f"SIKLUS {m} ({len(d['cards'])} kartu): belanja {format_idr(k.get('belanja', 0))}; langganan {format_idr(k.get('langganan', 0))}; "
                      f"cicilan {format_idr(k.get('cicilan', 0))}; bunga {format_idr(k.get('bunga', 0))}; biaya {format_idr(k.get('biaya', 0))}; "
                      f"refund {format_idr(-k.get('refund', 0))}; dibayar {format_idr(-k.get('pembayaran', 0))}")
+        if d.get("cancelled"):
+            lines.append(f"  dibatalkan/dikonversi ke cicilan (belanja yang dikreditkan balik, tidak dihitung): {format_idr(d['cancelled'])}")
         if d["categories"]:
             lines.append("  belanja per kategori: " + "; ".join(f"{c} {format_idr(v)}" for c, v in d["categories"].items()))
         if d["merchants"]:

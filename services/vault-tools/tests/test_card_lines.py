@@ -167,6 +167,41 @@ class Store(unittest.TestCase):
         self.assertIn("🛒 Belanja: <b>Rp 3.040.845</b>", html)
 
 
+class Accuracy(unittest.TestCase):
+    def test_an_instalment_without_the_word_cicilan_is_recognised_by_its_exact_amount(self):
+        conn = card_world()
+        ci.record(conn, "bca-1", "2026-10-12", [{"description": "Tokopedia 378922", "amount": 378_922, "seq": 10, "total": 18}])
+        text = STATEMENT + "\n03-OKT 03-OKT MID*Tokopedia 378.922\n04-OKT 04-OKT MID*Tokopedia 378.922"
+        sid = add_statement(conn, debits=DEBITS + 2 * 378_922)
+        self.assertEqual(cl.store(conn, sid, cl.parse_text(text, date(2026, 10, 12)))["status"], "cocok")
+        kinds = sorted(r[0] for r in conn.execute("SELECT kind FROM card_lines WHERE description LIKE 'MID*%'"))
+        self.assertEqual(kinds, ["belanja", "cicilan"])                       # one instalment matches one line only
+
+    def test_more_merchants_have_a_category(self):
+        conn = card_world()
+        cases = {"CATHAY PACIFIC AIRWAYS HKG": "liburan", "PLN PREPAID 5123": "listrik", "SAMSUNG ERF JAKARTA": "elektronik",
+                 "ADIDAS GRAND INDONESIA": "pakaian-perawatan", "POP MART PIK": "hobi", "CEMARA JAYA BAN": "otomotif",
+                 "SPBU 34-12345": "transport", "HERO SUPERMARKET": "belanja-harian", "ALP*OTHERRETAIL": "belanja-online",
+                 "AMAZON WEB SERVICES": "langganan", "SOTO KUDUS BLOK M": "makan"}
+        for desc, want in cases.items():
+            self.assertEqual(cl.categorize(conn, desc), want, desc)
+
+    def test_a_credit_from_m_bca_is_a_payment_not_a_refund(self):
+        self.assertEqual(cl.classify("M-BCA ID", -500_000), "pembayaran")
+
+    def test_a_purchase_credited_back_is_neither_spending_nor_refund(self):
+        conn = card_world()
+        text = STATEMENT + "\n02-OKT 02-OKT SAMSUNG ERF JAKARTA 6.800.000\n10-OKT 10-OKT SAMSUNG ERF JAKARTA 6.800.000 CR"
+        sid = add_statement(conn)                                             # the purchase and its credit cancel out
+        self.assertEqual(cl.store(conn, sid, cl.parse_text(text, date(2026, 10, 12)))["status"], "cocok")
+        d = cl.summary(conn)["by_month"]["2026-10"]
+        self.assertEqual(d["kinds"]["belanja"], 337_995 + 109_350 + 93_500 + 2_500_000)
+        self.assertNotIn("refund", d["kinds"])
+        self.assertEqual(d["cancelled"], 6_800_000)
+        self.assertNotIn("SAMSUNG", " ".join(x[0] for x in d["big"]))
+        self.assertIn("dibatalkan/dikonversi ke cicilan", cl.format_summary(cl.summary(conn)))
+
+
 class Recovery(unittest.TestCase):
     """Real layouts that hid an amount: the statement totals let the code recover it, but only when it is unambiguous."""
 

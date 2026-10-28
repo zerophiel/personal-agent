@@ -10,7 +10,7 @@ from datetime import date
 from . import card_installments, card_lines, health, roadmap, subscriptions, tools
 from .money import format_idr
 
-NAMES = ("bantuan", "rencana", "tagihan", "belanja", "cicilan", "anggaran", "peta", "kondisi", "data", "usulan")
+NAMES = ("bantuan", "rencana", "tagihan", "belanja", "cicilan", "anggaran", "peta", "kondisi", "data", "periksa", "usulan")
 
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des")
 
@@ -268,6 +268,17 @@ def _belanja(conn, today: date) -> str:
     return "\n\n".join(out)
 
 
+def _periksa(conn, today: date) -> str:
+    from . import audit
+    found = audit.run(conn, today)
+    if not found:
+        return f"✅ {b('Periksa data')}\nSemua sumber cocok: tagihan, baris tagihan, pembayaran, langganan, cicilan, pot."
+    icon = {"bad": "⛔", "warn": "⚠️", "info": "ℹ️"}
+    order = {"bad": 0, "warn": 1, "info": 2}
+    rows = [f"{icon[s]} {e(t)}" for s, t in sorted(found, key=lambda f: order[f[0]])]
+    return f"🔎 {b('Periksa data')} <i>(aturan tetap, dihitung kode)</i>\n" + "\n".join(rows)
+
+
 def _usulan(conn, today: date) -> str:
     rows = conn.execute("SELECT id, created_at, title, detail, status FROM feature_requests ORDER BY CASE status WHEN 'baru' THEN 0 WHEN 'dikerjakan' THEN 1 ELSE 2 END, id DESC LIMIT 15").fetchall()
     if not rows:
@@ -280,7 +291,7 @@ def _usulan(conn, today: date) -> str:
 
 def build(conn, name: str, today: date) -> str:
     fn = {"bantuan": lambda c, t: HELP, "rencana": _rencana, "tagihan": _tagihan, "belanja": _belanja, "cicilan": _cicilan,
-          "anggaran": _anggaran, "peta": _peta, "kondisi": _kondisi, "data": _data, "usulan": _usulan}.get(name)
+          "anggaran": _anggaran, "peta": _peta, "kondisi": _kondisi, "data": _data, "periksa": _periksa, "usulan": _usulan}.get(name)
     if fn is None:
         raise ValueError("laporan tidak dikenal")
     return fn(conn, today)

@@ -6,6 +6,11 @@ Rules (docs/payday.md):
 - Obligations are funded in priority order; allocation is sequential, so once one item is
   not fully funded every later item gets 0. Nothing is dropped silently: unfunded amounts
   are reported with an estimated cost of delay.
+- The living reserve is kept before anything that is saving rather than a bill: the emergency
+  fund, the pot and card balances beyond the minimum are paid only from what is above it, so a
+  pot deposit can never squeeze the money for daily life.
+- A 'pool_rest' pot (pattern "sisa") is paid after the card balances and takes what is left; it
+  is open-ended, so an unpaid part is not a shortfall.
 """
 from __future__ import annotations
 
@@ -16,9 +21,10 @@ from typing import Iterable
 
 from .money import bp_of, check_idr
 
-# Lower number = funded first.
-P_OVERDUE, P_MIN_DUE, P_ESSENTIAL, P_INSTALLMENT, P_CARD_REST, P_SAVING = 0, 1, 2, 3, 4, 5
-KINDS = {"card", "fixed", "debt", "pool", "saving"}
+# Lower number = funded first. From P_EMERGENCY on, only money above the living reserve is used.
+P_OVERDUE, P_MIN_DUE, P_ESSENTIAL, P_INSTALLMENT, P_EMERGENCY, P_POT, P_CARD_REST, P_POT_REST, P_SAVING = range(9)
+ABOVE_RESERVE = P_EMERGENCY
+KINDS = {"card", "fixed", "debt", "pool", "pool_rest", "emergency", "saving"}
 
 
 def is_working_day(d: date, holidays: frozenset[date]) -> bool:
@@ -113,11 +119,14 @@ def _items(payday: date, obligations: Iterable[Obligation], horizon: date):
                             "tagihan kartu - sisa saldo (bayar penuh)", o.from_account, o.late_cost_bp,
                             o.method, o.pay_to))
             continue
-        prio = {"fixed": P_ESSENTIAL, "debt": P_INSTALLMENT, "pool": P_INSTALLMENT,
-                "saving": P_SAVING}[o.kind]
-        out.append((P_OVERDUE if overdue else prio, o.due, o.payee_alias, o.amount,
-                    {"fixed": "pengeluaran tetap", "debt": "cicilan", "pool": "transfer pool",
-                     "saving": "tabungan"}[o.kind], o.from_account, o.late_cost_bp, o.method, o.pay_to))
+        prio = {"fixed": P_ESSENTIAL, "debt": P_INSTALLMENT, "emergency": P_EMERGENCY, "pool": P_POT,
+                "pool_rest": P_POT_REST, "saving": P_SAVING}[o.kind]
+        if overdue and o.kind in ("fixed", "debt"):
+            prio = P_OVERDUE
+        out.append((prio, o.due, o.payee_alias, o.amount,
+                    {"fixed": "pengeluaran tetap", "debt": "cicilan", "pool": "transfer pool", "emergency": "dana darurat",
+                     "pool_rest": "setoran pot (sisa setelah kartu)", "saving": "tabungan"}[o.kind],
+                    o.from_account, o.late_cost_bp, o.method, o.pay_to))
     # stable total order: priority, due date, alias, reason
     # card balances beyond the minimum: highest interest first (avalanche), then earliest due
     out.sort(key=lambda t: (t[0], -t[6] if t[0] == P_CARD_REST else 0, t[1], t[2], t[4]))
@@ -126,8 +135,8 @@ def _items(payday: date, obligations: Iterable[Obligation], horizon: date):
 
 def build_plan(payday: date, salary: int, obligations: Iterable[Obligation],
                holidays: Iterable[date] = (), buffer: int = 0, reserve: int = 0) -> Plan:
-    """`reserve` is cash kept for day-to-day living: obligations and card minimums are paid before it,
-    card balances beyond the minimum and savings only from what is left above it."""
+    """`reserve` is cash kept for day-to-day living: obligations and card minimums are paid before it; the emergency
+    fund, the pot, card balances beyond the minimum and savings only from what is left above it."""
     check_idr(salary)
     check_idr(buffer)
     check_idr(reserve)
@@ -139,22 +148,22 @@ def build_plan(payday: date, salary: int, obligations: Iterable[Obligation],
     unfunded: list[Unfunded] = []
     kept_by_reserve = False
     for prio, due, alias, amount, reason, acct, late_bp, method, pay_to in _items(payday, obligations, nxt):
-        limit = remaining - reserve if prio >= P_CARD_REST else remaining
+        limit = remaining - reserve if prio >= ABOVE_RESERVE else remaining
         pay = min(amount, max(0, limit))
-        if prio >= P_CARD_REST and pay < amount and reserve and remaining - pay <= reserve:
-            kept_by_reserve = True       # held back by the living reserve, not by an empty account
         remaining -= pay
         if pay:
             tdate = payday if prio == P_OVERDUE else max(payday, due - timedelta(days=3))
             transfers.append(Transfer(tdate, acct, alias, pay, reason, method, pay_to, due))
         short = amount - pay
-        if short:
+        if short and prio != P_POT_REST:          # the pot after the cards takes what is left: the rest is not a shortfall
+            if prio >= ABOVE_RESERVE and reserve and remaining <= reserve:
+                kept_by_reserve = True       # held back by the living reserve, not by an empty account
             unfunded.append(Unfunded(alias, short, reason, bp_of(short, late_bp)))
     days = (nxt - payday).days
     warnings = []
     if unfunded:
         if kept_by_reserve and reserve:
-            warnings.append(f"Sebagian saldo kartu/tabungan belum dibayar karena kas Rp {reserve:,} ".replace(",", ".")
+            warnings.append(f"Sebagian saldo kartu/pot/tabungan belum dibayar karena kas Rp {reserve:,} ".replace(",", ".")
                             + "dicadangkan untuk hidup harian; lihat daftar belum terdanai dan saran.")
         else:
             warnings.append("Gaji tidak cukup untuk semua kewajiban; lihat daftar belum terdanai.")

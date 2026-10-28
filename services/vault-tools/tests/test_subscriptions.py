@@ -37,5 +37,23 @@ class Subscriptions(unittest.TestCase):
         self.assertEqual(sub.format_list(conn), "Belum ada langganan tercatat.")
 
 
+class OwnerRules(unittest.TestCase):
+    def test_a_protected_subscription_stays_protected_when_updated_without_the_flag(self):
+        conn = connect(":memory:")
+        self.assertIn("WAJIB", sub.upsert(conn, "rockstar-gym", "Rockstar Gym", 1_458_000, "hsbc-5915", note="gym Gracia (anak)", essential=True))
+        sub.upsert(conn, "rockstar-gym", "Rockstar Gym", 1_500_000, "jenius-0480")           # moved card, new price
+        self.assertEqual(conn.execute("SELECT essential, amount FROM subscriptions").fetchone()[:], (1, 1_500_000))
+        self.assertIn("WAJIB: jangan diusulkan dipotong", sub.format_list(conn))
+
+    def test_month_aware_total_drops_a_contract_after_its_last_month(self):
+        conn = connect(":memory:")
+        sub.upsert(conn, "coway-cs", "Coway CS", 400_000, "mega-5855", ends="2027-01")
+        sub.upsert(conn, "netflix", "Netflix", 186_000, "jenius-0480")
+        self.assertEqual((sub.active_total(conn, "2027-01"), sub.active_total(conn, "2027-02"), sub.active_total(conn)),
+                         (586_000, 186_000, 586_000))
+        with self.assertRaises(ValueError):
+            sub.upsert(conn, "x", "X", 1, "a", ends="2027-13")
+
+
 if __name__ == "__main__":
     unittest.main()
