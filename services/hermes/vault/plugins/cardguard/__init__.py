@@ -337,12 +337,96 @@ def on_inbound(event, **kwargs):
         return {"action": "skip"}
 
 
+# ---- number guard: every rupiah amount in the bot's answer must come from the tools or the owner's own words -----------
+# The model only relays numbers computed by vault-tools. An amount in its answer that no tool printed and the owner did not
+# write is a number the model made up or calculated itself: the answer gets a visible warning under it (never silently).
+_MONEY = re.compile(r"(?i)(rp\.?\s*)?(\d{1,3}(?:\.\d{3})+|\d+(?:,\d{1,3})?)\s*(jt|juta|rb|ribu)?(?![\w])")
+_UNIT = {"jt": 1_000_000, "juta": 1_000_000, "rb": 1_000, "ribu": 1_000}
+_seen: dict[str, set[int]] = {}          # session id -> amounts printed by tools or written by the owner in that session
+_SEEN_SESSIONS = 50
+
+
+def amounts(text: str, money_only: bool = False) -> list[tuple[int, int]]:
+    """(value, tolerance) for each amount in `text`. money_only: only 'Rp ...' or '... jt/rb' forms (the bot's answer);
+    otherwise every number (tool output, the owner's words). A compact '13,56 jt' may round anything within half a step."""
+    out = []
+    for m in _MONEY.finditer(text or ""):
+        rp, num, unit = m.group(1), m.group(2), (m.group(3) or "").lower()
+        if money_only and not rp and not unit:
+            continue
+        mult = _UNIT.get(unit, 1)
+        if "," in num:
+            if mult == 1:
+                continue                                  # 1,75 (percent, rate): not an amount
+            whole, frac = num.split(",")
+            value, step = (int(whole) * mult + int(frac) * mult // 10 ** len(frac)), mult // 10 ** len(frac)
+        else:
+            value, step = int(num.replace(".", "")) * mult, mult
+        out.append((value, step // 2 if mult > 1 else 0))
+    return out
+
+
+def _remember(session_id: str, text) -> None:
+    if not session_id or text is None:
+        return
+    if session_id not in _seen and len(_seen) >= _SEEN_SESSIONS:
+        _seen.pop(next(iter(_seen)))
+    _seen.setdefault(session_id, set()).update(v for v, _ in amounts(text if isinstance(text, str) else json.dumps(text, default=str)))
+
+
+def on_pre_llm(session_id="", user_message=None, conversation_history=None, **kwargs):
+    try:
+        _remember(session_id, user_message)
+        for msg in conversation_history or ():
+            if isinstance(msg, dict) and msg.get("role") in ("tool", "user"):
+                _remember(session_id, msg.get("content"))
+    except Exception:  # noqa: BLE001 - the guard must never break a turn
+        log.debug("number guard: history scan failed")
+    return None
+
+
+def on_tool_result(session_id="", result=None, **kwargs):
+    try:
+        _remember(session_id, result)
+    except Exception:  # noqa: BLE001
+        log.debug("number guard: tool result scan failed")
+    return None
+
+
+def check_answer(text: str, allowed: set[int]) -> list[int]:
+    """Amounts (>= Rp 1.000) in the answer that match nothing the tools printed or the owner wrote."""
+    bad = []
+    for value, tol in amounts(text, money_only=True):
+        if value < 1_000 or value in allowed or (tol and any(abs(a - value) <= tol for a in allowed)):
+            continue
+        if value not in bad:
+            bad.append(value)
+    return bad
+
+
+def on_llm_output(response_text="", session_id="", **kwargs):
+    try:
+        bad = check_answer(response_text, _seen.get(session_id, set()))
+        if not bad:
+            return None
+        log.warning("number guard: %d amount(s) not from the tools in session %s", len(bad), session_id[-6:])
+        shown = ", ".join("Rp " + f"{v:,}".replace(",", ".") for v in bad[:5])
+        return (response_text + f"\n\n⚠️ Cek angka: {shown} tidak ditemukan di hitungan sistem sesi ini (mungkin hitungan atau "
+                "pembulatan bot sendiri). Angka resmi ada di /rencana, /tagihan, dan /rincian.")
+    except Exception:  # noqa: BLE001
+        log.debug("number guard: check failed")
+        return None
+
+
 _started = False
 
 
 def register(ctx):
     global _started
     ctx.register_hook("pre_gateway_dispatch", on_inbound)
+    ctx.register_hook("pre_llm_call", on_pre_llm)
+    ctx.register_hook("post_tool_call", on_tool_result)
+    ctx.register_hook("transform_llm_output", on_llm_output)
     if not _started:
         _started = True
         threading.Thread(target=_sweeper_loop, daemon=True).start()

@@ -252,5 +252,35 @@ class CardGuard(unittest.TestCase):
         self.assertEqual(cg.on_inbound(Boom()), {"action": "skip"})
 
 
+class NumberGuard(unittest.TestCase):
+    TOOL = "Pot hutang-teman: setoran gajian ini Rp 0; perkiraan terkumpul Rp 121.437.703, KURANG Rp 13.562.297; dbs: 1903656"
+
+    def setUp(self):
+        cg._seen.clear()
+
+    def test_amount_forms(self):
+        self.assertEqual(cg.amounts("Rp 1.234.567"), [(1_234_567, 0)])
+        self.assertEqual(cg.amounts("Rp 13,56 jt dan 500 rb", money_only=True), [(13_560_000, 5_000), (500_000, 500)])
+        self.assertEqual(cg.amounts("bunga 1,75% per bulan, 15 gajian, …5915", money_only=True), [])
+
+    def test_numbers_from_the_tools_and_the_owner_pass_and_made_up_ones_are_flagged(self):
+        cg.on_pre_llm(session_id="s1", user_message="sisa uang harian 4.994.157", conversation_history=[])
+        cg.on_tool_result(session_id="s1", result=self.TOOL)
+        ok = "Pot kurang **Rp 13.562.297** (sekitar Rp 13,56 jt); DBS Rp 1.903.656; sisa harianmu Rp 4.994.157."
+        self.assertIsNone(cg.on_llm_output(response_text=ok, session_id="s1"))
+        out = cg.on_llm_output(response_text=ok + " Totalnya Rp 15.465.953.", session_id="s1")   # the model's own sum
+        self.assertTrue(out.startswith(ok))
+        self.assertIn("⚠️ Cek angka: Rp 15.465.953", out)
+
+    def test_a_new_session_knows_nothing_until_the_tools_speak(self):
+        self.assertIn("Cek angka", cg.on_llm_output(response_text="Tagihan Rp 8.993.569.", session_id="fresh"))
+        cg.on_pre_llm(session_id="fresh", conversation_history=[{"role": "tool", "content": "sisa Rp 8.993.569"}])
+        self.assertIsNone(cg.on_llm_output(response_text="Tagihan Rp 8.993.569.", session_id="fresh"))
+
+    def test_the_guard_never_breaks_a_turn(self):
+        self.assertIsNone(cg.on_llm_output(response_text=None, session_id=None))
+        self.assertIsNone(cg.on_pre_llm(session_id="x", conversation_history=[object()]))
+
+
 if __name__ == "__main__":
     unittest.main()
