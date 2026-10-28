@@ -164,8 +164,8 @@ MENU = [
     ("new", "Mulai percakapan baru (data tidak hilang)"),
     ("stop", "Hentikan proses yang sedang berjalan"),
 ]
-MENU_FIRST_DELAY = int(os.environ.get("CARDGUARD_MENU_DELAY", "90"))
-MENU_REPEAT = 1800
+MENU_FIRST_DELAY = int(os.environ.get("CARDGUARD_MENU_DELAY", "45"))
+MENU_CHECK_EVERY = int(os.environ.get("CARDGUARD_MENU_CHECK", "120"))
 _SCOPES = ({"type": "default"}, {"type": "all_private_chats"})
 
 
@@ -175,15 +175,34 @@ def push_menu() -> int:
     return sum(1 for scope in _SCOPES if _bot("setMyCommands", commands=cmds, scope=json.dumps(scope)) is not None)
 
 
+def menu_is_ours() -> bool:
+    """True when Telegram already shows the owner's list in every scope (Hermes rewrites its stock menu on each
+    (re)connect, at a moment we cannot predict, so we look instead of guessing)."""
+    want = [{"command": c, "description": d} for c, d in MENU]
+    for scope in _SCOPES:
+        got = _bot("getMyCommands", scope=json.dumps(scope))
+        if got is None or [{"command": g.get("command"), "description": g.get("description")} for g in got] != want:
+            return False
+    return True
+
+
+def ensure_menu() -> bool:
+    """Push only when the shown menu differs. Returns True when a push was needed."""
+    if menu_is_ours():
+        return False
+    ok = push_menu()
+    log.info("cardguard: command menu restored in %d scope(s)", ok)
+    return True
+
+
 def _menu_loop() -> None:
-    time.sleep(MENU_FIRST_DELAY)          # after Hermes has registered (and overwritten) its stock menu
+    time.sleep(MENU_FIRST_DELAY)
     while True:
         try:
-            ok = push_menu()
-            log.info("cardguard: command menu pushed in %d scope(s)", ok)
+            ensure_menu()
         except Exception:  # noqa: BLE001
-            log.error("cardguard: command menu push failed")
-        time.sleep(MENU_REPEAT)
+            log.error("cardguard: command menu check failed")
+        time.sleep(MENU_CHECK_EVERY)
 
 
 def _chunks(text: str, limit: int = 3800) -> list[str]:

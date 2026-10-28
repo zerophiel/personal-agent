@@ -113,6 +113,30 @@ class CardGuard(unittest.TestCase):
             self.assertIn(must, names)
         self.assertNotIn("model", names)                                              # stock commands are not shown
 
+    def test_the_menu_is_restored_only_when_hermes_has_overwritten_it(self):
+        shown = {"default": [{"command": "help", "description": "stock"}], "all_private_chats": [{"command": "help", "description": "stock"}]}
+        calls = []
+
+        def bot(method, **params):
+            calls.append(method)
+            scope = json.loads(params["scope"])["type"]
+            if method == "getMyCommands":
+                return shown[scope]
+            shown[scope] = json.loads(params["commands"])
+            return True
+        cg._bot = bot
+        self.assertTrue(cg.ensure_menu())                          # stock menu on screen: restore ours
+        self.assertEqual(calls.count("setMyCommands"), 2)
+        calls.clear()
+        self.assertFalse(cg.ensure_menu())                         # already ours: no write at all
+        self.assertEqual(calls.count("setMyCommands"), 0)
+        shown["default"] = [{"command": "help", "description": "stock"}]                  # Hermes reconnects and overwrites
+        self.assertTrue(cg.ensure_menu())
+
+    def test_a_failing_bot_api_never_raises_from_the_menu_check(self):
+        cg._bot = lambda method, **p: None
+        self.assertTrue(cg.ensure_menu() in (True, False))
+
     def test_rewrites_to_alias_token_and_deletes_raw(self):
         for raw in ("4111 1111 1111 1111", "4111111111111111", "4111-1111-1111-1111"):
             out = cg.on_inbound(ev(f"kartu {raw} ok"))
