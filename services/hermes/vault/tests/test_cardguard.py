@@ -63,11 +63,36 @@ class CardGuard(unittest.TestCase):
         self.assertIsNone(cg.on_inbound(ev("/model")))
         self.assertEqual(cg.on_inbound(ev("/rencana", chat_type="group")), None)    # private chat only
 
-    def test_long_reports_are_split_under_the_telegram_limit(self):
+    def test_reports_go_out_as_html_split_on_blank_lines_under_the_telegram_limit(self):
+        paras = [f"<b>Bagian {i}</b>\n" + ("baris panjang " * 60) for i in range(12)]          # about 900 characters each
+        self.f.body = "\n\n".join(paras).encode()
+        cg.on_inbound(ev("/data"))
+        sent = [p for m, p in self.f.bot_calls if m == "sendMessage"]
+        self.assertGreater(len(sent), 1)
+        for p in sent:
+            self.assertLessEqual(len(p["text"]), 3800)
+            self.assertEqual(p["parse_mode"], "HTML")
+            self.assertEqual(p["text"].count("<b>"), p["text"].count("</b>"))                     # never cut inside a tag
+        self.assertEqual("\n\n".join(p["text"] for p in sent), "\n\n".join(paras))
+
+    def test_a_single_huge_paragraph_is_hard_cut_as_a_last_resort(self):
         self.f.body = ("x" * 9000).encode()
         cg.on_inbound(ev("/data"))
-        sizes = [len(p["text"]) for m, p in self.f.bot_calls if m == "sendMessage"]
-        self.assertEqual(sizes, [3800, 3800, 1400])
+        self.assertEqual([len(p["text"]) for m, p in self.f.bot_calls if m == "sendMessage"], [3800, 3800, 1400])
+
+    def test_if_telegram_rejects_the_html_the_same_text_is_sent_plain(self):
+        calls = []
+
+        def bot(method, **params):
+            calls.append((method, params))
+            return None if params.get("parse_mode") == "HTML" else {"message_id": 1}
+        cg._bot = bot
+        self.f.body = "<b>Judul</b>\nisi &amp; lagi".encode()
+        cg.on_inbound(ev("/tagihan"))
+        sent = [p for m, p in calls if m == "sendMessage"]
+        self.assertEqual(len(sent), 2)
+        self.assertEqual(sent[1]["text"], "Judul\nisi & lagi")
+        self.assertNotIn("parse_mode", sent[1])
 
     def test_a_failing_report_tells_the_owner_and_still_skips(self):
         self.f.status, self.f.body = 500, b"boom"

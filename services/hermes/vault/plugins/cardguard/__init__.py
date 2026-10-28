@@ -186,6 +186,28 @@ def _menu_loop() -> None:
         time.sleep(MENU_REPEAT)
 
 
+def _chunks(text: str, limit: int = 3800) -> list[str]:
+    """Split on blank lines (each paragraph is self-contained HTML), packing up to `limit` characters; a paragraph that is
+    itself too long falls back to line, then hard, cuts."""
+    parts, cur = [], ""
+    for para in text.split("\n\n"):
+        pieces = [para] if len(para) <= limit else [para[i:i + limit] for i in range(0, len(para), limit)]
+        for piece in pieces:
+            if cur and len(cur) + 2 + len(piece) > limit:
+                parts.append(cur)
+                cur = piece
+            else:
+                cur = f"{cur}\n\n{piece}" if cur else piece
+    if cur:
+        parts.append(cur)
+    return parts
+
+
+def _plain(html_text: str) -> str:
+    import html as _html
+    return _html.unescape(re.sub(r"</?(?:b|i|code|pre|u|s)>", "", html_text))
+
+
 def _report(event, name: str):
     status, body = _post("/internal/report", {"name": name}, timeout=30)
     chat_id = event.source.chat_id
@@ -193,10 +215,13 @@ def _report(event, name: str):
         log.error("cardguard: report %s failed status=%s", name, status)
         _notify(event, "Gagal mengambil laporan. Coba lagi nanti.")
         return {"action": "skip"}
-    text = body.decode()
-    for i in range(0, len(text), 3800):                        # Telegram caps a message at 4096 characters
-        _bot("sendMessage", chat_id=chat_id, text=text[i:i + 3800], disable_web_page_preview="true")
+    for part in _chunks(body.decode()):
+        sent = _bot("sendMessage", chat_id=chat_id, text=part, parse_mode="HTML", disable_web_page_preview="true")
+        if sent is None:                  # Telegram refused the markup: send the same text plain rather than nothing
+            log.error("cardguard: report %s html rejected, sending plain", name)
+            _bot("sendMessage", chat_id=chat_id, text=_plain(part), disable_web_page_preview="true")
     return {"action": "skip"}
+
 
 # ---- hook ------------------------------------------------------------------------------
 
