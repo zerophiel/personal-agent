@@ -18,6 +18,13 @@ agent:
     - cronjob
     - memory
     - kanban
+    - computer_use          # remote screen control: never in the finance zone
+    - image_gen             # not needed; each enabled toolset adds schema tokens to every session
+    - tts
+    - skills                # instructions live in SOUL.md, not in Hermes skills
+    - todo
+    - session_search        # old sessions carry stale facts; the ledger is the source of truth
+    - connections
 
 auxiliary:
   compression:
