@@ -177,6 +177,15 @@ class Accuracy(unittest.TestCase):
         kinds = sorted(r[0] for r in conn.execute("SELECT kind FROM card_lines WHERE description LIKE 'MID*%'"))
         self.assertEqual(kinds, ["belanja", "cicilan"])                       # one instalment matches one line only
 
+    def test_an_instalment_already_printed_as_one_does_not_claim_a_purchase_of_the_same_amount(self):
+        conn = card_world()
+        ci.record(conn, "bca-1", "2026-10-12", [{"description": "Shopee 12 bulan", "amount": 476_990, "seq": 11, "total": 12}])
+        text = STATEMENT + "\n03-OKT 03-OKT TOKOPEDIA JAKARTA 476.990\n04-OKT 04-OKT INSTALLMENT 11/12 SHOPEE 476.990"
+        sid = add_statement(conn, debits=DEBITS + 2 * 476_990)
+        self.assertEqual(cl.store(conn, sid, cl.parse_text(text, date(2026, 10, 12)))["status"], "cocok")
+        got = dict(conn.execute("SELECT substr(description,1,9), kind FROM card_lines WHERE amount=476990").fetchall())
+        self.assertEqual(got, {"TOKOPEDIA": "belanja", "INSTALLME": "cicilan"})
+
     def test_more_merchants_have_a_category(self):
         conn = card_world()
         cases = {"CATHAY PACIFIC AIRWAYS HKG": "liburan", "PLN PREPAID 5123": "listrik", "SAMSUNG ERF JAKARTA": "elektronik",

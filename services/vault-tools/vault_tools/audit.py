@@ -17,15 +17,20 @@ from .money import format_idr
 
 STATEMENT_EVERY_DAYS = 35      # a card prints a statement about every 30 days; later than this, the newest one is missing
 POT_STALE_DAYS = 40
-_GENERIC = {"one", "plan", "unit", "cs", "domain", "workspace", "langganan", "premium", "family", "dan", "the"}
+_GENERIC = {"one", "plan", "unit", "cs", "domain", "workspace", "langganan", "premium", "family", "dan", "the", "email", "sewa",
+            "paket", "termasuk", "perawatan", "kontrak", "via"}
 _SYNONYMS = {"squarespace": r"sqsp|squarespace", "microsoft": r"microsoft|msbill", "anthropic": r"anthropic|claude",
              "rockstar": r"rockstar", "google": r"google ?(one|g1)", "apple": r"apple\.com|itunes"}
 
 
 def _keyword(alias: str, name: str) -> str | None:
-    for tok in re.findall(r"[a-z0-9]+", f"{name} {alias}".lower()):
+    """The merchant pattern of a subscription: a known merchant anywhere in its name wins (so "Email domain (Workspace via
+    Squarespace)" and "Domain (Squarespace)" both mean Squarespace), else its first distinctive word."""
+    toks = re.findall(r"[a-z0-9]+", f"{name} {alias}".lower())
+    for tok in toks:
         if tok in _SYNONYMS:
             return _SYNONYMS[tok]
+    for tok in toks:
         if len(tok) >= 4 and tok not in _GENERIC and not tok.isdigit():
             return re.escape(tok)
     return None
@@ -70,11 +75,20 @@ def run(conn, today: date) -> list[tuple[str, str]]:
     if cycle:
         lines = conn.execute("SELECT substr(cycle,1,7) m, description d, amount a, kind FROM card_lines WHERE kind IN ('belanja','langganan','refund')"
                              " AND substr(cycle,1,7) >= ?", ((date.fromisoformat(cycle + "-01") - timedelta(days=62)).strftime("%Y-%m"),)).fetchall()
+        bill_date = conn.execute("SELECT max(statement_date) FROM statements WHERE substr(statement_date,1,7)=?", (cycle,)).fetchone()[0]
         groups: dict[str, list] = {}
-        for s in conn.execute("SELECT * FROM subscriptions WHERE status='active' AND (ends IS NULL OR ends >= ?)", (cycle,)):
+        stopped: dict[str, list] = {}
+        for s in conn.execute("SELECT * FROM subscriptions WHERE status IN ('active','ended')"):
             kw = _keyword(s["alias"], s["name"])
-            if kw:
+            if not kw:
+                continue
+            if s["status"] == "active" and (s["ends"] is None or s["ends"] >= cycle):
                 groups.setdefault(kw, []).append(s)
+            elif s["status"] == "ended":
+                stopped.setdefault(kw, []).append(s)
+
+        def after_bill(subs) -> bool:      # the owner's latest word on these came after the bill: the bill is old news
+            return bool(bill_date) and all((s["updated_at"] or "")[:10] > bill_date for s in subs)
         for kw, subs in groups.items():
             expected = sum(s["amount"] for s in subs)
             actual = sum(x["a"] for x in lines if x["m"] == cycle and re.search(kw, x["d"], re.I))
@@ -83,13 +97,24 @@ def run(conn, today: date) -> list[tuple[str, str]]:
                 out.append(("info", f"Langganan {names} (tercatat {format_idr(expected)}/bulan) tidak terlihat di tagihan kartu siklus {cycle}: "
                                     "pindah kartu, dibayar dari rekening, atau sudah berhenti?"))
             elif actual > expected + max(50_000, expected // 10):
-                out.append(("warn", f"Langganan {names}: tercatat {format_idr(expected)}/bulan, tetapi kartu menagih {format_idr(actual)} "
-                                    f"di siklus {cycle}. Perbarui catatan atau cek tagihan ganda."))
+                newer = after_bill(subs)
+                out.append(("info" if newer else "warn",
+                            f"Langganan {names}: tercatat {format_idr(expected)}/bulan, tetapi kartu menagih {format_idr(actual)} di siklus {cycle} "
+                            "(bisa termasuk pembelian satu kali di merchant yang sama). "
+                            + ("Catatan sudah diperbarui pemilik setelah tagihan itu; cek lagi di tagihan berikutnya." if newer
+                               else "Perbarui catatan atau cek tagihan ganda.")))
             elif actual < expected - max(50_000, expected // 10):
                 out.append(("info", f"Langganan {names}: tercatat {format_idr(expected)}/bulan, kartu menagih {format_idr(actual)} di siklus {cycle}."))
+        for kw, subs in stopped.items():
+            if kw in groups:
+                continue
+            actual = sum(x["a"] for x in lines if x["m"] == cycle and re.search(kw, x["d"], re.I))
+            if actual > 0 and not after_bill(subs):
+                out.append(("warn", f"Langganan {', '.join(s['alias'] for s in subs)} tercatat BERHENTI, tetapi kartu masih menagih "
+                                    f"{format_idr(actual)} di siklus {cycle}. Pastikan benar sudah dibatalkan."))
         seen: dict[str, set] = {}
         for x in lines:
-            if x["kind"] != "langganan" or any(re.search(kw, x["d"], re.I) for kw in groups):
+            if x["kind"] != "langganan" or any(re.search(kw, x["d"], re.I) for kw in list(groups) + list(stopped)):
                 continue
             key = " ".join(re.sub(r"[^A-Za-z ]+", " ", x["d"]).split()[:2]).upper()
             if key:

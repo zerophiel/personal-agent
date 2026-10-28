@@ -811,7 +811,11 @@ def generate_payday_plan(conn, today: date, payday: date | None = None,
             " AND s.paid_at IS NULL AND s.id = (SELECT id FROM statements WHERE card_id = s.card_id ORDER BY statement_date DESC, id DESC LIMIT 1)"):
         snap["warnings"].append(f"Statement {r['alias']} belum cocok saat rekonsiliasi; angka tagihan perlu diperiksa.")
     from . import audit     # local import: audit -> card_installments
-    for level, text in audit.run(conn, today):
+    try:                    # the audit is auxiliary: it must never take the owner's payday list down
+        found = audit.run(conn, today)
+    except Exception as e:  # noqa: BLE001
+        found = [("warn", f"pemeriksaan silang gagal ({type(e).__name__}); jalankan /periksa")]
+    for level, text in found:
         if level in ("bad", "warn") and "tidak rekonsiliasi" not in text:
             snap["warnings"].append("Data: " + text)
     conn.execute("INSERT INTO plans(payday,snapshot_json,created_at) VALUES (?,?,?)",

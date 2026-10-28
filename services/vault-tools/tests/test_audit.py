@@ -74,9 +74,35 @@ class Audit(unittest.TestCase):
         sub.upsert(conn, "spotify", "Spotify", 119_900, "hsbc-1")
         for amount in (1_752_690, 876_900, 175_380):
             line(conn, sid, "2026-10-26", "GOOGLE ONE 650-253", amount)
+        conn.execute("UPDATE subscriptions SET updated_at='2026-10-01T00:00:00+00:00'")      # recorded before that bill
+        conn.commit()
         warn = found(conn, "warn")
         self.assertTrue(any("google-one" in t and "Rp 309.000" in t and "Rp 2.804.970" in t for t in warn))
         self.assertTrue(any("spotify" in t and "tidak terlihat" in t for t in found(conn, "info")))
+        conn.execute("UPDATE subscriptions SET updated_at='2026-10-28T00:00:00+00:00' WHERE alias='google-one'")   # the owner explained it after
+        conn.commit()
+        self.assertFalse(any("google-one" in t for t in found(conn, "warn")))
+        self.assertTrue(any("google-one" in t and "diperbarui pemilik setelah tagihan" in t for t in found(conn, "info")))
+
+    def test_two_records_of_one_merchant_are_compared_together(self):
+        conn = world()
+        sid = stmt(conn, "2026-10-26", "2026-11-13")
+        sub.upsert(conn, "squarespace-workspace", "Email domain (Workspace via Squarespace)", 304_140, "cimb-1")
+        sub.upsert(conn, "domain-squarespace", "Domain (Squarespace)", 15_349, "cimb-1")
+        line(conn, sid, "2026-10-26", "SQSP* WORKSP#123 NEW YORK", 304_140)
+        self.assertFalse([t for t in found(conn) if "squarespace" in t])
+
+    def test_a_stopped_subscription_still_charged(self):
+        conn = world()
+        sid = stmt(conn, "2026-10-26", "2026-11-13")
+        sub.upsert(conn, "catchplay", "Catchplay", 0, "cimb-1", status="ended")
+        line(conn, sid, "2026-10-26", "CATCHPLAY KOWLOON HKG", 49_950)
+        conn.execute("UPDATE subscriptions SET updated_at='2026-10-01T00:00:00+00:00'")
+        conn.commit()
+        self.assertTrue(any("catchplay" in t and "tercatat BERHENTI" in t for t in found(conn, "warn")))
+        conn.execute("UPDATE subscriptions SET updated_at='2026-10-28T00:00:00+00:00'")      # stopped after that bill: fine
+        conn.commit()
+        self.assertFalse([t for t in found(conn) if "atchplay" in t])
 
     def test_a_repeating_charge_that_is_not_recorded(self):
         conn = world()

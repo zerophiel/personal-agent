@@ -183,8 +183,11 @@ def store(conn, statement_id: int, lines: list[dict]) -> dict:
     # an instalment printed without the words "cicilan" or "x/y" (e.g. "MID*Tokopedia", "IPREG...") is recognised by its exact
     # amount: the same card, the same rupiah as one of its recorded instalments; each instalment matches one line at most
     plans = [a["per_month"] for a in _all_instalments(conn, st["card_id"]) if a["per_month"] >= 50_000]
-    for x in lines:
-        kind = classify(x["description"], x["amount"])
+    kinds = [classify(x["description"], x["amount"]) for x in lines]
+    for x, kind in zip(lines, kinds):
+        if kind == "cicilan" and x["amount"] in plans:
+            plans.remove(x["amount"])          # printed as an instalment already: it cannot also claim a purchase
+    for x, kind in zip(lines, kinds):
         if kind == "belanja" and x["amount"] in plans:
             plans.remove(x["amount"])
             kind = "cicilan"
