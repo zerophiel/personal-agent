@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS sinking_funds (
   pool_alias TEXT NOT NULL REFERENCES accounts(alias),
   pool_pay_to TEXT NOT NULL,            -- payee alias of the pool account number (contributions go here)
   creditor_pay_to TEXT,                 -- payee alias of the creditor's account (final payment)
-  {_money('saved_so_far')} NOT NULL, saved_asof TEXT NOT NULL, note TEXT);
+  {_money('saved_so_far')} NOT NULL, saved_asof TEXT NOT NULL, note TEXT,
+  low_amount INTEGER, low_until TEXT);   -- optional low phase: deposit `low_amount` per payday up to month `low_until` (YYYY-MM), then spread the rest
 CREATE TABLE IF NOT EXISTS net_snapshots (
   month TEXT PRIMARY KEY, {_money('total_debt')} NOT NULL, {_money('accounts_balance', True)},
   {_money('saved_funds')} NOT NULL, created_at TEXT NOT NULL);
@@ -149,4 +150,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE transactions ADD COLUMN {col} {typ}")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_txn_dedupe ON transactions(dedupe_key)"
                  " WHERE dedupe_key IS NOT NULL")
+    fcols = {r["name"] for r in conn.execute("PRAGMA table_info(sinking_funds)")}
+    for col, typ in (("low_amount", "INTEGER"), ("low_until", "TEXT")):
+        if col not in fcols:
+            conn.execute(f"ALTER TABLE sinking_funds ADD COLUMN {col} {typ}")
     conn.commit()

@@ -60,6 +60,7 @@ def roadmap(conn, today: date) -> dict:
     if payday < today:
         payday = next_payday(payday, hol)
     items, freed = [], []
+    pot_scheds, fund_aliases = [], set()
 
     for d in conn.execute("SELECT * FROM debts WHERE tenor_left > 0 ORDER BY alias"):
         first = next_due(d["due_day"], today)
@@ -70,6 +71,8 @@ def roadmap(conn, today: date) -> dict:
 
     for f in conn.execute("SELECT * FROM sinking_funds ORDER BY alias"):
         s = sinking_required(conn, f, payday, hol)
+        pot_scheds.append(s["schedule"])
+        fund_aliases.add(f["alias"])
         items.append({"kind": "dana terikat", "alias": f["alias"], "remaining": s["remaining"], "ends": f["due_date"],
                       "per_month": s["per_month"], "detail": f"terkumpul {format_idr(s['saved'])} dari {format_idr(f['target'])}"})
         if s["per_month"]:
@@ -105,7 +108,10 @@ def roadmap(conn, today: date) -> dict:
     def extra(k: int) -> int:
         """Cash freed by liabilities that ended before the k-th month (1 = this payday's month)."""
         start = add_months(first_month, k - 1)
-        return sum(amt for d, amt, _ in freed if d < start)
+        ended = sum(amt for d, amt, a in freed if d < start and a not in fund_aliases)
+        # the pot is a goal with a deadline, not a fixed instalment: its deposits can rise or fall over the cycles
+        steps = sum((sch[0] if sch else 0) - (sch[k - 1] if k - 1 < len(sch) else 0) for sch in pot_scheds)
+        return ended + steps
 
     card_result = clear_cards(cards, capacity, extra) if cards and capacity is not None else None
     card_end = None

@@ -108,6 +108,7 @@ Pemilik mengirim screenshot belanja (struk, e-commerce, QRIS, mobile banking). B
 - Untuk mencocokkan hasil dengan dokumen asli, `list_statements` menampilkan tagihan kartu yang tersimpan.
 
 ## Dana terikat (hutang sekali bayar)
+**Pot hutang teman adalah TUJUAN dengan tenggat, bukan cicilan tetap**: Rp 135 juta ditransfer ke teman pada 31 Jan 2028. Pemilik bebas mengatur setoran tiap bulan (mis. kecil dulu selama kartu masih berbunga, lalu besar). Rp 9 juta per bulan hanyalah pembagian rata bawaan. Untuk mencoba pola, pakai `simulasi_skenario` (`setoran_pot_awal`, `setoran_pot_awal_bulan`); simpan hanya setelah pemilik setuju dengan `atur_jadwal_pot`. Selalu sebutkan dua angka: setoran fase awal dan setoran fase mengejar, serta apakah sisa bulanan pada fase mengejar masih cukup. Kartu berbunga sekitar 21-27% per tahun sedangkan pot tidak berbunga, jadi setoran awal kecil masuk akal, asal tenggat dan target tetap aman.
 Untuk kewajiban satu kali pada tanggal tertentu yang dikumpulkan di rekening pot (mis. hutang ke teman Rp 135 juta jatuh tempo Januari 2028): daftarkan rekening pot (`upsert_account` kind=pool), minta pemilik mengirim nomor rekening pot dan rekening penerima dengan `/rekening`, lalu `upsert_sinking_fund`. Setoran bulanan dihitung alat dan otomatis masuk rencana gajian; saat jatuh tempo muncul pengingat bayar DARI pot. Setoran yang tercatat di mutasi rekening pot baru dihitung jika dikategorikan `sinking:<alias dana>`. Pantau dengan `sinking_status`.
 
 ## Onboarding

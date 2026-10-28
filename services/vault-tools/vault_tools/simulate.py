@@ -12,7 +12,7 @@ from . import card_installments, subscriptions
 from .money import format_idr
 from .payday import last_working_day, next_payday
 from .roadmap import add_months
-from .tools import DEFAULT_CARD_INTEREST_BP, bp_of_idr, get_threshold, id_holidays, sinking_required
+from .tools import DEFAULT_CARD_INTEREST_BP, _low_cycles, bp_of_idr, get_threshold, id_holidays, pot_schedule, sinking_required
 
 
 def _up_to_1000(x: int) -> int:
@@ -26,7 +26,7 @@ def _first_cycle(today: date) -> date:
 
 
 def simulate(conn, today: date, *, belanja_kartu: int = 0, tunda_pot: int = 0, ekstra_sekarang: int = 0,
-             hemat: int = 0, reserve: int | None = None, months: int = 12) -> dict:
+             hemat: int = 0, reserve: int | None = None, months: int = 12, pot_awal: int | None = None, pot_awal_bulan: int = 0) -> dict:
     salary = get_threshold(conn, "net_salary")
     if not salary:
         raise ValueError("net_salary belum diset")
@@ -39,12 +39,15 @@ def simulate(conn, today: date, *, belanja_kartu: int = 0, tunda_pot: int = 0, e
     debts = conn.execute("SELECT installment, tenor_left FROM debts WHERE tenor_left > 0").fetchall()
     inst = card_installments.active(conn)
     funds = conn.execute("SELECT * FROM sinking_funds").fetchall()
-    pot_plan = []                       # per fund: (normal per month, number of deposits)
+    pot_scheds = []                     # per fund: the deposit of every remaining pay cycle
     for f in funds:
-        s = sinking_required(conn, f, payday, hol)
-        left = max(0, s["remaining"])
-        n = -(-left // s["per_month"]) if s["per_month"] else 0
-        pot_plan.append((left, s["per_month"], n))
+        sr = sinking_required(conn, f, payday, hol)
+        low_amount, low_n = f["low_amount"], _low_cycles(f, payday)
+        if pot_awal is not None:
+            low_amount, low_n = pot_awal, pot_awal_bulan
+        elif tunda_pot:
+            low_amount, low_n = 0, tunda_pot
+        pot_scheds.append(pot_schedule(sr["remaining"], sr["paydays_left"], low_amount, low_n))
     default_rate = get_threshold(conn, "default_card_interest_bp", DEFAULT_CARD_INTEREST_BP)
     bal, rate = {}, {}
     for r in conn.execute(
@@ -60,14 +63,7 @@ def simulate(conn, today: date, *, belanja_kartu: int = 0, tunda_pot: int = 0, e
         start = add_months(first_month, k)                      # the month whose dues this cycle pays
         loans = sum(d["installment"] for d in debts if k <= d["tenor_left"])
         cards_inst = sum(a["per_month"] for a in inst if date.fromisoformat(a["ends"]) >= start)
-        pot = 0
-        for left, per, n in pot_plan:
-            if n == 0 or k > n:
-                continue                                         # no deposits needed, or the due date has passed
-            if tunda_pot == 0:
-                pot += per
-            elif k > tunda_pot and n > tunda_pot:                # deferred: the same target is spread over fewer deposits
-                pot += _up_to_1000(-(-left // (n - tunda_pot)))
+        pot = sum(sch[k - 1] for sch in pot_scheds if k <= len(sch))
         free = salary - fixed - loans - pot - res - cards_inst - recurring - belanja_kartu + hemat
         cap = free + (ekstra_sekarang if k == 1 else 0)
         short = 0
@@ -99,7 +95,8 @@ def simulate(conn, today: date, *, belanja_kartu: int = 0, tunda_pot: int = 0, e
             paid_off = k
         rows.append({"k": k, "month": start.strftime("%Y-%m"), "free": free, "balance": total, "interest": month_interest, "pot": pot, "loans": loans, "inst": cards_inst})
     return {"start_balance": start_balance, "rows": rows, "interest": interest_total, "paid_off_month": rows[paid_off - 1]["month"] if paid_off else None,
-            "salary": salary, "params": dict(belanja_kartu=belanja_kartu, tunda_pot=tunda_pot, ekstra_sekarang=ekstra_sekarang, hemat=hemat, reserve=res)}
+            "salary": salary, "params": dict(belanja_kartu=belanja_kartu, tunda_pot=tunda_pot, ekstra_sekarang=ekstra_sekarang, hemat=hemat, reserve=res,
+                                  pot_awal=pot_awal, pot_awal_bulan=pot_awal_bulan)}
 
 
 def _bln(ym: str) -> str:
@@ -112,6 +109,7 @@ def format_result(base: dict, sc: dict) -> str:
     p = sc["params"]
     changed = [f"belanja kartu baru {format_idr(p['belanja_kartu'])}/bulan" if p["belanja_kartu"] else "",
                f"setoran pot ditunda {p['tunda_pot']} bulan" if p["tunda_pot"] else "",
+               f"setoran pot awal {format_idr(p['pot_awal'])}/bulan selama {p['pot_awal_bulan']} bulan, lalu mengejar target" if p["pot_awal"] is not None else "",
                f"bayar ekstra sekarang {format_idr(p['ekstra_sekarang'])}" if p["ekstra_sekarang"] else "",
                f"penghematan {format_idr(p['hemat'])}/bulan" if p["hemat"] else ""]
     changed = [c for c in changed if c]
@@ -127,6 +125,12 @@ def format_result(base: dict, sc: dict) -> str:
     if changed:
         d = base["interest"] - sc["interest"]
         lines.append(f"Selisih bunga: {'hemat' if d >= 0 else 'tambah'} {format_idr(abs(d))}")
+    pots = []
+    for r in sc["rows"]:
+        if not pots or pots[-1][1] != r["pot"]:
+            pots.append((r["month"], r["pot"]))
+    if len(pots) > 1 or (pots and pots[0][1]):
+        lines.append("Setoran pot per bulan: " + "; ".join(f"{_bln(m)} {format_idr(v)}" for m, v in pots[:4]) + (" ..." if len(pots) > 4 else ""))
     first_pos = next((r for r in sc["rows"] if r["free"] > 0), None)
     lines.append("Sisa bulanan (setelah semua komitmen, sebelum membayar saldo kartu):")
     for r in sc["rows"]:

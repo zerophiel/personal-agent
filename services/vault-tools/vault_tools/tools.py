@@ -464,12 +464,70 @@ def sinking_paydays_left(payday: date, due: date, holidays) -> int:
     return n
 
 
+def _low_cycles(fund, payday: date) -> int:
+    """Pay cycles from `payday` through the fund's low-phase month (0 when there is no low phase)."""
+    if fund["low_amount"] is None or not fund["low_until"]:
+        return 0
+    y, m = int(fund["low_until"][:4]), int(fund["low_until"][5:7])
+    return max(0, (y * 12 + m) - (payday.year * 12 + payday.month) + 1)
+
+
+def pot_schedule(remaining: int, left: int, low_amount: int | None = None, low_cycles: int = 0) -> list[int]:
+    """Deposits for each remaining payday. Even split by default (rounded up to Rp 1.000). With a low phase: `low_amount`
+    for the first `low_cycles` paydays, then whatever is still missing spread evenly over the rest, so the TARGET is still
+    met on the due date. A low phase can never swallow every payday: the last ones always carry the catch-up."""
+    out, rem = [], max(0, remaining)
+    low_on = low_amount is not None and 0 < low_cycles < left
+    for i in range(left):
+        left_i = left - i
+        if rem <= 0:
+            out.append(0)
+            continue
+        d = min(low_amount, rem) if low_on and i < low_cycles else _round_up(-(-rem // left_i))
+        out.append(d)
+        rem = max(0, rem - d)
+    return out
+
+
 def sinking_required(conn, fund, payday: date, holidays) -> dict:
     saved = sinking_saved(conn, fund)
     remaining = max(0, fund["target"] - saved)
     left = sinking_paydays_left(payday, date.fromisoformat(fund["due_date"]), holidays)
-    return {"saved": saved, "remaining": remaining, "paydays_left": left,
-            "per_month": _round_up(-(-remaining // left)) if left and remaining else 0}
+    low = _low_cycles(fund, payday)
+    sched = pot_schedule(remaining, left, fund["low_amount"], low) if left else []
+    low_on = fund["low_amount"] is not None and 0 < low < left
+    return {"saved": saved, "remaining": remaining, "paydays_left": left, "schedule": sched,
+            "per_month": sched[0] if sched and remaining else 0,
+            "low_cycles": low if low_on else 0, "later_per_month": sched[low] if low_on and remaining else None}
+
+
+def set_pot_schedule(conn, alias: str, amount: int | None, until_month: str | None, today: date) -> str:
+    """Owner's choice: deposit `amount` per payday until `until_month` (YYYY-MM), then the catch-up. amount=None clears it
+    (back to an even split)."""
+    fund = conn.execute("SELECT * FROM sinking_funds WHERE alias=?", (alias,)).fetchone()
+    if fund is None:
+        raise ValueError(f"dana terikat {alias} tidak ada")
+    if amount is None:
+        conn.execute("UPDATE sinking_funds SET low_amount=NULL, low_until=NULL WHERE alias=?", (alias,))
+        conn.commit()
+        return f"{alias}: jadwal kembali rata. " + sinking_status(conn, today, alias)
+    check_idr(amount)
+    if amount < 0 or not until_month or len(until_month) != 7 or until_month[4] != "-":
+        raise ValueError("setoran_awal >= 0 dan sampai_bulan format YYYY-MM")
+    hol = id_holidays(today.year) | id_holidays(today.year + 1) | id_holidays(today.year + 2)
+    p = last_working_day(today.year, today.month, hol)
+    payday = p if p >= today else next_payday(p, hol)
+    probe = dict(fund)
+    probe["low_amount"], probe["low_until"] = amount, until_month
+    s = sinking_required(conn, probe, payday, hol)
+    low = _low_cycles(probe, payday)
+    if low <= 0:
+        raise ValueError("sampai_bulan sudah lewat")
+    if low >= s["paydays_left"]:
+        raise ValueError("fase awal tidak boleh menutup semua gajian: sisakan bulan untuk mengejar target sebelum jatuh tempo")
+    conn.execute("UPDATE sinking_funds SET low_amount=?, low_until=? WHERE alias=?", (amount, until_month, alias))
+    conn.commit()
+    return f"{alias}: jadwal disimpan. " + sinking_status(conn, today, alias)
 
 
 def sinking_status(conn, today: date, alias: str | None = None) -> str:
@@ -487,7 +545,10 @@ def sinking_status(conn, today: date, alias: str | None = None) -> str:
         pct = min(100, s["saved"] * 100 // f["target"])
         line = (f"{f['alias']}: target {format_idr(f['target'])} jatuh tempo {f['due_date']}; terkumpul "
                 f"{format_idr(s['saved'])} ({pct}%); kurang {format_idr(s['remaining'])}")
-        if s["remaining"] and s["paydays_left"]:
+        if s["low_cycles"] and s["later_per_month"] is not None:
+            line += (f"; setoran fase awal {format_idr(s['per_month'])}/bulan sampai {f['low_until']} ({s['low_cycles']} gajian), "
+                     f"lalu sekitar {format_idr(s['later_per_month'])}/bulan sampai jatuh tempo ({s['paydays_left']} gajian tersisa)")
+        elif s["remaining"] and s["paydays_left"]:
             line += f"; setoran {format_idr(s['per_month'])}/bulan selama {s['paydays_left']} gajian"
         elif s["remaining"]:
             line += "; TIDAK ADA gajian tersisa sebelum jatuh tempo"
@@ -565,6 +626,12 @@ def generate_payday_plan(conn, today: date, payday: date | None = None,
     snap = plan_to_dict(plan)
     snap["reserve_source"] = reserve_source
     snap["reminders"] = []
+    for f in conn.execute("SELECT * FROM sinking_funds WHERE low_amount IS NOT NULL"):
+        sr = sinking_required(conn, f, payday, hol)
+        if sr["low_cycles"] and sr["later_per_month"] is not None:
+            snap["reminders"].append(
+                f"Pot {f['alias']}: setoran fase awal {format_idr(sr['per_month'])} sampai {f['low_until']}, lalu sekitar "
+                f"{format_idr(sr['later_per_month'])} per bulan agar tetap {format_idr(f['target'])} pada {f['due_date']}.")
     # A card bill that falls due BEFORE this payday cannot wait for the salary: it must be paid from the balance
     # on hand. Shown first, because a late payment costs a fee and may hurt the credit record.
     for o in sorted((o for o in obs if o.kind == "card" and o.due < payday), key=lambda o: o.due):

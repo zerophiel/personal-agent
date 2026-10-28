@@ -42,7 +42,7 @@ MCP_TOOL_NAMES = ("upsert_card", "upsert_debt", "upsert_expense", "set_threshold
                   "health_check", "list_statements", "record_card_payment", "debt_free_roadmap",
                   "add_owner_name", "suggest_categories", "apply_suggestions", "living_cost_analysis",
                   "record_card_installments", "card_installments_status", "pending_statements", "skip_statement_file",
-                  "upsert_subscription", "subscriptions_status", "set_category_keyword", "link_card_payees", "ringkasan_data", "simulasi_skenario", "catat_usulan")
+                  "upsert_subscription", "subscriptions_status", "set_category_keyword", "link_card_payees", "ringkasan_data", "simulasi_skenario", "catat_usulan", "atur_jadwal_pot")
 
 
 class Installment(BaseModel):
@@ -321,17 +321,30 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
     @mcp.tool()
     @locked
     def simulasi_skenario(belanja_kartu_per_bulan: int = 0, tunda_pot_bulan: int = 0, bayar_ekstra_sekarang: int = 0,
-                          hemat_per_bulan: int = 0, cadangan_kas: int | None = None, bulan: int = 12) -> str:
+                          hemat_per_bulan: int = 0, cadangan_kas: int | None = None, bulan: int = 12,
+                          setoran_pot_awal: int | None = None, setoran_pot_awal_bulan: int = 0) -> str:
         """SIMULASI "bagaimana kalau" (dihitung kode, jangan dihitung sendiri). Isi hanya yang berubah:
         belanja_kartu_per_bulan = belanja kartu baru tiap bulan (0 = tidak belanja kartu); tunda_pot_bulan = setoran pot
         hutang ditunda N bulan; bayar_ekstra_sekarang = uang sekali untuk melunasi kartu (mis. hasil jual barang, saldo
         yang sudah dipegang); hemat_per_bulan = penghematan tetap per bulan (mis. stop langganan, potong belanja online);
-        cadangan_kas = ganti cadangan kas harian. Hasil: lunas kapan, total bunga, sisa bulanan, arah saldo kartu."""
+        cadangan_kas = ganti cadangan kas harian; setoran_pot_awal + setoran_pot_awal_bulan = setoran pot kecil dulu selama N
+        bulan lalu otomatis mengejar target (pot adalah tujuan dengan tenggat, jumlahnya boleh berubah tiap bulan). Hasil: lunas kapan, total bunga, sisa bulanan, arah saldo kartu."""
         today_ = today()
         base = simulate.simulate(conn, today_, months=max(1, min(bulan, 36)))
         sc = simulate.simulate(conn, today_, belanja_kartu=belanja_kartu_per_bulan, tunda_pot=tunda_pot_bulan,
-                               ekstra_sekarang=bayar_ekstra_sekarang, hemat=hemat_per_bulan, reserve=cadangan_kas, months=max(1, min(bulan, 36)))
+                               ekstra_sekarang=bayar_ekstra_sekarang, hemat=hemat_per_bulan, reserve=cadangan_kas, months=max(1, min(bulan, 36)),
+                               pot_awal=setoran_pot_awal, pot_awal_bulan=setoran_pot_awal_bulan)
         return simulate.format_result(base, sc)
+
+    @mcp.tool()
+    @locked
+    def atur_jadwal_pot(alias: str, setoran_awal: int | None = None, sampai_bulan: str | None = None) -> str:
+        """Atur JADWAL setoran dana terikat (pot hutang). Pot adalah TUJUAN dengan tenggat (mis. Rp 135 juta ke teman pada
+        31 Jan 2028), bukan cicilan tetap: setoran boleh kecil dulu lalu besar. setoran_awal = jumlah per gajian pada fase
+        awal; sampai_bulan = YYYY-MM terakhir fase awal. Sisanya otomatis dikejar rata setelahnya agar target tetap tercapai.
+        Panggil tanpa setoran_awal untuk kembali ke pembagian rata. Hanya setelah pemilik menyetujui angkanya; sebelum itu
+        coba dulu dengan simulasi_skenario (setoran_pot_awal / setoran_pot_awal_bulan)."""
+        return tools.set_pot_schedule(conn, alias, setoran_awal, sampai_bulan, today())
 
     @mcp.tool()
     @locked
