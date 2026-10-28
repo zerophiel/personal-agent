@@ -14,6 +14,7 @@ import os
 import sqlite3
 import sys
 import threading
+import time
 from datetime import date, datetime, timezone
 
 from mcp.server.fastmcp import FastMCP
@@ -28,6 +29,9 @@ from .ledger import connect
 from .money import format_idr
 from .payee_vault import PayeeVault, has_forbidden_card_data
 from .payday import last_working_day
+
+REREAD_LIMIT = 3          # re-reads of already recorded documents allowed per window
+REREAD_WINDOW = 1800      # seconds
 
 MCP_TOOL_NAMES = ("upsert_card", "upsert_debt", "upsert_expense", "set_threshold",
                   "generate_payday_plan", "list_payees", "next_payday",
@@ -94,6 +98,7 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
         raise ValueError("tokens must be >= 32 chars and different")
     conn = connect(db_path)
     vault = PayeeVault(conn, master_key)
+    reread_times: list[float] = []     # recent re-reads of documents that are already recorded (they flood the chat context)
     hosts = allowed_hosts or ["vault-tools:8000", "vault-tools"]
     mcp = FastMCP("vault-tools", stateless_http=True, json_response=True,
                   transport_security=TransportSecuritySettings(
@@ -164,6 +169,8 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
     @locked
     def set_threshold(key: str, value: int) -> str:
         """Set ambang/angka tetap, mis. net_salary, cash_buffer, dsr_max_bp."""
+        if key in ("reread_open_until", "ingest_events_cursor") or key.startswith("living_reserve_override"):
+            raise ValueError("kunci ini diatur oleh sistem, bukan lewat chat")
         return tools.set_threshold(conn, key, value)
 
     @mcp.tool()
@@ -206,6 +213,19 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
             return f"GAGAL membaca berkas: {e}"
         if not 1 <= part <= len(parts):
             return f"GAGAL: part harus 1..{len(parts)}"
+        if part == 1:
+            with _LOCK:
+                recorded = conn.execute(
+                    "SELECT 1 FROM statements WHERE file_hash=? UNION SELECT 1 FROM mutation_files WHERE file_hash=?", (h, h)).fetchone()
+                window_open = (tools.get_threshold(conn, "reread_open_until", 0) or 0) > time.time()
+                if recorded and not window_open:
+                    now = time.time()
+                    reread_times[:] = [t for t in reread_times if now - t < REREAD_WINDOW]
+                    if len(reread_times) >= REREAD_LIMIT:
+                        return ("BATAS BACA ULANG: dokumen ini SUDAH TERCATAT, dan membacanya lagi memenuhi konteks percakapan. "
+                                "Jangan memindai tagihan lewat chat. Pakai ringkasan_data, list_statements, card_installments_status "
+                                "atau subscriptions_status. Analisis dokumen besar dilakukan di luar chat: katakan ke pemilik.")
+                    reread_times.append(now)
         dated = statement_pdf.count_transactions(parts)
         with _LOCK:    # remember what the document contains so record_mutations can tell if rows are missing
             conn.execute("INSERT OR REPLACE INTO ingest_checks VALUES (?,?,?,?)",
