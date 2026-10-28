@@ -22,6 +22,10 @@ November: kesehatan 500k, makan 200k, game-digital 250k, belanja-online 300k, la
 Biggest avoidable costs: game/digital top-ups (PlayStation, Steam, Apple non-One, AWS) and Rp 1.5-2.1M a month of late/overlimit fees and interest. Autodebit or minimum on time on all 7 cards.
 Fixed this session: the current bill is the latest by statement date; the same card+statement date is one bill (duplicates from email + Telegram).
 
+## Payday 30 Oct 2026: scenario A (owner approved 2026-10-28)
+Owner paid BCA 1.538.834 on 28 Oct from Mandiri (recorded) and holds ~5.06M in Mandiri, which counts as part of the 7.5M daily cash. One-off `living_reserve_override` = 2.438.834 until 2026-10-31 (`reserve_for`); from the Nov payday the normal 7.5M applies again by itself. Effect: Jenius paid in full (6.361.689 + minimum on 10 Nov), HSBC +1.179.205, other cards minimum; card interest next month ~173k instead of ~309k; card balance ~10.6M, cleared ~Jul 2027 (was ~Oct 2027). SPayLater autodebit day 1 (270k x 5, Nov-Mar), car autodebit day 2; salary must land in Mandiri on 30 Oct. The plan's "jatah harian" for this cycle shows only the 2.44M part; real daily cash is the full 7.5M.
+Roadmap now subtracts confirmed subscriptions and grows the card-clearing capacity as installments, the pot and the car end.
+
 ## Notion
 Snapshot pages created 2026-10-28 (private): `Agent` > `Finance` (Rencana gajian, Tagihan kartu, Cicilan kartu dan langganan, Peta jalan bebas utang, Anggaran dan batas) and `Agent` > `General` (empty). Written from the ledger summaries by Claude Code through the Notion connector; no card/account numbers.
 NOT automated yet: a recurring sync needs a Notion integration token (owner runs `make secret-set`), the `Agent` page shared with that integration, and an exporter job in vault-tools that renders the same pages deterministically. Until then the pages are a manual snapshot (refresh by asking).
