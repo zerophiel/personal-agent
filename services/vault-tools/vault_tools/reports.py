@@ -115,13 +115,17 @@ def _rencana(conn, today: date) -> str:
         row["amount"] += t["amount"]
         if _note(t) and _note(t) not in row["notes"]:
             row["notes"].append(_note(t))
+    short = {u["to_alias"] for u in snap["unfunded"]}
     for d in sorted(by_date):
         head = f"💰 {b('Bayar ' + tgl(d))}" + (" (hari gajian)" if d == snap["payday"] else "")
         rows = []
         for alias, r in by_date[d].items():
-            notes = [n for n in r["notes"]]
-            if "minimum" in " ".join(notes) and "bayar penuh" in " ".join(notes):
-                notes = ["minimum + sisa tagihan, lunas"]
+            notes = list(r["notes"])
+            joined, partly = " ".join(notes), alias in short       # "bayar penuh" is the plan's target; it may be funded only in part
+            if "minimum" in joined and "bayar penuh" in joined:
+                notes = ["minimum + tambahan, BELUM lunas"] if partly else ["minimum + sisa tagihan, lunas"]
+            elif "bayar penuh" in joined and partly:
+                notes = ["sebagian, BELUM lunas"]
             note = "; ".join(notes)
             rows.append(f"• {e(label(alias, banks))}: {b(format_idr(r['amount']))}" + (f" <i>({e(note)})</i>" if note else ""))
         out.append(head + "\n" + "\n".join(rows))

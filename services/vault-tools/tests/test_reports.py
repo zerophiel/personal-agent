@@ -96,6 +96,14 @@ class Reports(unittest.TestCase):
         self.assertIn("minimum + sisa tagihan, lunas", text)
         self.assertNotIn("rekening rekening", text)
 
+    def test_partly_funded_payment_is_never_called_lunas(self):
+        """Regression: HSBC was shown as 'lunas' while Rp 3.77M of its bill was still unfunded."""
+        conn = world()
+        tools.set_threshold(conn, "living_reserve", 9_000_000)                    # enough for the minimums and only part of one card
+        text = reports.build(conn, "rencana", TODAY)
+        self.assertIn("BELUM lunas", text)
+        self.assertNotIn("sisa tagihan, lunas", text)
+
     def test_cicilan_lists_installments_and_subscriptions(self):
         text = reports.build(world(), "cicilan", TODAY)
         self.assertIn("TOKOPEDIA 3/12", text)
