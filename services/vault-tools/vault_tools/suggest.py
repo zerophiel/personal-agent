@@ -87,13 +87,14 @@ def groups(conn) -> dict[str, dict]:
     owners = owner_names(conn)
     own_last4 = [r[0] for r in conn.execute("SELECT last4 FROM accounts WHERE last4 IS NOT NULL AND kind != 'pool' UNION SELECT last4 FROM cards")]   # own accounts and own cards
     out: dict[str, dict] = defaultdict(lambda: {"n": 0, "out": 0, "in": 0, "cats": defaultdict(int)})
+    words = [(r["keyword"], r["category"]) for r in conn.execute("SELECT keyword, category FROM category_keywords")]
     for r in conn.execute("SELECT merchant, amount FROM transactions WHERE source IN ('mutation','receipt')"
                           " AND category IS NULL AND merged_into IS NULL"):
         key = normalize(r["merchant"])
         g = out[key]
         g["n"] += 1
         g["out" if r["amount"] < 0 else "in"] += abs(r["amount"])
-        cat = suggest_category(key, r["amount"], owners, own_last4)
+        cat = next((c for kw, c in words if kw in key), None) or suggest_category(key, r["amount"], owners, own_last4)
         if cat:
             g["cats"][cat] += 1
     for g in out.values():

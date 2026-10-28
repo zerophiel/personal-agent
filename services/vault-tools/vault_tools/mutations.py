@@ -158,6 +158,19 @@ def set_category(conn, txn_id: int, category: str) -> str:
     return f"transaksi {txn_id} -> {cat}"
 
 
+def set_category_keyword(conn, keyword: str, category: str) -> str:
+    """Remember that any description containing `keyword` (a name, a shop) belongs to `category`; applies to rows
+    still uncategorized and to every future import."""
+    kw, cat = clean_text(keyword, 40).lower().strip(), clean_text(category, 40).lower()
+    if len(kw) < 4 or not cat:
+        raise ValueError("kata kunci minimal 4 huruf dan kategori wajib")
+    conn.execute("INSERT INTO category_keywords VALUES (?,?) ON CONFLICT(keyword) DO UPDATE SET category=excluded.category", (kw, cat))
+    hit = conn.execute("UPDATE transactions SET category=?, status='verified' WHERE source IN ('mutation','receipt')"
+                       " AND category IS NULL AND merged_into IS NULL AND lower(merchant) LIKE ?", (cat, f"%{kw}%")).rowcount
+    conn.commit()
+    return f"kata kunci '{kw}' -> {cat}; {hit} transaksi dikategorikan"
+
+
 def set_category_rule(conn, merchant: str, category: str) -> str:
     """Remember a category for a merchant and apply it to matching rows not yet verified."""
     pattern, cat = normalize(merchant), clean_text(category, 40).lower()

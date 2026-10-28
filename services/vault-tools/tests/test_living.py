@@ -212,6 +212,23 @@ class Suggestions(unittest.TestCase):
         for desc, sign, want in cases:
             self.assertEqual(sg.suggest_category(desc, sign * 1000, owners, mine), want, desc)
 
+    def test_owner_keywords_apply_now_and_to_every_future_import(self):
+        from vault_tools import mutations as mu
+        conn = connect(":memory:")
+        conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('b','BCA','main')")
+        for i, d in enumerate(("TRSF E-BANKING DB 0110/FTSCY/WS1 GURU BUDI", "TRANSFER BI FAST KE BCA GURU BUDI", "BELI KOPI")):
+            conn.execute("INSERT INTO transactions(txn_date,merchant,amount,status,source) VALUES (?,?,?,?,?)",
+                         (f"2026-10-0{i + 1}", d, -100_000, "unverified", "mutation"))
+        conn.commit()
+        self.assertIn("2 transaksi", mu.set_category_keyword(conn, "Guru Budi", "wajib:les"))
+        self.assertEqual([r[0] for r in conn.execute("SELECT category FROM transactions ORDER BY id")], ["wajib:les", "wajib:les", None])
+        conn.execute("INSERT INTO transactions(txn_date,merchant,amount,status,source) VALUES ('2026-11-02','TRSF DB GURU BUDI',-100000,'unverified','mutation')")
+        conn.commit()
+        sg.apply_suggestions(conn)
+        self.assertEqual(conn.execute("SELECT category FROM transactions WHERE txn_date='2026-11-02'").fetchone()[0], "wajib:les")
+        with self.assertRaises(ValueError):
+            mu.set_category_keyword(conn, "ab", "x")
+
     def test_card_payments_hospitals_and_church_collections(self):
         mine = ["5855", "5915", "5685"]
         cases = [

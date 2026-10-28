@@ -38,7 +38,7 @@ MCP_TOOL_NAMES = ("upsert_card", "upsert_debt", "upsert_expense", "set_threshold
                   "health_check", "list_statements", "record_card_payment", "debt_free_roadmap",
                   "add_owner_name", "suggest_categories", "apply_suggestions", "living_cost_analysis",
                   "record_card_installments", "card_installments_status", "pending_statements", "skip_statement_file",
-                  "upsert_subscription", "subscriptions_status")
+                  "upsert_subscription", "subscriptions_status", "set_category_keyword")
 
 
 class Installment(BaseModel):
@@ -372,6 +372,13 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
     def set_category(txn_id: int, category: str) -> str:
         """Tetapkan kategori satu transaksi (dianggap terverifikasi). Kategori 'transfer_internal' = antar rekening sendiri."""
         return mutations.set_category(conn, txn_id, category)
+
+    @mcp.tool()
+    @locked
+    def set_category_keyword(keyword: str, category: str) -> str:
+        """Ingat kata kunci (mis. nama guru les atau toko) -> kategori. Berlaku untuk transaksi yang belum terkategori
+        dan semua impor berikutnya. Pakai setelah pemilik menjelaskan siapa/apa itu."""
+        return mutations.set_category_keyword(conn, keyword, category)
 
     @mcp.tool()
     @locked
