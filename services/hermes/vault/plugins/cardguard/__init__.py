@@ -1,4 +1,4 @@
-"""cardguard: keep full card numbers out of the model's world (vault profile only).
+"""cardguard: keep full card numbers out of the model's world, and serve the owner's slash commands (vault profile only).
 
 pre_gateway_dispatch, in this order of precedence:
  1. "/rincian": ask vault-tools (internal API) for the transfer list WITH full numbers, send it
@@ -6,7 +6,10 @@ pre_gateway_dispatch, in this order of precedence:
     sees the reply or the command.
  2. Luhn-valid 13-19 digit numbers: store each via vault-tools `/internal/store_payee`, rewrite the
     text to [[CARD:alias]], delete the owner's raw message in Telegram, continue with the token.
- Everything fails CLOSED: any error drops the message (Hermes treats a hook exception as "allow",
+ 3. Report commands (/rencana, /tagihan, /cicilan, /anggaran, /peta, /kondisi, /data, /bantuan): vault-tools renders the
+    text from the ledger, the plugin sends it and `skip`s (no model, no cost).
+ The Telegram "/" menu is pushed by this plugin shortly after Hermes registers its own (the owner's list replaces the
+ stock one). Everything fails CLOSED: any error drops the message (Hermes treats a hook exception as "allow",
  which would leak the raw number). Only metadata is ever logged, never text or numbers.
 """
 import json
@@ -141,6 +144,60 @@ def _sweeper_loop() -> None:
             log.error("cardguard: ttl sweep failed")
 
 
+
+# ---- report commands and the "/" menu --------------------------------------------------------
+
+REPORTS = ("bantuan", "rencana", "tagihan", "cicilan", "anggaran", "peta", "kondisi", "data")
+_REPORT_CMD = re.compile(r"^/(" + "|".join(REPORTS) + r")(?:@\w+)?\s*$", re.I)
+MENU = [
+    ("bantuan", "Apa saja yang bisa saya lakukan"),
+    ("rencana", "Rencana gajian dan pembayaran terdekat"),
+    ("tagihan", "Tagihan kartu terbuka dan jatuh tempo"),
+    ("cicilan", "Cicilan kartu dan langganan"),
+    ("anggaran", "Anggaran bulan ini dan pemakaiannya"),
+    ("peta", "Peta jalan bebas utang"),
+    ("kondisi", "Penilaian kesehatan keuangan"),
+    ("data", "Ringkasan semua data yang tersimpan"),
+    ("rincian", "Nomor tujuan transfer lengkap (terhapus 24 jam)"),
+    ("rekening", "Simpan rekening: /rekening alias bank nomor"),
+    ("va", "Simpan virtual account: /va alias bank nomor"),
+    ("new", "Mulai percakapan baru (data tidak hilang)"),
+    ("stop", "Hentikan proses yang sedang berjalan"),
+]
+MENU_FIRST_DELAY = int(os.environ.get("CARDGUARD_MENU_DELAY", "90"))
+MENU_REPEAT = 1800
+_SCOPES = ({"type": "default"}, {"type": "all_private_chats"})
+
+
+def push_menu() -> int:
+    """setMyCommands in the scopes Hermes also writes, so the owner's list is the one Telegram shows."""
+    cmds = json.dumps([{"command": c, "description": d} for c, d in MENU])
+    return sum(1 for scope in _SCOPES if _bot("setMyCommands", commands=cmds, scope=json.dumps(scope)) is not None)
+
+
+def _menu_loop() -> None:
+    time.sleep(MENU_FIRST_DELAY)          # after Hermes has registered (and overwritten) its stock menu
+    while True:
+        try:
+            ok = push_menu()
+            log.info("cardguard: command menu pushed in %d scope(s)", ok)
+        except Exception:  # noqa: BLE001
+            log.error("cardguard: command menu push failed")
+        time.sleep(MENU_REPEAT)
+
+
+def _report(event, name: str):
+    status, body = _post("/internal/report", {"name": name}, timeout=30)
+    chat_id = event.source.chat_id
+    if status != 200:
+        log.error("cardguard: report %s failed status=%s", name, status)
+        _notify(event, "Gagal mengambil laporan. Coba lagi nanti.")
+        return {"action": "skip"}
+    text = body.decode()
+    for i in range(0, len(text), 3800):                        # Telegram caps a message at 4096 characters
+        _bot("sendMessage", chat_id=chat_id, text=text[i:i + 3800], disable_web_page_preview="true")
+    return {"action": "skip"}
+
 # ---- hook ------------------------------------------------------------------------------
 
 def _rincian(event):
@@ -197,6 +254,9 @@ def on_inbound(event, **kwargs):
         if not text:
             return None
         private = getattr(getattr(event, "source", None), "chat_type", None) == "dm"
+        m = _REPORT_CMD.match(text.strip())
+        if private and m:
+            return _report(event, m.group(1).lower())
         if private and text.strip().lower() == "/rincian":
             return _rincian(event)
         if private and _PAYEE_CMD.match(text.strip()):
@@ -239,3 +299,4 @@ def register(ctx):
     if not _started:
         _started = True
         threading.Thread(target=_sweeper_loop, daemon=True).start()
+        threading.Thread(target=_menu_loop, daemon=True).start()

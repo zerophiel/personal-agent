@@ -50,6 +50,44 @@ class CardGuard(unittest.TestCase):
         threading.Event().wait(0.1)  # background delete thread
         return [m for m, _ in self.f.bot_calls]
 
+    def test_report_commands_are_answered_by_code_and_never_reach_the_model(self):
+        self.f.body = "Tagihan kartu terbuka\n- BCA ...9706: LUNAS".encode()
+        for cmd in ("/rencana", "/tagihan", "/CICILAN", "/anggaran@danoevault_agent", "/peta", "/kondisi", "/data", "/bantuan"):
+            self.f.posts.clear(); self.f.bot_calls.clear()
+            self.assertEqual(cg.on_inbound(ev(cmd)), {"action": "skip"}, cmd)
+            self.assertEqual(self.f.posts[0][0], "/internal/report")
+            self.assertEqual(self.f.posts[0][1]["name"], cmd.lstrip("/").split("@")[0].lower())
+            self.assertEqual([m for m, _ in self.f.bot_calls], ["sendMessage"])
+        self.f.bot_calls.clear()
+        self.assertIsNone(cg.on_inbound(ev("/rencana besok")))                      # not an exact command: a normal message
+        self.assertIsNone(cg.on_inbound(ev("/model")))
+        self.assertEqual(cg.on_inbound(ev("/rencana", chat_type="group")), None)    # private chat only
+
+    def test_long_reports_are_split_under_the_telegram_limit(self):
+        self.f.body = ("x" * 9000).encode()
+        cg.on_inbound(ev("/data"))
+        sizes = [len(p["text"]) for m, p in self.f.bot_calls if m == "sendMessage"]
+        self.assertEqual(sizes, [3800, 3800, 1400])
+
+    def test_a_failing_report_tells_the_owner_and_still_skips(self):
+        self.f.status, self.f.body = 500, b"boom"
+        self.assertEqual(cg.on_inbound(ev("/tagihan")), {"action": "skip"})
+        self.assertIn("Gagal mengambil laporan", self.f.bot_calls[-1][1]["text"])
+
+    def test_menu_is_the_owners_list_in_both_scopes_and_valid_for_telegram(self):
+        self.assertEqual(cg.push_menu(), 2)
+        calls = [p for m, p in self.f.bot_calls if m == "setMyCommands"]
+        self.assertEqual(sorted(json.loads(p["scope"])["type"] for p in calls), ["all_private_chats", "default"])
+        cmds = json.loads(calls[0]["commands"])
+        names = [c["command"] for c in cmds]
+        self.assertEqual(len(names), len(set(names)))
+        for c in cmds:
+            self.assertRegex(c["command"], r"^[a-z0-9_]{1,32}$")
+            self.assertTrue(1 <= len(c["description"]) <= 256)
+        for must in ("bantuan", "rencana", "tagihan", "rincian", "rekening", "va", "new", "stop"):
+            self.assertIn(must, names)
+        self.assertNotIn("model", names)                                              # stock commands are not shown
+
     def test_rewrites_to_alias_token_and_deletes_raw(self):
         for raw in ("4111 1111 1111 1111", "4111111111111111", "4111-1111-1111-1111"):
             out = cg.on_inbound(ev(f"kartu {raw} ok"))

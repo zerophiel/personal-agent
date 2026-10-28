@@ -2,7 +2,7 @@
 
 /mcp          model-facing (bearer MCP token). Tools only read/write aliases and amounts.
               There is deliberately NO tool that stores or reveals a full number.
-/internal/*   plugin-facing (bearer INTERNAL token): store_payee, rincian. The model never
+/internal/*   plugin-facing (bearer INTERNAL token): store_payee, rincian, report. The model never
               holds this token.
 """
 from __future__ import annotations
@@ -23,7 +23,7 @@ from starlette.responses import JSONResponse, PlainTextResponse
 
 from pydantic import BaseModel, Field
 
-from . import card_installments, health, living, mutations, names, roadmap, statement_pdf, statements, subscriptions, suggest, tools
+from . import card_installments, health, living, mutations, names, reports, roadmap, statement_pdf, statements, subscriptions, suggest, tools
 from .ledger import connect
 from .money import format_idr
 from .payee_vault import PayeeVault, has_forbidden_card_data
@@ -485,6 +485,17 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
             return JSONResponse({"ok": False, "error": type(e).__name__}, status_code=422)
         return JSONResponse({"ok": True, "alias": alias, "display": shown})
 
+    async def report(request: Request):
+        """Plugin-only: a ready-made text for a slash command (rendered by code, no model involved)."""
+        try:
+            name = str((await request.json()).get("name", ""))
+        except ValueError:
+            name = ""
+        if name not in reports.NAMES:
+            return JSONResponse({"ok": False, "error": "unknown_report"}, status_code=404)
+        with _LOCK:
+            return PlainTextResponse(reports.build(conn, name, today()))
+
     async def rincian(request: Request):
         with _LOCK:
             row = conn.execute("SELECT snapshot_json FROM plans ORDER BY id DESC LIMIT 1").fetchone()
@@ -522,6 +533,7 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
 
     app.add_route("/internal/store_payee", store_payee, methods=["POST"])
     app.add_route("/internal/rincian", rincian, methods=["POST"])
+    app.add_route("/internal/report", report, methods=["POST"])
     app.add_middleware(_Auth, rules={"/mcp": mcp_token, "/internal/": internal_token})
     app.state.mcp = mcp
     return app
