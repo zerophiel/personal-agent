@@ -32,7 +32,7 @@ def build(conn, vault, snap: dict) -> str:
         if t["reason"] == "tabungan":
             savings += t["amount"]
             continue
-        if t["reason"] == "dana darurat":
+        if t["reason"] == "dana darurat" and not t.get("pay_to"):     # no pocket number registered yet
             emergency += t["amount"]
             continue
         if t.get("method") == "app_menu":

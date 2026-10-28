@@ -34,7 +34,7 @@ Tagihan tetap dan cicilan → minimum kartu → uang harian (dilindungi) → dan
 - Pola pot hanya diubah atas keputusan pemilik (`atur_jadwal_pot` dengan `pola='sisa'` atau `'rata'`).
 
 ## Dana darurat
-Target Rp 3.000.000, diisi Rp 500.000 tiap gajian sebelum pot dan sebelum sisa saldo kartu. Hanya untuk kejadian tak terduga (servis mobil, kebutuhan sekolah mendadak, sakit di luar tanggungan kantor), BUKAN untuk menutup belanja kartu. Status: `dana_darurat`. Setelah pemilik menyetor atau memakainya, catat saldo yang ia baca: `dana_darurat(saldo=...)`.
+Target Rp 3.000.000, diisi Rp 500.000 tiap gajian sebelum pot dan sebelum sisa saldo kartu, ke kantong dana darurat pemilik (Jago; nomornya hanya di `/rincian`, didaftarkan pemilik dengan `/rekening dana-darurat ...`). Hanya untuk kejadian tak terduga (servis mobil, kebutuhan sekolah mendadak, sakit di luar tanggungan kantor), BUKAN untuk menutup belanja kartu. Status: `dana_darurat`. Setelah pemilik menyetor atau memakainya, catat saldo yang ia baca: `dana_darurat(saldo=...)`.
 
 ## Kartu kredit
 - **Belanja kartu adalah uang harian.** Tagihannya dibayar dari sisa uang harian saat gajian (`sisa_uang_harian`). Belanja kartu DI LUAR uang harian langsung memotong pot: tunjukkan dampaknya dengan `simulasi_skenario(belanja_kartu_per_bulan=...)`.

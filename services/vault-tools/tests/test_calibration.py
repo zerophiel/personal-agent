@@ -131,6 +131,24 @@ class Emergency(unittest.TestCase):
         self.assertNotIn("dana-darurat", amounts(tools.generate_payday_plan(conn, NOV_1)))
         self.assertIn("PENUH", tools.format_emergency(conn))
 
+    def test_once_the_pocket_number_is_registered_the_deposit_is_a_transfer_with_its_number(self):
+        conn = full_world()
+        tools.set_threshold(conn, "emergency_target", 3_000_000)
+        tools.set_threshold(conn, "emergency_monthly", 500_000)
+        tools.set_emergency_balance(conn, 100_000)                                   # already in the pocket
+        self.assertIn("nomor tujuan belum didaftarkan", tools.data_overview(conn, NOV_1))
+        vault = PayeeVault(conn, bytes(range(32)))
+        vault.store("dana-darurat", "account", "Jago", "102000008051")              # what /rekening does
+        snap = tools.generate_payday_plan(conn, NOV_1)
+        t = [x for x in snap["transfers"] if x["to_alias"] == "dana-darurat"][0]
+        self.assertEqual((t["amount"], t["pay_to"]), (500_000, "dana-darurat"))
+        text = rincian.build(conn, vault, snap)
+        self.assertIn("Dana Darurat (Jago)", text)
+        self.assertIn("102000008051", text)                                          # /rincian is the only place with the number
+        self.assertNotIn("Sisihkan ke dana darurat", text)
+        self.assertIn("disetor ke dana-darurat (Jago 8051)", tools.data_overview(conn, NOV_1))
+        self.assertNotIn("102000008051", str(snap) + tools.data_overview(conn, NOV_1))
+
 
 class LeftoverLivingCash(unittest.TestCase):
     def test_last_cycles_cash_tops_up_the_living_money_for_this_payday_only(self):

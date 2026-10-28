@@ -178,7 +178,10 @@ def data_overview(conn, today: date) -> str:
                  f"pola {'kartu dulu, pot dari sisa' if f['pace'] == 'sisa' else 'setoran tetap (rata)'}"
                  + (" | gaji di hari tenggat ikut dihitung" if f["due_payday"] else ""))
     e = emergency_status(conn)
-    L.append("DANA DARURAT: " + (f"{format_idr(e['saved'])} dari {format_idr(e['target'])}, {format_idr(e['monthly'])} per gajian" if e else "belum diatur"))
+    dest = conn.execute("SELECT bank, last4 FROM payee_secrets WHERE alias=?", (EMERGENCY_PAYEE,)).fetchone()
+    where = (f"; disetor ke {EMERGENCY_PAYEE} ({dest['bank']} {dest['last4']})" if dest
+             else f"; nomor tujuan belum didaftarkan (/rekening {EMERGENCY_PAYEE} <bank> <nomor>)")
+    L.append("DANA DARURAT: " + (f"{format_idr(e['saved'])} dari {format_idr(e['target'])}, {format_idr(e['monthly'])} per gajian{where}" if e else "belum diatur"))
     L.append("PENGELUARAN TETAP")
     for e in conn.execute("SELECT alias, amount, due_day FROM fixed_expenses ORDER BY alias"):
         L.append(f"- {e['alias']} | {format_idr(e['amount'])} | tanggal {e['due_day']}")
@@ -612,6 +615,14 @@ def set_pot_balance(conn, alias: str, balance: int, today: date) -> str:
 
 # ---- emergency fund: a small buffer so a surprise lands here, not on a credit card ----------
 
+EMERGENCY_PAYEE = "dana-darurat"     # payee alias of the emergency pocket's account number (sent by the owner with /rekening)
+
+
+def emergency_destination(conn) -> str | None:
+    row = conn.execute("SELECT alias FROM payee_secrets WHERE alias=? AND kind IN ('account','va')", (EMERGENCY_PAYEE,)).fetchone()
+    return row["alias"] if row else None
+
+
 def emergency_status(conn) -> dict | None:
     target = get_threshold(conn, "emergency_target")
     if not target:
@@ -677,8 +688,8 @@ def sinking_status(conn, today: date, alias: str | None = None) -> str:
 def collect_obligations(conn, payday: date, nxt: date, holidays=()) -> list[Obligation]:
     obs: list[Obligation] = []
     e = emergency_status(conn)
-    if e and e["next"]:
-        obs.append(Obligation("emergency", "dana-darurat", payday, e["next"]))
+    if e and e["next"]:      # paid to the owner's own emergency pocket once its number is registered (/rekening dana-darurat ...)
+        obs.append(Obligation("emergency", EMERGENCY_PAYEE, payday, e["next"], pay_to=emergency_destination(conn)))
     for f in conn.execute("SELECT * FROM sinking_funds"):
         s = sinking_required(conn, f, payday, holidays)
         if s["pace"] == "sisa":
