@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from . import card_installments, subscriptions
+from . import card_installments, invariants, subscriptions
 from .money import format_idr
 from .roadmap import add_months
 from .tools import (DEFAULT_CARD_INTEREST_BP, SINKING_BUFFER_DAYS, _low_cycles, _round_up, bp_of_idr, current_payday,
@@ -150,12 +150,14 @@ def simulate(conn, today: date, *, belanja_kartu: int = 0, tunda_pot: int = 0, e
     out_funds = [{"alias": f["alias"], "target": f["target"], "due": f["due"], "pace": f["pace"], "paydays": f["left"],
                   "start": f["start"], "at_due": f["at_due"], "gap": (f["target"] - f["at_due"]) if f["at_due"] is not None else None,
                   "deposits": f["deposits"]} for f in funds]
-    return {"payday": payday.isoformat(), "start_balance": start_balance, "rows": rows, "interest": interest_total,
-            "paid_off_month": rows[paid_off - 1]["month"] if paid_off else None, "salary": salary, "funds": out_funds,
-            "emergency": {"target": ef["target"], "saved_end": ef_saved} if ef else None,
-            "params": dict(belanja_kartu=belanja_kartu, tunda_pot=tunda_pot, ekstra_sekarang=ekstra_sekarang, hemat=hemat,
-                           reserve=reserve, pot_awal=pot_awal, pot_awal_bulan=pot_awal_bulan, pola_pot=pola_pot,
-                           gaji_hari_tenggat=gaji_hari_tenggat)}
+    result = {"payday": payday.isoformat(), "start_balance": start_balance, "rows": rows, "interest": interest_total,
+              "paid_off_month": rows[paid_off - 1]["month"] if paid_off else None, "salary": salary, "funds": out_funds,
+              "emergency": {"target": ef["target"], "saved_end": ef_saved} if ef else None,
+              "params": dict(belanja_kartu=belanja_kartu, tunda_pot=tunda_pot, ekstra_sekarang=ekstra_sekarang, hemat=hemat,
+                             reserve=reserve, pot_awal=pot_awal, pot_awal_bulan=pot_awal_bulan, pola_pot=pola_pot,
+                             gaji_hari_tenggat=gaji_hari_tenggat)}
+    invariants.require(invariants.simulation_errors(result), "simulasi")     # refuse numbers that break their own rules
+    return result
 
 
 def horizon(conn, today: date, at_least: int = 12) -> int:

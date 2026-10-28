@@ -67,6 +67,16 @@ class WorkedExample(unittest.TestCase):
         self.assertEqual(plan.transfers[0].to_alias, "telat-9999")
         self.assertEqual(plan.transfers[0].date, PAYDAY)
 
+    def test_an_overdue_card_takes_its_minimum_first_but_never_the_living_money_for_the_rest(self):
+        """Found by the random-ledger property test: the whole overdue balance used to outrank the living money."""
+        obs = [Obligation("card", "telat-1111", date(2026, 10, 25), 9_000_000, 1_000_000)]
+        plan = build_plan(PAYDAY, 8_000_000, obs, reserve=6_000_000)
+        self.assertEqual([(t.to_alias, t.amount, t.reason) for t in plan.transfers],
+                         [("telat-1111", 1_000_000, "tagihan kartu - minimum"),
+                          ("telat-1111", 1_000_000, "tagihan kartu - sisa saldo (bayar penuh)")])
+        self.assertEqual(plan.cash_to_hold, 6_000_000)
+        self.assertEqual(plan.unfunded[0].amount, 7_000_000)
+
     def test_later_window_excluded(self):
         obs = [Obligation("fixed", "x", date(2026, 12, 1), 1_000_000)]
         self.assertEqual(build_plan(PAYDAY, 5_000_000, obs).transfers, ())

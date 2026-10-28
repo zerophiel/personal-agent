@@ -820,6 +820,12 @@ def generate_payday_plan(conn, today: date, payday: date | None = None,
     for level, text in found:
         if level in ("bad", "warn") and "tidak rekonsiliasi" not in text:
             snap["warnings"].append("Data: " + text)
+    from . import invariants   # every plan checks its own arithmetic before anyone sees it
+    bills: dict[str, int] = {}
+    for o in obs:
+        if o.kind != "pool_rest" and o.due < nxt:
+            bills[o.payee_alias] = bills.get(o.payee_alias, 0) + o.amount
+    invariants.require(invariants.plan_errors(snap, bills), "rencana gajian")
     conn.execute("INSERT INTO plans(payday,snapshot_json,created_at) VALUES (?,?,?)",
                  (payday.isoformat(), json.dumps(snap), datetime.now(timezone.utc).isoformat()))
     conn.commit()

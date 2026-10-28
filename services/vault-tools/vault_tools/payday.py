@@ -115,7 +115,8 @@ def _items(payday: date, obligations: Iterable[Obligation], horizon: date):
                         "tagihan kartu - minimum", o.from_account, o.late_cost_bp, o.method, o.pay_to))
             rest = o.amount - minimum
             if rest:
-                out.append((P_OVERDUE if overdue else P_CARD_REST, o.due, o.payee_alias, rest,
+                # only the minimum of an overdue card is urgent (late fee); the rest is interest, paid above the living money
+                out.append((P_CARD_REST, o.due, o.payee_alias, rest,
                             "tagihan kartu - sisa saldo (bayar penuh)", o.from_account, o.late_cost_bp,
                             o.method, o.pay_to))
             continue
