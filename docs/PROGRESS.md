@@ -1,6 +1,6 @@
 # Progress and resume point (finance / vault)
 
-Last updated: 2026-10-30. Branch `worktree-m1-skeleton`, draft PR #1. 368 vault-tools tests pass.
+Last updated: 2026-10-30. Branch `worktree-m1-skeleton`, draft PR #1. 374 vault-tools tests pass.
 No secrets or personal amounts are recorded here; the numbers live in the ledger on the VPS.
 
 ## Done
@@ -143,6 +143,24 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   already changed differs from #54). Backup `ledger.db.bak-pre-merge-fix`; vault-tools rebuilt, vault restarted; no tool,
   SOUL or schema change, so no `/new`; from the vault, MCP `tools/list` returns the 53 tools of `MCP_TOOL_NAMES`.
 
+## Records made after their statement, and re-sent screenshots (2026-10-30, owner: "ya betulkan juga")
+- `record_expense` now matches the new record at once (`merge_receipts(receipt_id=...)`), but only against a bank whose
+  stored statements (`mutation_files` period) already reach the record's day: before that its own row is not in yet and the
+  2-day window would hand it to another payment of the same size, so it waits for that upload. `ubah_belanja` re-matches
+  under the same gate. The bot gets the merge in `alerts` (relayed as is): the row and the category that counts, plus
+  `merged_into`.
+- The duplicate check includes merged records (`existing_id` = the oldest; the message says what it was merged with).
+  Before, the screenshot of a merged purchase sent again was stored a second time (a corrected record's key is id-based)
+  or hit `UNIQUE constraint failed: transactions.dedupe_key`; `allow_duplicate` after a merged or deleted twin hit it too.
+  The key now takes the next free number.
+- A merge no longer overwrites the status of a row that already has a category (a rule's `verified` row turned `unverified`).
+- 374 tests (6 new, 5 red on the old code; the sixth guards the gate). Dry run on a ledger copy: #2440 merged on a synthetic
+  Jago row, its screenshot re-sent -> `possible_duplicate` #2440 and no new row; `allow_duplicate` -> stored, unmerged; a
+  Mandiri 800.000 record of 27 Oct left alone although a 26 Oct row of that size exists (Mandiri reaches 26 Oct); a record
+  for BCA's 25 Oct FLAZZ 200.000 merged at once (October total +0, the row stays `transport`/`verified`); plan identical.
+  Backup `ledger.db.bak-pre-record-merge`; vault-tools rebuilt, vault restarted; MCP `tools/list` 53 tools with the
+  `record_expense` description unchanged; ledger counts unchanged; no `/new`.
+
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
 2. Closing the pot gap without the children's needs: games (owner's own), apps not marked `wajib`, or talking to the friend.
@@ -155,11 +173,10 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 7. CIMB Oct statement: GoPro Rp 1.186.072 (USD 65.16) took the card's subscriptions from 524.089 to 1.676.161. Annual charge,
    or something to stop/move? Owner decides.
 8. (fixed 2026-10-30: own records merge only into a debit of their own bank, see above)
-9. Latent, no live exposure (statements end 26 Oct, own records start 28 Oct), checked in memory: a record made AFTER its
-   statement was uploaded is never matched (matching runs on upload and on `ubah_belanja` only), so it counts twice; and
-   `record_expense`'s duplicate check skips merged records, so re-sending the screenshot of a merged purchase fails with
-   `UNIQUE constraint failed: transactions.dedupe_key` instead of being flagged. Fix offered to the owner: match at record
-   time too; the duplicate check includes merged records.
+9. (fixed 2026-10-30: a record made after its statement merges at once; a re-sent screenshot of a merged purchase is flagged)
+10. A merged record cannot be corrected or unmerged through the bot (`_own_row` refuses merged rows for `ubah_belanja` and
+    `hapus_belanja`), so a wrong match stays until a human fixes the row; the coverage gate and the bank, card and own-move
+    rules keep it rare. A fix is a tool change, so the owner sends `/new` once. Offered 2026-10-30.
 
 ## Next steps
 - Done 2026-10-30 (session from 10:02 WIB, edit 10:04 WIB): owner sent `/new` and had the bot fix PHO STREET #2440 (Jenius ->
