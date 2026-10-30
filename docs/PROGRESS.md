@@ -1,6 +1,6 @@
 # Progress and resume point (finance / vault)
 
-Last updated: 2026-10-30. Branch `worktree-m1-skeleton`, draft PR #1. 360 vault-tools tests pass.
+Last updated: 2026-10-30. Branch `worktree-m1-skeleton`, draft PR #1. 368 vault-tools tests pass.
 No secrets or personal amounts are recorded here; the numbers live in the ledger on the VPS.
 
 ## Done
@@ -126,6 +126,23 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 - `/usulan` shows `feature_requests.resolution`; #1-#3 marked `selesai` with what to say to the bot. Pot shortfall choices no
   longer offer the due-day salary once it is counted. Backup `ledger.db.bak-pre-usulan`; plan for 30 Oct unchanged to the rupiah.
 
+## Own records merge only into a debit of their own bank (2026-10-30, owner: "ya betulkan")
+- Found while checking the PHO STREET fix: `merge_receipt_into_mutation` merged the nearest own record of the same amount
+  within 2 days into a debit of ANY account, card purchases included, and the debit took the record's category (a
+  `transfer_internal` record could drop a real expense out of the living cost). Live: 3 own records, 1 merge, none wrong.
+- Now `health.merge_receipts`: the same bank, not the same account, because the Jago statement (`jago-utama`) is one file
+  for every pocket (Danu Pocket, Main Pocket, Internet, IPL...), so `jago-harian` purchases show up there; bank names are
+  compared case-insensitively ('Jago'/'jago'). A record without a source still matches any bank; a card purchase never; a
+  purchase never merges with a move between own accounts (the Jago file is full of round pocket moves) nor the other way
+  round. Matched once the whole file is stored, closest dates first, exact account before same bank before no source, one
+  record per debit. `ubah_belanja` matches the corrected record again (a wrong bank fixed later is not left counted twice);
+  its change_log row then shows `merged_into`.
+- 368 tests (8 new, 7 of them fail on the old code). Dry run on a ledger copy: BCA -100.000 on 28 Oct leaves Flazz #2438
+  alone; Jago -156.541 on 29 Oct (jago-utama) absorbs PHO STREET #2440; Mandiri -100.000 on 28 Oct absorbs #2438; the fresh
+  30 Oct plan is identical (cash 2.651.848, leftover 4.894.157, invariants clean; only the pot warning text that Deploy B
+  already changed differs from #54). Backup `ledger.db.bak-pre-merge-fix`; vault-tools rebuilt, vault restarted; no tool,
+  SOUL or schema change, so no `/new`; from the vault, MCP `tools/list` returns the 53 tools of `MCP_TOOL_NAMES`.
+
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
 2. Closing the pot gap without the children's needs: games (owner's own), apps not marked `wajib`, or talking to the friend.
@@ -137,11 +154,12 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 6. Listrik and internet as fixed expenses (due day, how paid); sender allowlist (CIMB collections address) only with the owner.
 7. CIMB Oct statement: GoPro Rp 1.186.072 (USD 65.16) took the card's subscriptions from 524.089 to 1.676.161. Annual charge,
    or something to stop/move? Owner decides.
-8. The receipt-to-mutation merge ignores the account (`health.merge_receipt_into_mutation`, run by `mutations` for every new
-   debit): the nearest own record with the same amount within 2 days merges into a mutation of ANY account, a card purchase
-   included, and the mutation takes that record's category (a `transfer_internal` record would drop a real expense out of the
-   living cost). Live on 2026-10-30: 3 own records, 1 merge (record into record, same account), none wrong. Proposed fix:
-   same account, or a record without a source; never a card record. Waiting for the owner's go.
+8. (fixed 2026-10-30: own records merge only into a debit of their own bank, see above)
+9. Latent, no live exposure (statements end 26 Oct, own records start 28 Oct), checked in memory: a record made AFTER its
+   statement was uploaded is never matched (matching runs on upload and on `ubah_belanja` only), so it counts twice; and
+   `record_expense`'s duplicate check skips merged records, so re-sending the screenshot of a merged purchase fails with
+   `UNIQUE constraint failed: transactions.dedupe_key` instead of being flagged. Fix offered to the owner: match at record
+   time too; the duplicate check includes merged records.
 
 ## Next steps
 - Done 2026-10-30 (session from 10:02 WIB, edit 10:04 WIB): owner sent `/new` and had the bot fix PHO STREET #2440 (Jenius ->
