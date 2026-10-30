@@ -1,6 +1,6 @@
 # Progress and resume point (finance / vault)
 
-Last updated: 2026-10-30. Branch `worktree-m1-skeleton`, draft PR #1. 333 vault-tools tests pass.
+Last updated: 2026-10-30. Branch `worktree-m1-skeleton`, draft PR #1. 360 vault-tools tests pass.
 No secrets or personal amounts are recorded here; the numbers live in the ledger on the VPS.
 
 ## Done
@@ -108,6 +108,24 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   unfunded DBS 696.020 (+46.005) and CIMB 1.631.853; pot projection 132.732.499, short 2.267.501 (sisa pattern, due-date
   salary counted).
 
+## The bot's three /usulan, built (2026-10-30, schema v12)
+- #3 correct what the owner recorded: `daftar_belanja` (ids, source, merged/twin flags), `ubah_belanja`, `hapus_belanja`. Only
+  `receipt`/`manual` rows not merged; the stored amount must be named back (`jumlah_tercatat`, guards a wrong id); an edit
+  re-keys `dedupe_key` by id so a later record of the old values cannot hit the unique index; the whole row before/after goes to
+  `change_log` with the owner's reason (subscription upserts are logged there too). Bank mutations and statement lines are fixed
+  by uploading again. A merged row can point at an earlier owner record (the 28 Oct Flazz screenshot sent twice), not only a
+  mutation. PHO STREET #2440 (Jenius -> Jago daily) is left for the owner to fix through the bot after `/new`.
+- #2 `belanja_kartu(kartu=, bulan=)`: every line of one card's latest (or given) statement with its line status, long numbers
+  masked, plus that card's per-cycle summary. One-shot check on CIMB answered from the tool exactly (total 1.717.741, minimum
+  85.888, due 5 Nov; subscriptions 1.676.161 of which GoPro 1.186.072; no writes).
+- #1 `saldo_rekening`: the balance shown in the bank app (gross) is stored in `balance_reports` and checked by code against the
+  auto-debits from that account until the next salary plus what the bank holds back; a debit due that day gives both figures
+  (live: Mandiri 6.076.000 = CUKUP lebih 0; on 1 Nov 6.076.000 not yet debited / 5.806.000 after SPayLater). The payday plan
+  repeats the verdict for a balance reported since this payday; `ringkasan_data` shows the last report with its WIB time.
+  SOUL payday step 5: ask it AFTER the transfers; it is not the pre-salary leftover of step 1.
+- `/usulan` shows `feature_requests.resolution`; #1-#3 marked `selesai` with what to say to the bot. Pot shortfall choices no
+  longer offer the due-day salary once it is counted. Backup `ledger.db.bak-pre-usulan`; plan for 30 Oct unchanged to the rupiah.
+
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
 2. Closing the pot gap without the children's needs: games (owner's own), apps not marked `wajib`, or talking to the friend.
@@ -119,9 +137,10 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 6. Listrik and internet as fixed expenses (due day, how paid); sender allowlist (CIMB collections address) only with the owner.
 
 ## Next steps
-- Owner: `/new` in Telegram (vault restarted 2026-10-30 with the new SOUL and tool). On 1 Nov ask for the payday list; the bot
-  asks again on purpose for the leftover living cash just BEFORE the salary (Mandiri usable + daily account); after paying, tell
-  the bot (card payments, pot balance, emergency fund balance).
+- Owner: `/new` in Telegram (vault restarted 2026-10-30 twice: leftover fix, then the /usulan tools; one `/new` covers both).
+  Then ask the bot to fix PHO STREET #2440 (from Jago daily, not Jenius) and check `change_log`. On 1 Nov ask for the payday
+  list; the bot asks again on purpose for the leftover living cash just BEFORE the salary (Mandiri usable + daily account); after
+  paying, tell the bot (card payments, pot balance, emergency fund balance) and the Mandiri balance shown in the app.
 - After the November statements: calibration per `docs/calibration.md` (Google One, Apple, Coway, bot quality, spend).
 - Remaining plan: M3 front/control/applier, M4 comms, M2 gate checks (`docs/assumptions.md`).
 
