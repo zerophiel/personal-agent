@@ -135,6 +135,8 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
    check on the November statements (the audit flags them again if they repeat).
 5. MID*Tokopedia 204.071 every month on HSBC: an instalment that is not recorded yet?
 6. Listrik and internet as fixed expenses (due day, how paid); sender allowlist (CIMB collections address) only with the owner.
+7. CIMB Oct statement: GoPro Rp 1.186.072 (USD 65.16) took the card's subscriptions from 524.089 to 1.676.161. Annual charge,
+   or something to stop/move? Owner decides.
 
 ## Next steps
 - Owner: `/new` in Telegram (vault restarted 2026-10-30 twice: leftover fix, then the /usulan tools; one `/new` covers both).
