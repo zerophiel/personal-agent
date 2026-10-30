@@ -189,6 +189,43 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   that row, counted twice). 384 tests; the new one fails without either half. Dry run on live copies clean; backup
   `ledger.db.bak-pre-unmerge-2`; redeployed with the same checks; no further `/new`.
 
+## A payday's plan comes from the ledger before that payday; payments are progress (2026-10-30, owner: "PERBAIKI SEKARANG JUGA")
+- After the owner paid everything on the 30 Oct payday, plans #57-#61 treated the paid salary as still free (pot deposit
+  19-20.7M for November), `/rincian` and the simulation counted the paid cards again, `tunda_pot` did nothing to a `sisa`
+  pot, a card whose minimum was paid was still "due", and the bot asked the same questions again after three compactions.
+- Schema v13: `card_payments`, `debt_payments`, `plan_progress`, `fund_reports` date every payment and reported balance;
+  v12 data is backfilled once (`paid_at` trimmed to its date; the open bill and the current emergency balance dated on the
+  deploy day).
+- A payday's plan, `/rincian`, `/rencana`, the simulation and the pot projection use the ledger as it stood BEFORE that
+  payday; what was paid since is progress (done, paid outside the plan, still open), never free money. Reminders and card
+  status use the current state. Plans are stored only when the JSON changes.
+- New tools: `cicilan_dibayar` (an instalment paid by hand ahead of its auto-debit: tenor and outstanding go down, the
+  auto-debit leaves the reminder), `transfer_selesai`, `status_gajian` (progress plus facts already reported).
+- A card whose minimum is paid is never "due" (reminders, audit, `/tagihan`, overview, SOUL). `card_advice` no longer
+  offers cutting the living money. `record_card_payment` refuses the same amount twice on one day unless `ulang=true`.
+- `tunda_pot`/`pot_awal` also hold back a `sisa` pot; the simulation's first cycle pays every minimum first, like the plan.
+- `dana_darurat(saldo)` read on or after a payday says whether that payday's deposit arrived, against the last report
+  before it (16:29: 600.048 and 600.000, both read after the deposit, made the bot ask for another 500.000). The latest
+  fund report is picked by date, not by id (a report can be backdated).
+- SOUL: `status_gajian` first (up to 7 days after a payday, and after every compaction), one question per message, never
+  re-ask what is recorded; open items are knowledge, not questions. Hermes compaction at 100K tokens (was 60K) with the
+  owner's last 3 messages verbatim; `protect_first_n` stays at Hermes's default (it stops protecting the session opening
+  after the first compaction by itself).
+- 401 vault-tools tests (16 new in `test_payday_progress.py`; the first 15 fail on the old code), 479 across all suites.
+  Dry runs on in-memory copies of the live ledger (old vs new code). Backup `ledger.db.bak-pre-payday-progress` (v12,
+  61 plans, 1.915 transactions); vault-tools rebuilt (v13: 7 card payments, 2 fund reports, dates 2026-10-30); data fix;
+  vault restarted; MCP 56 tools, `status_gajian` through the Hermes container; logs clean. Owner sends `/new`.
+- Data recorded from the owner's 30 Oct chat: MTF 2 Nov (5.706.000) and SPayLater 1 Nov (270.000) paid by hand on 30 Oct
+  (tenor 18 / 4, outstanding 102.613.000 / 1.080.000); transfers done: IPL, les English, les Gracia, both school VAs,
+  dana darurat 500.000, uang harian 2.827.889 (the owner sent 2.830.398); les Mandarin 800.000 left in Mandiri (not billed
+  yet); emergency fund 100.000 before the payday (report dated 29 Oct) and 600.000 after; office parking Nusapala 150.000
+  from Mandiri on 30 Oct 16:53 (#2442, transport: paid monthly since August, a living cost, no fixed expense). /usulan #5,
+  #7, #8, #9, #10 `selesai`; #4, #6 `dikerjakan`.
+- Plan #62: no auto-debit until 30 Nov; DBS rest 872.061 carried (minimum met, ±15.261 interest); pot hutang-teman
+  134.200.046 of 135.000.000 by 31 Jan 2028, short 799.954 (16 paydays: 0, 4.454.039, 5.818.351, 6.108.204, 6.794.623,
+  7.164.623, 3 x 7.564.623, 9.433.427, 3 x 11.855.363, 3 x 12.055.607). Before the data fix it showed short 299.954: the
+  500.000 deposit was counted twice.
+
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
 2. Closing the pot gap without the children's needs: games (owner's own), apps not marked `wajib`, or talking to the friend.
@@ -203,10 +240,24 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 8. (fixed 2026-10-30: own records merge only into a debit of their own bank, see above)
 9. (fixed 2026-10-30: a record made after its statement merges at once; a re-sent screenshot of a merged purchase is flagged)
 10. (fixed 2026-10-30: merged records can be corrected, deleted or let go with `lepas`; cash records never merge; see above)
+11. Coway Rp 540.000 in arrears (2 months, owner 30 Oct 15:54): not in any plan yet (/usulan #6). Paid already, or from
+    which money before 30 Nov?
+12. The bot told the owner 'Jago "fixed-expenses" …9703' was registered: it is not (`accounts` has the alias, `payee_secrets`
+    has no number for it). Only if the bot should name it as a destination: `/rekening fixed-expenses Jago <nomor>`. The
+    owner pasted that account's full number in the chat on 30 Oct 16:02; it is in Hermes `state.db`.
+13. MTF outstanding 102.613.000 is 95.000 below 18 x 5.706.000: check the remaining amount in the MTF app.
+14. `payee_secrets` holds a card entry ending 1111 that no card uses (likely an early cardguard test): remove with the owner.
+15. Transport over its October budget (1.420.000 of 1.000.000 with the parking): raise the budget or keep it as a warning.
 
 ## Next steps
-- Owner: send `/new` once before the 1 Nov payday session (2026-10-30 deploy: `lepas`/`tunai` on `ubah_belanja`, `tunai` on
-  `record_expense`, SOUL). The bot now asks where a purchase was paid from when the screenshot does not show it.
+- Owner: send `/new` now (2026-10-30 evening deploy: new tools, SOUL, compaction config). Then: les Mandarin once paid
+  (`transfer_selesai`), and the Mandiri October e-statement again (sent 30 Oct 16:14, never recorded).
+- Before the 30 Nov payday (deploy 2): admin fees as an estimated essential cost (/usulan #4: 7.500 per card payment,
+  6.500 per transfer); one-off bills such as the Coway arrears (/usulan #6); an undo for `cicilan_dibayar`; the
+  `format_autodebit_check` sentence when nothing is debited. After a week: compare cached tokens per turn and compactions
+  per day with the 60K week.
+- (done 2026-10-30 morning) Owner sent `/new` once before the payday session (deploy: `lepas`/`tunai` on `ubah_belanja`,
+  `tunai` on `record_expense`, SOUL). The bot now asks where a purchase was paid from when the screenshot does not show it.
 - Done 2026-10-30 (session from 10:02 WIB, edit 10:04 WIB): owner sent `/new` and had the bot fix PHO STREET #2440 (Jenius ->
   jago-harian): the bot listed it, asked what was wrong, showed before -> after, waited for "ya", then `ubah_belanja`;
   `change_log` #1 holds only the account and dedupe key change; no warnings; no new transaction rows. The account of an own
@@ -215,8 +266,9 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   POS row (file under `jago-utama`); Flazz #2438 (Mandiri, `transfer_internal`; #2439 is merged into it) into the Mandiri
   "Transfer BI Fast Ke BCA" -100.000 of 28 Oct, NOT into BCA's "FLAZZ BCA TOPUP" (all 129 Flazz top-ups go through BCA,
   `transport` by rule; that row must stay counted once as transport).
-- Owner: on 1 Nov ask for the payday list; the bot asks again on purpose for the leftover living cash just BEFORE the salary (Mandiri usable + daily account); after
-  paying, tell the bot (card payments, pot balance, emergency fund balance) and the Mandiri balance shown in the app.
+- On the 30 Nov payday: ask the bot for the payday list; it asks for the leftover living cash just BEFORE the salary
+  (Mandiri usable + daily account); after paying, tell the bot (card payments, instalments, transfers, pot and emergency
+  fund balances, the Mandiri balance in the app). (30 Oct: done in the chat, recorded by the data fix above.)
 - After the November statements: calibration per `docs/calibration.md` (Google One, Apple, Coway, bot quality, spend).
 - Remaining plan: M3 front/control/applier, M4 comms, M2 gate checks (`docs/assumptions.md`).
 
