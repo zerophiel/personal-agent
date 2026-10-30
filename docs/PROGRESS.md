@@ -176,7 +176,10 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 9. (fixed 2026-10-30: a record made after its statement merges at once; a re-sent screenshot of a merged purchase is flagged)
 10. A merged record cannot be corrected or unmerged through the bot (`_own_row` refuses merged rows for `ubah_belanja` and
     `hapus_belanja`), so a wrong match stays until a human fixes the row; the coverage gate and the bank, card and own-move
-    rules keep it rare. A fix is a tool change, so the owner sends `/new` once. Offered 2026-10-30.
+    rules keep it rare. A fix is a tool change, so the owner sends `/new` once. Offered 2026-10-30. Related: a record with no
+    account and no card (cash) has no bank to check, so it can merge into any bank's debit of the same amount within 2 days
+    (rule from 841ab6e, now at record time too); none exist yet (all own records name an account). If the owner records
+    cash, such records should never merge (code only, no `/new`). Asked 2026-10-30.
 
 ## Next steps
 - Done 2026-10-30 (session from 10:02 WIB, edit 10:04 WIB): owner sent `/new` and had the bot fix PHO STREET #2440 (Jenius ->
