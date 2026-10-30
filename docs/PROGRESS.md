@@ -1,6 +1,6 @@
 # Progress and resume point (finance / vault)
 
-Last updated: 2026-10-30. Branch `worktree-m1-skeleton`, draft PR #1. 374 vault-tools tests pass.
+Last updated: 2026-10-30. Branch `worktree-m1-skeleton`, draft PR #1. 383 vault-tools tests pass.
 No secrets or personal amounts are recorded here; the numbers live in the ledger on the VPS.
 
 ## Done
@@ -161,6 +161,30 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   Backup `ledger.db.bak-pre-record-merge`; vault-tools rebuilt, vault restarted; MCP `tools/list` 53 tools with the
   `record_expense` description unchanged; ledger counts unchanged; no `/new`.
 
+## Merged records corrected, deleted or let go; cash never merges (2026-10-30, owner: "ya betulkan dua-duanya")
+- `ubah_belanja` and `hapus_belanja` accept a record merged into a bank row (before: refused, so a wrong match stayed until
+  a human fixed the row). A corrected record goes back into the row it came from while it is still that money (same amount,
+  bank and kind; no coverage gate, since an upload merges without one), else it is matched afresh under the gate. A
+  category the owner names there becomes the counted row's too, so the bot does not ask twice.
+- `lepas=true` (the owner: the record is not that row): it counts on its own and never merges into that row again, by the
+  row's dedupe key, so recording the statement again does not hand it back. A screenshot sent twice (a record merged into
+  a record) is deleted or let go, not edited.
+- A row that took a record's category gets it back when the record leaves, unless it was changed since. `change_log` holds
+  these as `ubah` rows told apart by a key in `after_json` (`catatan` given, `kembali` given back, `bukan` refused): the
+  action column is CHECKed to baru/ubah/hapus. A replaced upload marks each removed row that held a record, because the
+  last ids are used again (`INTEGER PRIMARY KEY` without AUTOINCREMENT).
+- A record with no account and no card is cash and never merges (before: it could take any bank's debit of that size).
+  `record_expense` requires exactly one of `account_alias`, `card_alias`, `tunai=true`; the bot asks when unsure (SOUL).
+  `daftar_belanja` names the bank row a merged record is in, and says "tunai" for cash.
+- 383 tests (9 new; every new and changed one fails on the old code, the id-reuse one also without the replace mark). Dry
+  run on in-memory copies of the live ledger: no receipts without a source and no `manual` rows; twin #2439: edit refused
+  with guidance, delete allowed (#2438 still counts, October total +0), `lepas` makes it count (+100.000, transport budget
+  warning); #2440 merges into a synthetic Jago row, an owner category moves to that row, `lepas` gives the row its
+  category back and a later edit keeps it out; a cash record on a free BCA debit of the same size and day stays separate
+  while a BCA record merges; plan identical (2.651.848 / 4.894.157, invariants clean). Backup `ledger.db.bak-pre-unmerge`;
+  vault-tools rebuilt, vault restarted; MCP `tools/list` 53 tools, `ubah_belanja` with `lepas`/`tunai`, `record_expense`
+  with `tunai`; counts unchanged; logs clean. Tool fields and SOUL changed, so the owner sends `/new` once.
+
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
 2. Closing the pot gap without the children's needs: games (owner's own), apps not marked `wajib`, or talking to the friend.
@@ -174,14 +198,11 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
    or something to stop/move? Owner decides.
 8. (fixed 2026-10-30: own records merge only into a debit of their own bank, see above)
 9. (fixed 2026-10-30: a record made after its statement merges at once; a re-sent screenshot of a merged purchase is flagged)
-10. A merged record cannot be corrected or unmerged through the bot (`_own_row` refuses merged rows for `ubah_belanja` and
-    `hapus_belanja`), so a wrong match stays until a human fixes the row; the coverage gate and the bank, card and own-move
-    rules keep it rare. A fix is a tool change, so the owner sends `/new` once. Offered 2026-10-30. Related: a record with no
-    account and no card (cash) has no bank to check, so it can merge into any bank's debit of the same amount within 2 days
-    (rule from 841ab6e, now at record time too); none exist yet (all own records name an account). If the owner records
-    cash, such records should never merge (code only, no `/new`). Asked 2026-10-30.
+10. (fixed 2026-10-30: merged records can be corrected, deleted or let go with `lepas`; cash records never merge; see above)
 
 ## Next steps
+- Owner: send `/new` once before the 1 Nov payday session (2026-10-30 deploy: `lepas`/`tunai` on `ubah_belanja`, `tunai` on
+  `record_expense`, SOUL). The bot now asks where a purchase was paid from when the screenshot does not show it.
 - Done 2026-10-30 (session from 10:02 WIB, edit 10:04 WIB): owner sent `/new` and had the bot fix PHO STREET #2440 (Jenius ->
   jago-harian): the bot listed it, asked what was wrong, showed before -> after, waited for "ya", then `ubah_belanja`;
   `change_log` #1 holds only the account and dedupe key change; no warnings; no new transaction rows. The account of an own
