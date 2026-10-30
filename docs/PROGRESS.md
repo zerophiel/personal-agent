@@ -166,6 +166,10 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   jago-harian): the bot listed it, asked what was wrong, showed before -> after, waited for "ya", then `ubah_belanja`;
   `change_log` #1 holds only the account and dedupe key change; no warnings; no new transaction rows. The account of an own
   record feeds no plan or living-cost figure (`living.monthly` sums by month and category).
+- After the next uploads, check the two live own records merged where they belong: PHO STREET #2440 into the Jago October
+  POS row (file under `jago-utama`); Flazz #2438 (Mandiri, `transfer_internal`; #2439 is merged into it) into the Mandiri
+  "Transfer BI Fast Ke BCA" -100.000 of 28 Oct, NOT into BCA's "FLAZZ BCA TOPUP" (all 129 Flazz top-ups go through BCA,
+  `transport` by rule; that row must stay counted once as transport).
 - Owner: on 1 Nov ask for the payday list; the bot asks again on purpose for the leftover living cash just BEFORE the salary (Mandiri usable + daily account); after
   paying, tell the bot (card payments, pot balance, emergency fund balance) and the Mandiri balance shown in the app.
 - After the November statements: calibration per `docs/calibration.md` (Google One, Apple, Coway, bot quality, spend).
