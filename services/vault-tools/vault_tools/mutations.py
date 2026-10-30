@@ -14,6 +14,7 @@ import statistics
 from collections import defaultdict
 from datetime import date, datetime, timezone
 
+from . import changelog
 from .money import check_idr, format_idr
 
 MAX_ROWS = 2000
@@ -48,6 +49,10 @@ def _purge_file(conn, file_hash: str) -> int:
     ids = [r[0] for r in conn.execute("SELECT id FROM transactions WHERE file_hash=?", (file_hash,))]
     categorized = conn.execute("SELECT COUNT(*) FROM transactions WHERE file_hash=? AND category IS NOT NULL", (file_hash,)).fetchone()[0]
     for i in ids:
+        # the row goes, and any category a record gave it with it: logged as given back, so it is never taken back from a
+        # new row that gets this id (the last ids are used again)
+        for (rid,) in conn.execute("SELECT id FROM transactions WHERE merged_into=?", (i,)).fetchall():
+            changelog.log(conn, "transactions", i, "ubah", None, {"kembali": rid}, "berkas mutasi direkam ulang: baris ini dihapus")
         conn.execute("UPDATE transactions SET merged_into=NULL WHERE merged_into=?", (i,))
     conn.execute("DELETE FROM transactions WHERE file_hash=?", (file_hash,))
     conn.execute("DELETE FROM mutation_files WHERE file_hash=?", (file_hash,))

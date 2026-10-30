@@ -145,8 +145,8 @@ class Completeness(unittest.TestCase):
         conn = acct_db()
         mu.record_mutations(conn, "bca-utama", H, "2026-01-01", "2026-01-31", None, None, [r(28, "BYR", -250_000)])
         conn.execute("UPDATE transactions SET category='makan', status='verified'")
-        conn.execute("INSERT INTO transactions(txn_date,merchant,amount,category,status,source,merged_into) "
-                     "VALUES ('2026-01-27','KOPI',-250000,'makan','unverified','receipt',1)")
+        conn.execute("INSERT INTO transactions(account_id,txn_date,merchant,amount,category,status,source,merged_into) "
+                     "VALUES (1,'2026-01-27','KOPI',-250000,'makan','unverified','receipt',1)")
         conn.commit()
         res = mu.record_mutations(conn, "bca-utama", H, "2026-01-01", "2026-01-31", None, None, self.full_rows(), replace=True)
         self.assertEqual(res["lost_categories"], 1)

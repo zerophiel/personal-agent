@@ -314,16 +314,22 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
     @mcp.tool()
     @locked
     def record_expense(amount: int, merchant: str, txn_date: str, category: str | None = None,
-                       account_alias: str | None = None, card_alias: str | None = None,
+                       account_alias: str | None = None, card_alias: str | None = None, tunai: bool = False,
                        allow_duplicate: bool = False) -> dict:
         """Catat SATU belanja dari screenshot/struk/ucapan pemilik. amount = besar pengeluaran (positif, Rupiah bulat),
-        txn_date YYYY-MM-DD, account_alias bila dibayar dari rekening, card_alias bila dibayar kartu kredit.
+        txn_date YYYY-MM-DD. Sumber bayar WAJIB, isi SATU: account_alias bila dari rekening, card_alias bila kartu kredit,
+        tunai=true bila uang tunai. Sumber tidak jelas: TANYAKAN ke pemilik, jangan menebak tunai (belanja tunai tidak
+        pernah digabung dengan mutasi bank, jadi tebakan yang salah membuatnya dihitung dua kali).
         Hasil memuat `alerts`: SAMPAIKAN peringatan itu ke pemilik apa adanya. Jika status possible_duplicate,
         tanyakan dulu ke pemilik. Belanja dengan kartu WAJIB mengisi card_alias: ia dihitung ke anggaran kartu
         ('kartu:<kategori>'), sedangkan belanja dari rekening dihitung ke anggaran kas. Kategori: pakai 'wajib:<nama>' untuk kewajiban (sekolah, les, cicilan, bayar kartu),
         selain itu kategori bebas (makan, transport, belanja, hiburan, dst)."""
-        return health.record_expense(conn, today(), amount, merchant, txn_date, category, account_alias,
-                                     card_alias, allow_duplicate)
+        # the source is asked, not assumed: a record with none is cash, and cash never merges into a bank row
+        if sum(map(bool, (account_alias, card_alias, tunai))) != 1:
+            raise ValueError("sumber bayar: isi SATU dari account_alias (rekening), card_alias (kartu kredit), atau tunai=true;"
+                             " bila tidak jelas, tanyakan ke pemilik")
+        return health.record_expense(conn, today(), amount, merchant, txn_date, category, account_alias or None,
+                                     card_alias or None, allow_duplicate)
 
     @mcp.tool()
     @locked
@@ -335,20 +341,25 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
     @mcp.tool()
     @locked
     def ubah_belanja(id: int, jumlah_tercatat: int, alasan: str, rekening: str | None = None, kartu: str | None = None,
-                     jumlah: int | None = None, tanggal: str | None = None, merchant: str | None = None,
-                     kategori: str | None = None) -> str:
-        """UBAH SATU belanja catatan pemilik (salah rekening/kartu, jumlah, tanggal YYYY-MM-DD, merchant, kategori). id dan
-        jumlah_tercatat (jumlah yang tersimpan sekarang) dari daftar_belanja; isi hanya yang berubah; rekening ATAU kartu;
-        alasan = kata-kata pemilik. Tunjukkan dulu sebelum -> sesudah dan tunggu 'ya'. Mutasi bank dan baris tagihan kartu
-        tidak diubah di sini (unggah ulang berkasnya). Jangan mencatat ulang untuk memperbaiki."""
+                     tunai: bool = False, jumlah: int | None = None, tanggal: str | None = None, merchant: str | None = None,
+                     kategori: str | None = None, lepas: bool = False) -> str:
+        """UBAH SATU belanja catatan pemilik (salah sumber, jumlah, tanggal YYYY-MM-DD, merchant, kategori). id dan
+        jumlah_tercatat (jumlah yang tersimpan sekarang) dari daftar_belanja; isi hanya yang berubah; sumber: rekening ATAU
+        kartu ATAU tunai=true; alasan = kata-kata pemilik. Tunjukkan dulu sebelum -> sesudah dan tunggu 'ya'. Belanja yang
+        sudah digabung dengan mutasi bank juga bisa diubah: ia dicocokkan ulang, dan kategori yang pemilik sebut di sini juga
+        menjadi kategori mutasi yang dihitung. lepas=true HANYA bila pemilik bilang belanja itu BUKAN mutasi yang
+        digabungkan dengannya (sesudahnya tidak digabung lagi ke baris itu). Mutasi bank dan baris tagihan kartu sendiri
+        tidak diubah di sini (unggah ulang berkasnya; kategorinya lewat set_category). Jangan mencatat ulang untuk
+        memperbaiki. SAMPAIKAN hasilnya apa adanya."""
         return health.edit_expense(conn, today(), id, jumlah_tercatat, alasan, rekening or None, kartu or None, jumlah or None,
-                                   tanggal or None, merchant or None, kategori or None)
+                                   tanggal or None, merchant or None, kategori or None, bool(tunai), bool(lepas))
 
     @mcp.tool()
     @locked
     def hapus_belanja(id: int, jumlah_tercatat: int, alasan: str) -> str:
         """HAPUS SATU belanja catatan pemilik (mis. tercatat dua kali). Aturannya sama dengan ubah_belanja; isinya tetap
-        tersimpan di catatan perubahan."""
+        tersimpan di catatan perubahan. Yang sudah digabung dengan mutasi bank boleh dihapus: mutasinya tetap dihitung
+        (uangnya memang keluar). SAMPAIKAN hasilnya apa adanya."""
         return health.delete_expense(conn, id, jumlah_tercatat, alasan)
 
     @mcp.tool()

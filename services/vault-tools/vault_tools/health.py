@@ -8,7 +8,8 @@ Conventions
   Everything else (including uncategorized) counts as day-to-day spending.
 - A receipt for money a mutation of the same bank shows is merged into it (`merged_into`), so it is never counted twice:
   when the statement is stored, or when the receipt is recorded or corrected after that bank's statements reach its day.
-  A card purchase never is (it is on the card statement).
+  A card purchase never is (it is on the card statement), nor a cash one (no bank shows it). A merged receipt can still be
+  corrected, deleted or taken out of a row it is not (ubah_belanja lepas=true).
 """
 from __future__ import annotations
 
@@ -47,7 +48,8 @@ def record_expense(conn: sqlite3.Connection, today: date, amount: int, merchant:
     """One purchase (from a screenshot or the owner's words). `amount` is the positive size of the spend.
     Stored unverified. A second record with the same date, amount and merchant is flagged, not added,
     unless allow_duplicate=True (two identical purchases in a day do happen). Money a stored statement of its bank
-    already shows merges into that row at once (merge_receipts)."""
+    already shows merges into that row at once (merge_receipts). Without an account or a card it is cash, which no
+    statement shows."""
     check_idr(amount)
     if amount <= 0:
         raise ValueError("amount harus > 0 (besar pengeluaran)")
@@ -94,7 +96,7 @@ def record_expense(conn: sqlite3.Connection, today: date, amount: int, merchant:
     conn.commit()
     out = {"status": "stored", "id": cur.lastrowid, "category": cat,
            "alerts": alerts_for(conn, today, ("kartu:" + cat) if cat and card_alias else cat, d)}
-    if merged:                                  # in alerts, which the bot relays as they are: a merge is not undone in chat
+    if merged:                  # in alerts, which the bot relays as they are: the owner sees the row and can say it is not it
         out["merged_into"] = merged[0][1]
         out["alerts"].insert(0, "Belanja ini sudah ada di " + _merged_note(conn, merged[0][1], cat))
     return out
@@ -113,56 +115,101 @@ def merge_receipts(conn, mutation_ids: list[int] | None = None, receipt_id: int 
     """A receipt for money a bank mutation also shows becomes part of that mutation (`merged_into`), so it counts once.
 
     The same money is the same amount within MATCH_DAYS at the same bank: one statement can carry several of the owner's
-    accounts (the Jago statement lists every pocket), and a receipt without a source can be any bank's. Never merged
-    (2026-10-30, the old rule matched any account): a card purchase, which is on the card statement, and a purchase with
-    a move between the owner's own accounts or the other way round (the Jago statement is full of round pocket moves).
-    Closest dates pair first and each mutation takes one receipt, so of two equal debits a day apart the one on the
-    receipt's date gets it. A row that already has a category keeps it and its status. Runs over the new rows of a
-    mutation file, or for one receipt just recorded or corrected. The caller commits. Returns the (receipt, mutation)
-    pairs merged."""
+    accounts (the Jago statement lists every pocket). Never merged: a card purchase, which is on the card statement; a cash
+    purchase (no account; until 2026-10-30 it could take any bank's debit of that size), which no statement shows; a
+    purchase with a move between the owner's own accounts or the other way round (the Jago statement is full of round
+    pocket moves); a receipt and a row the owner said it is not (ubah_belanja lepas=true). Closest dates pair first and
+    each mutation takes one receipt, so of two equal debits a day apart the one on the receipt's date gets it. A row with
+    no category takes the receipt's, logged so that taking the receipt out gives it back; a row that has one keeps it and
+    its status. Runs over the new rows of a mutation file, for one receipt just recorded or corrected, or for one
+    corrected receipt and the row it came from (both ids given: no coverage gate, that row was already its money). The
+    caller commits. Returns the (receipt, mutation) pairs merged."""
     only, one = "", ()
     if receipt_id is not None:
-        r = conn.execute("SELECT txn_date, amount FROM transactions WHERE id=?", (receipt_id,)).fetchone()
-        # only a bank whose stored statements already reach the receipt's day: before that its own row is not in yet, and
-        # the window would hand it to another payment of the same size (it merges when that statement is stored)
-        mutation_ids = [m["id"] for m in conn.execute(
-            "SELECT t.id FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE t.source='mutation' AND t.amount=?"
-            " AND t.txn_date BETWEEN ? AND ? AND EXISTS (SELECT 1 FROM mutation_files f JOIN accounts b ON b.id = f.account_id"
-            " WHERE LOWER(TRIM(b.bank)) = LOWER(TRIM(a.bank)) AND ? BETWEEN f.period_start AND f.period_end)",
-            (r["amount"], *_window(r["txn_date"]), r["txn_date"]))]
+        if mutation_ids is None:
+            r = conn.execute("SELECT txn_date, amount FROM transactions WHERE id=?", (receipt_id,)).fetchone()
+            # only a bank whose stored statements already reach the receipt's day: before that its own row is not in yet,
+            # and the window would hand it to another payment of the same size (it merges when that statement is stored)
+            mutation_ids = [m["id"] for m in conn.execute(
+                "SELECT t.id FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE t.source='mutation' AND t.amount=?"
+                " AND t.txn_date BETWEEN ? AND ? AND EXISTS (SELECT 1 FROM mutation_files f JOIN accounts b ON b.id = f.account_id"
+                " WHERE LOWER(TRIM(b.bank)) = LOWER(TRIM(a.bank)) AND ? BETWEEN f.period_start AND f.period_end)",
+                (r["amount"], *_window(r["txn_date"]), r["txn_date"]))]
         only, one = " AND t.id=?", (receipt_id,)
+    refused = _refused(conn)
     pairs = []
     for mid in mutation_ids or ():
-        m = conn.execute("SELECT t.id, t.account_id, t.txn_date, t.amount, t.category, a.bank FROM transactions t"
-                         " JOIN accounts a ON a.id = t.account_id WHERE t.id=? AND t.source='mutation' AND t.amount < 0"
-                         " AND NOT EXISTS (SELECT 1 FROM transactions x WHERE x.merged_into = t.id)", (mid,)).fetchone()
+        m = conn.execute("SELECT t.id, t.account_id, t.txn_date, t.amount, t.category, t.status, t.dedupe_key, a.bank"
+                         " FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE t.id=? AND t.source='mutation'"
+                         " AND t.amount < 0 AND NOT EXISTS (SELECT 1 FROM transactions x WHERE x.merged_into = t.id)",
+                         (mid,)).fetchone()
         if m is None:
             continue
+        # JOIN, not LEFT JOIN: a receipt with no account is cash
         for r in conn.execute("SELECT t.id, t.account_id, t.txn_date, t.category, t.status, a.bank FROM transactions t"
-                              " LEFT JOIN accounts a ON a.id = t.account_id WHERE t.source='receipt' AND t.merged_into IS NULL"
+                              " JOIN accounts a ON a.id = t.account_id WHERE t.source='receipt' AND t.merged_into IS NULL"
                               " AND t.card_id IS NULL AND t.amount=? AND t.txn_date BETWEEN ? AND ?" + only,
                               (m["amount"], *_window(m["txn_date"]), *one)):
-            if r["account_id"] is not None and (r["bank"] or "").strip().lower() != (m["bank"] or "").strip().lower():
+            if (r["bank"] or "").strip().lower() != (m["bank"] or "").strip().lower():
                 continue                                    # another bank's money ('Jago' and 'jago' are one bank)
             if m["category"] is not None and (m["category"] == INTERNAL) != (r["category"] == INTERNAL):
                 continue
+            if (r["id"], m["dedupe_key"] or f"id{m['id']}") in refused:
+                continue
             days = abs((date.fromisoformat(r["txn_date"]) - date.fromisoformat(m["txn_date"])).days)
-            source = 0 if r["account_id"] == m["account_id"] else 1 if r["account_id"] is not None else 2
-            pairs.append((days, source, r["id"], m["id"], r))
+            pairs.append((days, 0 if r["account_id"] == m["account_id"] else 1, r["id"], m["id"], r, m))
     taken, merged = set(), []                               # receipt and mutation ids never collide: one table
-    for _, _, rid, mid, r in sorted(pairs, key=lambda p: p[:4]):
+    for _, _, rid, mid, r, m in sorted(pairs, key=lambda p: p[:4]):
         if rid in taken or mid in taken:
             continue
         taken.update((rid, mid))
         conn.execute("UPDATE transactions SET merged_into=? WHERE id=?", (mid, rid))
-        if r["category"]:                                   # a row a rule or the owner already sorted keeps both
-            conn.execute("UPDATE transactions SET category=?, status=? WHERE id=? AND category IS NULL",
-                         (r["category"], r["status"], mid))
+        if r["category"] and m["category"] is None:         # a row a rule or the owner already sorted keeps both
+            _give(conn, mid, rid, m, r["category"], r["status"])
         merged.append((rid, mid))
     return merged
 
 
-# ---- corrections: only what the owner recorded himself ---------------------------------------
+# change_log rows of what merging does to a bank row's category and what the owner refused: all 'ubah' (the action is
+# checked to baru/ubah/hapus), told apart by a key in after_json: "catatan" (given by that record), "kembali" (given back
+# when it was taken out, or gone with the row when its file was recorded again), "bukan" (on the record: the owner said
+# it is not that row)
+
+def _give(conn, mutation_id: int, receipt_id: int, was, category: str, status: str) -> None:
+    """A bank row takes the category of the record merged into it; logged, so taking the record out gives it back."""
+    conn.execute("UPDATE transactions SET category=?, status=? WHERE id=?", (category, status, mutation_id))
+    changelog.log(conn, "transactions", mutation_id, "ubah", {"category": was["category"], "status": was["status"]},
+                  {"category": category, "status": status, "catatan": receipt_id}, f"kategori dari catatan #{receipt_id}")
+
+
+def _given(conn, mutation_id: int, receipt_id: int):
+    """(before, after) of the category this record gave the row, while the row still has it as given; else None."""
+    for row in conn.execute("SELECT before_json, after_json FROM change_log WHERE tbl='transactions' AND row_key=?"
+                            " AND action='ubah' ORDER BY id DESC", (str(mutation_id),)):
+        after = json.loads(row["after_json"] or "{}")
+        if "catatan" not in after and "kembali" not in after:
+            continue
+        now = conn.execute("SELECT category, status FROM transactions WHERE id=?", (mutation_id,)).fetchone()
+        if after.get("catatan") != receipt_id or now is None or (now["category"], now["status"]) != (after.get("category"),
+                                                                                                    after.get("status")):
+            return None
+        return json.loads(row["before_json"]), after
+    return None
+
+
+def _refused(conn) -> set[tuple[int, str]]:
+    """(record, bank row key) pairs the owner said are not the same money (ubah_belanja lepas=true). By the row's key, not
+    its id: a statement stored again gives its rows new ids."""
+    out = set()
+    for r in conn.execute("SELECT row_key, after_json FROM change_log WHERE tbl='transactions' AND action='ubah'"
+                          " AND after_json LIKE '%\"bukan\"%'"):
+        after = json.loads(r["after_json"])
+        if "bukan" in after:
+            out.add((int(r["row_key"]), after["bukan"]))
+    return out
+
+
+# ---- corrections: only what the owner recorded ------------------------------------------------
 # Bank mutations and card statement lines come from documents and are corrected by uploading the document again.
 
 OWN_SOURCES = ("receipt", "manual")
@@ -177,7 +224,7 @@ def _with_aliases(conn, txn_id: int):
 
 def _paid_from(r) -> str:
     return (f"kartu {r['card_alias']}" if r["card_alias"] else f"rekening {r['account_alias']}" if r["account_alias"]
-            else "sumber belum diisi")
+            else "tunai")
 
 
 def _merged_target(conn, txn_id: int) -> str:
@@ -202,7 +249,7 @@ def _merged_note(conn, mutation_id: int, category: str | None) -> str:
 
 
 def list_expenses(conn, today: date, days: int = 14) -> list[str]:
-    """Purchases the owner recorded (screenshots, his words) in the last `days` days, newest first, each with its id: a
+    """Purchases the owner recorded (screenshots, the owner's words) in the last `days` days, newest first, each with its id: a
     new chat session remembers no ids, and a correction must name the right row."""
     since = (today - timedelta(days=max(1, min(days, 120)))).isoformat()
     rows = conn.execute("SELECT t.*, a.alias AS account_alias, c.alias AS card_alias FROM transactions t"
@@ -217,8 +264,11 @@ def list_expenses(conn, today: date, days: int = 14) -> list[str]:
     out = []
     for r in rows:
         line = f"#{r['id']} | {_shown(r, ' | ')} | {r['category'] or 'belum dikategorikan'}"
-        if r["merged_into"] is not None:
-            line += f" | sudah digabung dengan {_merged_target(conn, r['merged_into'])} (yang itu yang dihitung; tidak diubah di sini)"
+        if r["merged_into"] is not None:                 # the row it is in, so the owner can tell a wrong match
+            t = _with_aliases(conn, r["merged_into"])
+            line += (f" | sudah digabung dengan mutasi bank #{t['id']} ({_shown(t)}): yang itu yang dihitung"
+                     if t is not None and t["source"] == "mutation" else
+                     f" | sudah digabung dengan catatan #{r['merged_into']} (screenshot yang sama): yang itu yang dihitung")
         elif twins[(r["txn_date"], r["amount"], r["account_id"], r["card_id"])] > 1:
             line += " | ada catatan lain dengan tanggal, jumlah, dan sumber yang sama"
         out.append(line)
@@ -226,8 +276,10 @@ def list_expenses(conn, today: date, days: int = 14) -> list[str]:
 
 
 def _own_row(conn, txn_id: int, recorded: int):
-    """The row to correct, after the guards: it exists, the owner recorded it, it still counts, and `recorded` (the positive
-    size the bot read from daftar_belanja) matches what is stored, so a wrong id is refused rather than corrected."""
+    """The row to correct, after the guards: it exists, the owner recorded it, and `recorded` (the positive size the bot
+    read from daftar_belanja) matches what is stored, so a wrong id is refused rather than corrected. A merged record passes
+    (2026-10-30, owner: "ya betulkan dua-duanya"; a wrong match had no way back): edit_expense and delete_expense say what
+    happens to the row it was merged into."""
     check_idr(recorded)
     r = _with_aliases(conn, txn_id)
     if r is None:
@@ -235,8 +287,6 @@ def _own_row(conn, txn_id: int, recorded: int):
     if r["source"] not in OWN_SOURCES:
         raise ValueError(f"#{txn_id} berasal dari {'mutasi bank' if r['source'] == 'mutation' else 'tagihan kartu'}, bukan catatan "
                          "pemilik; perbaiki dengan mengunggah ulang berkasnya")
-    if r["merged_into"] is not None:
-        raise ValueError(f"#{txn_id} sudah digabung dengan {_merged_target(conn, r['merged_into'])}; yang itu yang dihitung")
     if -r["amount"] != recorded:
         raise ValueError(f"#{txn_id} adalah {_shown(r)}, bukan belanja {format_idr(recorded)}: id-nya salah? cek daftar_belanja")
     return r
@@ -249,15 +299,39 @@ def _reason(text: str) -> str:
     return why
 
 
+def _take_out(conn, rid: int, target: int, why: str):
+    """Undo a merge: the record counts on its own again, and the row gets back the category it had before it took the
+    record's, unless that was changed since. Returns (category given back, category taken back) or None."""
+    conn.execute("UPDATE transactions SET merged_into=NULL WHERE id=?", (rid,))
+    given = _given(conn, target, rid)
+    if given is None:
+        return None
+    before, after = given
+    conn.execute("UPDATE transactions SET category=?, status=? WHERE id=?", (before["category"], before["status"], target))
+    changelog.log(conn, "transactions", target, "ubah", {"category": after["category"], "status": after["status"]},
+                  {**before, "kembali": rid}, why)
+    return before["category"], after["category"]
+
+
 def edit_expense(conn, today: date, txn_id: int, recorded: int, reason: str, account_alias: str | None = None,
                  card_alias: str | None = None, amount: int | None = None, txn_date: str | None = None,
-                 merchant: str | None = None, category: str | None = None) -> str:
-    """Correct one purchase the owner recorded. Fields left out keep their value; the source is an account OR a card.
-    The row before and after goes to change_log with the owner's reason."""
+                 merchant: str | None = None, category: str | None = None, cash: bool = False,
+                 unmerge: bool = False) -> str:
+    """Correct one purchase the owner recorded. Fields left out keep their value; the source is an account, a card or cash.
+    A merged record goes back into its bank row while it is still that money (same amount, bank and kind), else it is
+    matched again; a category the owner names here is the one that counts, on that row too. `unmerge` (the owner: it is not
+    that row) keeps it out of that row for good. The rows before and after go to change_log with the owner's reason."""
     why = _reason(reason)
-    if account_alias and card_alias:
-        raise ValueError("isi rekening ATAU kartu, bukan keduanya")
+    if sum(map(bool, (account_alias, card_alias, cash))) > 1:
+        raise ValueError("isi rekening ATAU kartu ATAU tunai, bukan lebih dari satu")
     r = _own_row(conn, txn_id, recorded)
+    target = r["merged_into"]
+    into = conn.execute("SELECT source, category, dedupe_key FROM transactions WHERE id=?", (target,)).fetchone() if target else None
+    if unmerge and into is None:
+        raise ValueError(f"#{txn_id} tidak digabung dengan apa pun; tidak ada yang dilepas")
+    if into is not None and into["source"] != "mutation" and not unmerge:
+        raise ValueError(f"#{txn_id} adalah screenshot yang sama dengan catatan #{target}, dan yang itu yang dihitung: ubah #{target}"
+                         f" atau hapus #{txn_id}; lepas=true HANYA bila pemilik bilang memang dua pembelian")
     new = {k: r[k] for k in ("account_id", "card_id", "txn_date", "merchant", "amount", "category", "status")}
     if account_alias or card_alias:
         table, alias = ("accounts", account_alias) if account_alias else ("cards", card_alias)
@@ -265,6 +339,8 @@ def edit_expense(conn, today: date, txn_id: int, recorded: int, reason: str, acc
         if row is None:
             raise ValueError(f"{'rekening' if account_alias else 'kartu'} {alias} belum terdaftar (lihat ringkasan_data)")
         new["account_id"], new["card_id"] = (row["id"], None) if account_alias else (None, row["id"])
+    if cash:
+        new["account_id"], new["card_id"] = None, None
     if amount is not None:
         check_idr(amount)
         if amount <= 0:
@@ -281,42 +357,81 @@ def edit_expense(conn, today: date, txn_id: int, recorded: int, reason: str, acc
     if category is not None:
         new["category"] = clean_text(category, 40).lower() or None
         new["status"] = "verified"                          # the owner said it, as with set_category
-    if all(new[k] == r[k] for k in new):
+    # a category the owner names for a merged record is meant for the row that counts, even when the record has it already
+    for_row = into is not None and into["source"] == "mutation" and category is not None and into["category"] != new["category"]
+    if all(new[k] == r[k] for k in new) and not unmerge and not for_row:
         raise ValueError("tidak ada yang berubah")
     # an id-based key: record_expense's keys end in a count, so a later record of the old values can never collide
     new["dedupe_key"] = hashlib.sha256(f"receipt|{new['txn_date']}|{-new['amount']}|{normalize(new['merchant'])}|id{txn_id}"
                                        .encode()).hexdigest()
     before = dict(r)
+    back = _take_out(conn, txn_id, target, why) if into is not None else None
+    if unmerge:          # the owner's word, kept by the row's content: a statement stored again (new ids) does not hand it back
+        changelog.log(conn, "transactions", txn_id, "ubah", {"merged_into": target},
+                      {"merged_into": None, "bukan": into["dedupe_key"] or f"id{target}"}, why)
     conn.execute("UPDATE transactions SET account_id=?, card_id=?, txn_date=?, merchant=?, amount=?, category=?, status=?,"
                  " dedupe_key=? WHERE id=?", (*new.values(), txn_id))
-    # a record with the wrong bank stays out of that bank's statement row; corrected, it finds the row it belongs to
-    merged = merge_receipts(conn, receipt_id=txn_id)
+    # back into the row it came from while it is still that money: an upload merges without the coverage gate, so matching
+    # afresh could leave a correctly merged purchase counted twice. Otherwise, or once let go, matched afresh: a record
+    # with the wrong bank stays out of that bank's statement row; corrected, it finds the row it belongs to
+    back_in = into is not None and into["source"] == "mutation" and not unmerge
+    merged = (merge_receipts(conn, [target], receipt_id=txn_id) if back_in else []) or merge_receipts(conn, receipt_id=txn_id)
+    if merged and category is not None and new["category"]:
+        m = conn.execute("SELECT category, status FROM transactions WHERE id=?", (merged[0][1],)).fetchone()
+        if (m["category"], m["status"]) != (new["category"], "verified"):
+            _give(conn, merged[0][1], txn_id, m, new["category"], "verified")
     after = _with_aliases(conn, txn_id)
     changelog.log(conn, "transactions", txn_id, "ubah", before, dict(after), why)
     conn.commit()
     names = {"sumber": _paid_from, "tanggal": lambda x: x["txn_date"], "merchant": lambda x: _LONG_DIGITS.sub("[angka]", x["merchant"]),
              "jumlah": lambda x: format_idr(-x["amount"]), "kategori": lambda x: x["category"] or "belum dikategorikan"}
     diff = [f"{n} {f(before)} -> {f(after)}" for n, f in names.items() if f(before) != f(after)]
-    out = (f"Belanja #{txn_id} diubah: " + ("; ".join(diff) if diff else "kategori dipastikan pemilik")
-           + f". Alasan: {why}. Sebelum dan sesudahnya tersimpan di catatan perubahan.")
-    if merged:
-        out += " Sekarang cocok dengan " + _merged_note(conn, merged[0][1], after["category"])
+    head = "; ".join(diff) or ("kategori dipastikan pemilik" if category is not None else "")
+    out = (f"Belanja #{txn_id} " + (f"diubah: {head}" if head else "dilepas") + f". Alasan: {why}."
+           " Sebelum dan sesudahnya tersimpan di catatan perubahan.")
+    if target is not None and after["merged_into"] == target:
+        out += " Masih cocok dengan " + _merged_note(conn, target, after["category"])
+    else:
+        if target is not None:
+            out += f" Dilepas dari {_merged_target(conn, target)}"
+            if into["source"] == "mutation":
+                out += f" ({_shown(_with_aliases(conn, target))})"
+            if back:
+                out += f"; kategori mutasi itu kembali {back[0] or 'belum dikategorikan'} (tadinya {back[1]}, dari catatan ini)"
+            out += "."
+        if merged:
+            out += " Sekarang cocok dengan " + _merged_note(conn, merged[0][1], after["category"])
+        elif target is not None:
+            out += " Sekarang dihitung sendiri" + ("; tidak digabung lagi ke baris itu." if unmerge else ".")
     cat = after["category"]
     alerts = alerts_for(conn, today, ("kartu:" + cat) if cat and after["card_id"] else cat, date.fromisoformat(after["txn_date"]))
     return out + "".join(f"\nPeringatan: {a}" for a in alerts)
 
 
 def delete_expense(conn, txn_id: int, recorded: int, reason: str) -> str:
-    """Remove one purchase the owner recorded (e.g. recorded twice). The whole row is kept in change_log."""
+    """Remove one purchase the owner recorded (e.g. recorded twice). The whole row is kept in change_log. A merged record
+    can go too: the bank row it was part of still counts and keeps its category; the text says when that category came
+    from the record, so a wrong one can be fixed."""
     why = _reason(reason)
     r = _own_row(conn, txn_id, recorded)
     ref = conn.execute("SELECT id FROM transactions WHERE merged_into=?", (txn_id,)).fetchone()
     if ref:
-        raise ValueError(f"#{ref['id']} merujuk ke #{txn_id}; tidak bisa dihapus")
+        raise ValueError(f"#{ref['id']} merujuk ke #{txn_id}; tidak bisa dihapus (hapus atau lepas #{ref['id']} dulu)")
     changelog.log(conn, "transactions", txn_id, "hapus", dict(r), None, why)
     conn.execute("DELETE FROM transactions WHERE id=?", (txn_id,))
     conn.commit()
-    return f"Belanja #{txn_id} dihapus: {_shown(r)}. Alasan: {why}. Isinya tetap tersimpan di catatan perubahan."
+    out = f"Belanja #{txn_id} dihapus: {_shown(r)}. Alasan: {why}. Isinya tetap tersimpan di catatan perubahan."
+    m = _with_aliases(conn, r["merged_into"]) if r["merged_into"] is not None else None
+    if m is not None and m["source"] == "mutation":
+        out += f" Mutasi bank #{m['id']} ({_shown(m)}) tetap dihitung: uangnya memang keluar"
+        if _given(conn, m["id"], txn_id):
+            out += (f"; kategorinya {m['category']} diambil dari catatan ini: bila mutasi itu bukan belanja ini, ubah dengan"
+                    f" set_category untuk #{m['id']}.")
+        else:
+            out += f"; kategori {m['category']}." if m["category"] else "; belum dikategorikan."
+    elif m is not None:
+        out += f" Catatan #{m['id']} (screenshot yang sama) tetap dihitung."
+    return out
 
 
 def estimate_living_reserve(conn, before: date, salary: int | None = None) -> int:

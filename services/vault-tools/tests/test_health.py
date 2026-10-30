@@ -80,7 +80,7 @@ class RecordExpense(unittest.TestCase):
 class Merge(unittest.TestCase):
     def setUp(self):
         self.conn = planned()
-        spend(self.conn, 50_000, "KOPI KENANGAN", day="2026-11-05", category="makan")
+        spend(self.conn, 50_000, "KOPI KENANGAN", day="2026-11-05", category="makan", account_alias="mandiri-utama")
 
     def mutation(self, desc="QRIS KOPI KENANGAN 998877", day="2026-11-06", amount=-50_000, h="a" * 64):
         return mu.record_mutations(self.conn, "mandiri-utama", h, "2026-11-01", "2026-11-30", None, None,
@@ -175,11 +175,16 @@ class MergeRules(_Banks, unittest.TestCase):
         self.assertEqual(self.merged(rid), rows["QRIS KOPI KENANGAN"]["id"])     # the old rule gave it to the first row
         self.assertEqual((rows["QRIS KOPI KENANGAN"]["category"], rows["TRSF KE ANDI"]["category"]), ("makan", None))
 
-    def test_the_receipt_from_that_account_goes_before_one_without_a_source(self):
-        loose = spend(self.conn, 80_000, "WARUNG")["id"]
+    def test_cash_is_never_a_bank_debit(self):
+        """No account and no card is cash (2026-10-30): it took any bank's debit of that size; the receipt of the row's
+        own account only went first."""
+        cash = spend(self.conn, 80_000, "WARUNG")["id"]
         own = spend(self.conn, 80_000, "WARUNG BU SRI", account_alias="mandiri-utama")["id"]
-        self.upload("mandiri-utama", "g", ("2026-11-05", "QRIS WARUNG BU SRI", -80_000))
-        self.assertEqual((self.merged(loose) is None, self.merged(own) is None), (True, False))
+        self.upload("mandiri-utama", "g", ("2026-11-05", "QRIS WARUNG BU SRI", -80_000), ("2026-11-06", "TRSF KE ANDI", -80_000))
+        self.assertEqual((self.merged(cash), self.merged(own) is None), (None, False))    # the free row did not take it
+        late = spend(self.conn, 80_000, "BAKSO", day="2026-11-06")                         # nor a record made after it
+        self.assertEqual(("merged_into" in late, self.merged(late["id"])), (False, None))
+        self.assertEqual(self.spent(), 320_000)
 
     def test_a_row_a_rule_sorted_keeps_its_category_and_status(self):
         """The record's category only fills a row that has none; the status was overwritten anyway, so a rule's row turned
@@ -438,7 +443,8 @@ class ThroughTheTools(unittest.TestCase):
             call("set_threshold", {"key": "net_salary", "value": 10_000_000})
             call("generate_payday_plan", {"payday": "2026-10-30"})
             call("set_budget", {"category": "makan", "monthly_amount": 500_000})
-            res = json.dumps(call("record_expense", {"amount": 600_000, "merchant": "RESTO", "txn_date": "2026-11-05", "category": "makan"}))
+            res = json.dumps(call("record_expense", {"amount": 600_000, "merchant": "RESTO", "txn_date": "2026-11-05", "category": "makan",
+                                                     "tunai": True}))
             self.assertIn("SUDAH LEWAT", res)
             self.assertIn("makan: Rp 600.000 dari Rp 500.000 (120%) over", json.dumps(call("budget_status")))
             self.assertIn("Penilaian keuangan 2026-11:", json.dumps(call("health_check")))
