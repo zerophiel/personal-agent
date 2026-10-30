@@ -6,8 +6,9 @@ Conventions
 - Categories that are NOT discretionary spending: 'transfer_internal', anything starting with
   'wajib:' (obligations such as school, lessons, loans, card bills) or 'sinking:' (pot deposits).
   Everything else (including uncategorized) counts as day-to-day spending.
-- A receipt later seen in a mutation of the same bank is merged (`merged_into`), so it is never counted twice; a card
-  purchase never is (it is on the card statement).
+- A receipt for money a mutation of the same bank shows is merged into it (`merged_into`), so it is never counted twice:
+  when the statement is stored, or when the receipt is recorded or corrected after that bank's statements reach its day.
+  A card purchase never is (it is on the card statement).
 """
 from __future__ import annotations
 
@@ -45,7 +46,8 @@ def record_expense(conn: sqlite3.Connection, today: date, amount: int, merchant:
                    card_alias: str | None = None, allow_duplicate: bool = False) -> dict:
     """One purchase (from a screenshot or the owner's words). `amount` is the positive size of the spend.
     Stored unverified. A second record with the same date, amount and merchant is flagged, not added,
-    unless allow_duplicate=True (two identical purchases in a day do happen)."""
+    unless allow_duplicate=True (two identical purchases in a day do happen). Money a stored statement of its bank
+    already shows merges into that row at once (merge_receipts)."""
     check_idr(amount)
     if amount <= 0:
         raise ValueError("amount harus > 0 (besar pengeluaran)")
@@ -64,27 +66,42 @@ def record_expense(conn: sqlite3.Connection, today: date, amount: int, merchant:
                 raise ValueError(f"{table[:-1]} {alias} belum terdaftar")
             ids[label] = row["id"]
     # the same money from the same account or card is a duplicate whatever the merchant text says: a new chat session
-    # describes a re-sent screenshot in other words ("Isi saldo Flazz" vs "Isi Flazz BCA"), and it remembers nothing
+    # describes a re-sent screenshot in other words ("Isi saldo Flazz" vs "Isi Flazz BCA"), and it remembers nothing.
+    # Merged records too (2026-10-30): one inside its bank row is still recorded; skipped, the screenshot sent again was
+    # stored a second time or hit the unique key
     same = [r for r in conn.execute(
-        "SELECT id, merchant, account_id, card_id FROM transactions WHERE source='receipt' AND txn_date=? AND amount=? AND merged_into IS NULL",
-        (txn_date, -amount)) if normalize(r["merchant"]) == key
+        "SELECT id, merchant, account_id, card_id, merged_into FROM transactions WHERE source='receipt' AND txn_date=? AND amount=?"
+        " ORDER BY id", (txn_date, -amount)) if normalize(r["merchant"]) == key
         or (ids.get("account_id") is not None and r["account_id"] == ids.get("account_id"))
         or (ids.get("card_id") is not None and r["card_id"] == ids.get("card_id"))]
     if same and not allow_duplicate:
+        inside = f", dan sudah digabung dengan {_merged_target(conn, same[0]['merged_into'])}" if same[0]["merged_into"] else ""
         return {"status": "possible_duplicate", "existing_id": same[0]["id"], "existing_merchant": same[0]["merchant"],
-                "message": f"Sudah tercatat belanja dengan tanggal dan jumlah yang sama dari sumber yang sama ('{same[0]['merchant']}'). "
+                "message": f"Sudah tercatat belanja dengan tanggal dan jumlah yang sama dari sumber yang sama ('{same[0]['merchant']}'){inside}. "
                            "Tanyakan ke pemilik; ulangi dengan allow_duplicate=true HANYA bila pemilik bilang memang dua pembelian."}
     rule = conn.execute("SELECT category FROM category_rules WHERE pattern=?", (key,)).fetchone()
     cat = clean_text(category, 40).lower() if category else (rule["category"] if rule else None)
-    dedupe = hashlib.sha256(f"receipt|{txn_date}|{amount}|{key}|{len(same) + 1}".encode()).hexdigest()
+    n = len(same) + 1                                           # the next free one: a deleted twin leaves its number taken
+    while conn.execute("SELECT 1 FROM transactions WHERE dedupe_key=?", (_receipt_key(txn_date, amount, key, n),)).fetchone():
+        n += 1
     cur = conn.execute(
         "INSERT INTO transactions(account_id,card_id,txn_date,merchant,amount,category,status,source,dedupe_key)"
         " VALUES (?,?,?,?,?,?,?,'receipt',?)",
         (ids.get("account_id"), ids.get("card_id"), txn_date, merchant, -amount, cat,
-         "verified" if rule and not category else "unverified", dedupe))
+         "verified" if rule and not category else "unverified", _receipt_key(txn_date, amount, key, n)))
+    # sent after its statement was stored: the row is already there, so it merges now instead of counting twice
+    merged = merge_receipts(conn, receipt_id=cur.lastrowid)
     conn.commit()
-    return {"status": "stored", "id": cur.lastrowid, "category": cat,
-            "alerts": alerts_for(conn, today, ("kartu:" + cat) if cat and card_alias else cat, d)}
+    out = {"status": "stored", "id": cur.lastrowid, "category": cat,
+           "alerts": alerts_for(conn, today, ("kartu:" + cat) if cat and card_alias else cat, d)}
+    if merged:                                  # in alerts, which the bot relays as they are: a merge is not undone in chat
+        out["merged_into"] = merged[0][1]
+        out["alerts"].insert(0, "Belanja ini sudah ada di " + _merged_note(conn, merged[0][1], cat))
+    return out
+
+
+def _receipt_key(txn_date: str, amount: int, key: str, n: int) -> str:
+    return hashlib.sha256(f"receipt|{txn_date}|{amount}|{key}|{n}".encode()).hexdigest()
 
 
 def _window(day: str) -> tuple[str, str]:
@@ -100,14 +117,19 @@ def merge_receipts(conn, mutation_ids: list[int] | None = None, receipt_id: int 
     (2026-10-30, the old rule matched any account): a card purchase, which is on the card statement, and a purchase with
     a move between the owner's own accounts or the other way round (the Jago statement is full of round pocket moves).
     Closest dates pair first and each mutation takes one receipt, so of two equal debits a day apart the one on the
-    receipt's date gets it. Runs over the new rows of a mutation file, or for one receipt just corrected. The caller
-    commits. Returns the (receipt, mutation) pairs merged."""
+    receipt's date gets it. A row that already has a category keeps it and its status. Runs over the new rows of a
+    mutation file, or for one receipt just recorded or corrected. The caller commits. Returns the (receipt, mutation)
+    pairs merged."""
     only, one = "", ()
     if receipt_id is not None:
         r = conn.execute("SELECT txn_date, amount FROM transactions WHERE id=?", (receipt_id,)).fetchone()
+        # only a bank whose stored statements already reach the receipt's day: before that its own row is not in yet, and
+        # the window would hand it to another payment of the same size (it merges when that statement is stored)
         mutation_ids = [m["id"] for m in conn.execute(
-            "SELECT id FROM transactions WHERE source='mutation' AND amount=? AND txn_date BETWEEN ? AND ?",
-            (r["amount"], *_window(r["txn_date"])))]
+            "SELECT t.id FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE t.source='mutation' AND t.amount=?"
+            " AND t.txn_date BETWEEN ? AND ? AND EXISTS (SELECT 1 FROM mutation_files f JOIN accounts b ON b.id = f.account_id"
+            " WHERE LOWER(TRIM(b.bank)) = LOWER(TRIM(a.bank)) AND ? BETWEEN f.period_start AND f.period_end)",
+            (r["amount"], *_window(r["txn_date"]), r["txn_date"]))]
         only, one = " AND t.id=?", (receipt_id,)
     pairs = []
     for mid in mutation_ids or ():
@@ -133,8 +155,8 @@ def merge_receipts(conn, mutation_ids: list[int] | None = None, receipt_id: int 
             continue
         taken.update((rid, mid))
         conn.execute("UPDATE transactions SET merged_into=? WHERE id=?", (mid, rid))
-        if r["category"]:
-            conn.execute("UPDATE transactions SET category=COALESCE(category, ?), status=? WHERE id=?",
+        if r["category"]:                                   # a row a rule or the owner already sorted keeps both
+            conn.execute("UPDATE transactions SET category=?, status=? WHERE id=? AND category IS NULL",
                          (r["category"], r["status"], mid))
         merged.append((rid, mid))
     return merged
@@ -167,6 +189,16 @@ def _merged_target(conn, txn_id: int) -> str:
 
 def _shown(r, sep: str = ", ") -> str:
     return sep.join((_LONG_DIGITS.sub("[angka]", r["merchant"]), r["txn_date"], format_idr(-r["amount"]), _paid_from(r)))
+
+
+def _merged_note(conn, mutation_id: int, category: str | None) -> str:
+    """The bank row a record turned out to be, and the category that counts: the row's own when it had one."""
+    m = _with_aliases(conn, mutation_id)
+    note = f"mutasi bank #{m['id']} ({_shown(m)}) dan digabung ke sana: yang itu yang dihitung, tidak dobel"
+    if category and m["category"] != category:
+        return note + (f"; kategori yang dihitung {m['category']} (dari mutasi), bukan {category}; bila pemilik mau {category},"
+                       f" ubah dengan set_category untuk #{m['id']}.")
+    return note + (f"; kategori {m['category']}." if m["category"] else ".")
 
 
 def list_expenses(conn, today: date, days: int = 14) -> list[str]:
@@ -268,8 +300,7 @@ def edit_expense(conn, today: date, txn_id: int, recorded: int, reason: str, acc
     out = (f"Belanja #{txn_id} diubah: " + ("; ".join(diff) if diff else "kategori dipastikan pemilik")
            + f". Alasan: {why}. Sebelum dan sesudahnya tersimpan di catatan perubahan.")
     if merged:
-        m = _with_aliases(conn, merged[0][1])
-        out += f" Sekarang cocok dengan mutasi bank #{m['id']} ({_shown(m)}) dan digabung ke sana: yang itu yang dihitung, tidak dobel."
+        out += " Sekarang cocok dengan " + _merged_note(conn, merged[0][1], after["category"])
     cat = after["category"]
     alerts = alerts_for(conn, today, ("kartu:" + cat) if cat and after["card_id"] else cat, date.fromisoformat(after["txn_date"]))
     return out + "".join(f"\nPeringatan: {a}" for a in alerts)

@@ -109,9 +109,9 @@ class Merge(unittest.TestCase):
         self.assertEqual(merged, 1)
 
 
-class MergeRules(unittest.TestCase):
-    """Only the same money merges (2026-10-30; the old rule took any account's debit of that amount): the same bank, never
-    a card purchase, never a purchase with a move between the owner's own accounts."""
+class _Banks:
+    """Mandiri, BCA and Jago (its one statement lists every pocket: jago-harian purchases are in jago-utama's file), a card,
+    and statement uploads."""
 
     def setUp(self):
         self.conn = planned()
@@ -120,8 +120,8 @@ class MergeRules(unittest.TestCase):
         self.conn.commit()
         tools.upsert_card(self.conn, "cimb-1", "CIMB", "2222", 5, 5, 10_000_000)
 
-    def upload(self, account, h, *rows):
-        mu.record_mutations(self.conn, account, h * 64, "2026-11-01", "2026-11-30", None, None,
+    def upload(self, account, h, *rows, period=("2026-11-01", "2026-11-30")):
+        mu.record_mutations(self.conn, account, h * 64, *period, None, None,
                             [{"date": d, "description": desc, "amount": a} for d, desc, a in rows])
 
     def merged(self, rid):
@@ -129,6 +129,14 @@ class MergeRules(unittest.TestCase):
 
     def spent(self):
         return hl.spending_pace(self.conn, TODAY)["spent"]
+
+    def count(self):
+        return self.conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+
+
+class MergeRules(_Banks, unittest.TestCase):
+    """Only the same money merges (2026-10-30; the old rule took any account's debit of that amount): the same bank, never
+    a card purchase, never a purchase with a move between the owner's own accounts."""
 
     def test_another_banks_debit_of_the_same_amount_is_other_money(self):
         rid = spend(self.conn, 100_000, "ISI FLAZZ", category="transport", account_alias="mandiri-utama")["id"]
@@ -172,6 +180,73 @@ class MergeRules(unittest.TestCase):
         own = spend(self.conn, 80_000, "WARUNG BU SRI", account_alias="mandiri-utama")["id"]
         self.upload("mandiri-utama", "g", ("2026-11-05", "QRIS WARUNG BU SRI", -80_000))
         self.assertEqual((self.merged(loose) is None, self.merged(own) is None), (True, False))
+
+    def test_a_row_a_rule_sorted_keeps_its_category_and_status(self):
+        """The record's category only fills a row that has none; the status was overwritten anyway, so a rule's row turned
+        'unverified' (or a guess turned 'verified')."""
+        mu.set_category_rule(self.conn, "TOKO ABC 123456", "belanja")
+        first = spend(self.conn, 60_000, "TOKO ABC", category="makan", account_alias="bca-utama")["id"]
+        self.upload("bca-utama", "h", ("2026-11-05", "TOKO ABC 654321", -60_000), ("2026-11-06", "TOKO ABC 654322", -60_000))
+        late = spend(self.conn, 60_000, "TOKO ABC", day="2026-11-06", category="makan", account_alias="bca-utama")
+        rows = self.conn.execute("SELECT id, category, status FROM transactions WHERE source='mutation' ORDER BY txn_date").fetchall()
+        self.assertEqual([(r["category"], r["status"]) for r in rows], [("belanja", "verified")] * 2)
+        self.assertEqual((self.merged(first), self.merged(late["id"])), (rows[0]["id"], rows[1]["id"]))
+        self.assertIn("kategori yang dihitung belanja (dari mutasi), bukan makan", late["alerts"][0])
+
+
+class LateRecordsAndResentScreenshots(_Banks, unittest.TestCase):
+    """2026-10-30, owner: "ya betulkan juga". Matching ran only on upload and on ubah_belanja, so a purchase recorded after
+    its statement counted twice; and the duplicate check skipped merged records, so the same screenshot sent again was
+    stored a second time or hit the unique key."""
+
+    def test_a_record_made_after_its_statement_merges_at_once_and_says_so(self):
+        self.upload("bca-utama", "a", ("2026-11-05", "QRIS WARUNG BU SRI", -80_000), ("2026-11-06", "QRIS GRAB", -75_000))
+        r = spend(self.conn, 80_000, "WARUNG BU SRI", category="makan", account_alias="bca-utama")
+        mut = self.conn.execute("SELECT id FROM transactions WHERE merchant='QRIS WARUNG BU SRI'").fetchone()[0]
+        self.assertEqual((r["status"], r.get("merged_into"), self.merged(r["id"])), ("stored", mut, mut))
+        self.assertIn(f"sudah ada di mutasi bank #{mut} (QRIS WARUNG BU SRI, 2026-11-05, Rp 80.000, rekening bca-utama)",
+                      r["alerts"][0])
+        self.assertEqual(self.spent(), 155_000)                         # the two statement rows, nothing twice
+        card = spend(self.conn, 75_000, "GRAB", day="2026-11-06", category="transport", card_alias="cimb-1")
+        self.assertEqual(("merged_into" in card, self.merged(card["id"])), (False, None))   # it is on the card statement
+
+    def test_a_record_past_its_banks_statements_waits_for_the_next_one(self):
+        """The statement ends the day before: the record's own row is not in yet, and the window would hand it to another
+        payment of the same size."""
+        self.upload("bca-utama", "b", ("2026-11-04", "QRIS TOKO LAIN", -80_000), period=("2026-11-01", "2026-11-04"))
+        r = spend(self.conn, 80_000, "WARUNG BU SRI", category="makan", account_alias="bca-utama")
+        self.assertEqual(("merged_into" in r, self.merged(r["id"])), (False, None))
+        self.upload("bca-utama", "c", ("2026-11-05", "QRIS WARUNG BU SRI", -80_000), period=("2026-11-05", "2026-11-30"))
+        own = self.conn.execute("SELECT id FROM transactions WHERE merchant='QRIS WARUNG BU SRI'").fetchone()[0]
+        self.assertEqual(self.merged(r["id"]), own)
+        self.assertEqual(self.spent(), 160_000)                         # two payments, each counted once
+
+    def test_a_resent_screenshot_of_a_merged_purchase_is_flagged_not_stored_again(self):
+        """Live shape (PHO STREET #2440): recorded, corrected (its key is then id-based), merged on upload, the screenshot
+        sent again in a new chat."""
+        rid = spend(self.conn, 156_541, "PHO STREET", category="makan", account_alias="bca-utama")["id"]
+        hl.edit_expense(self.conn, TODAY, rid, 156_541, "salah sumber, dari Jago harian", account_alias="jago-harian")
+        self.upload("jago-utama", "d", ("2026-11-05", "Monthly spending: PHO STREET POS Transaction", -156_541))
+        mut, n = self.merged(rid), self.count()
+        self.assertIsNotNone(mut)
+        dup = spend(self.conn, 156_541, "PHO STREET", category="makan", account_alias="jago-harian")
+        self.assertEqual((dup["status"], dup.get("existing_id"), self.count()), ("possible_duplicate", rid, n))
+        self.assertIn(f"sudah digabung dengan mutasi bank #{mut}", dup["message"])
+        self.assertEqual(self.spent(), 156_541)
+
+    def test_a_second_purchase_after_its_merged_twin_gets_its_own_key(self):
+        first = spend(self.conn, 50_000, "KOPI KENANGAN", category="makan", account_alias="mandiri-utama")["id"]
+        self.upload("mandiri-utama", "e", ("2026-11-05", "QRIS KOPI KENANGAN", -50_000))
+        self.assertIsNotNone(self.merged(first))
+        self.assertEqual(spend(self.conn, 50_000, "Kopi Kenangan", account_alias="mandiri-utama")["status"], "possible_duplicate")
+        again = spend(self.conn, 50_000, "KOPI KENANGAN", category="makan", account_alias="mandiri-utama", allow_duplicate=True)
+        self.assertEqual((again["status"], self.merged(again["id"])), ("stored", None))   # that row is the first purchase's
+
+    def test_a_deleted_twin_leaves_no_key_clash(self):
+        a = spend(self.conn, 50_000, "KOPI KENANGAN")["id"]
+        spend(self.conn, 50_000, "KOPI KENANGAN", allow_duplicate=True)
+        hl.delete_expense(self.conn, a, 50_000, "tercatat dua kali")
+        self.assertEqual(spend(self.conn, 50_000, "KOPI KENANGAN", allow_duplicate=True)["status"], "stored")
 
 
 class Pace(unittest.TestCase):
