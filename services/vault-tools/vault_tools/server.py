@@ -144,12 +144,15 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
 
     @mcp.tool()
     @locked
-    def sisa_uang_harian(jumlah: int) -> str:
-        """Catat SISA UANG HARIAN bulan lalu yang masih dipegang pemilik saat gajian (tanyakan sekali saat menyusun daftar bayar
-        tanggal 1, sebelum generate_payday_plan). jumlah = saldo yang BISA DIPAKAI: saldo dikurangi saldo minimum yang ditahan
-        bank (lihat kolom terakhir REKENING MILIK PEMILIK di ringkasan_data; mis. Mandiri menahan Rp 100.000). Rencana gajian ini lalu hanya mengambil kekurangannya dari gaji: belanja kartu
-        yang dibayar dari uang harian tidak memotong pot. Berlaku untuk gajian yang sedang berjalan saja."""
-        return tools.set_leftover_living_cash(conn, jumlah, today())
+    def sisa_uang_harian(jumlah: int, jumlah_lain: int = 0) -> str:
+        """Catat SISA UANG HARIAN bulan lalu yang masih dipegang pemilik tepat SEBELUM gaji masuk (tanyakan saat menyusun daftar
+        bayar tanggal 1, sebelum generate_payday_plan, juga bila sudah pernah dicatat: angkanya bisa sudah berubah).
+        jumlah = saldo yang BISA DIPAKAI di rekening utama: saldo dikurangi saldo minimum yang ditahan bank (lihat kolom terakhir
+        REKENING MILIK PEMILIK di ringkasan_data; mis. Mandiri menahan Rp 100.000). jumlah_lain = saldo rekening harian (Jago,
+        uang-harian) pada saat yang sama, bila ada; kode yang menjumlahkan, jangan menjumlahkan sendiri. Angka di atas uang
+        harian sebulan ditolak (biasanya gaji ikut terhitung). Rencana gajian ini lalu hanya mengambil kekurangannya dari gaji:
+        belanja kartu yang dibayar dari uang harian tidak memotong pot. Berlaku untuk gajian yang sedang berjalan saja."""
+        return tools.set_leftover_living_cash(conn, jumlah, today(), jumlah_lain)
 
     @mcp.tool()
     @locked
@@ -206,7 +209,7 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
     @locked
     def set_threshold(key: str, value: int) -> str:
         """Set ambang/angka tetap, mis. net_salary, cash_buffer, dsr_max_bp."""
-        if key in ("reread_open_until", "ingest_events_cursor", "emergency_saved") or key.startswith("living_reserve_override"):
+        if key in ("reread_open_until", "ingest_events_cursor", "emergency_saved") or key.startswith(("living_reserve_override", "living_leftover")):
             raise ValueError("kunci ini diatur oleh sistem, bukan lewat chat")
         return tools.set_threshold(conn, key, value)
 
@@ -442,9 +445,11 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
         """Catat/ubah LANGGANAN digital (Google One, Apple, Anthropic, Netflix, dll). status: active (masih berjalan),
         ended (sudah berhenti, supaya tidak dianggap lagi), unsure (belum pasti, tanyakan pemilik). source = alias kartu
         atau rekening. Catat HANYA setelah pemilik mengonfirmasi, kecuali status unsure. Langganan dolar: perkiraan rupiah.
-        berakhir = YYYY-MM tagihan terakhir untuk kontrak yang selesai sendiri (mis. sewa/cicilan Coway); kosong = tanpa akhir.
-        wajib = true untuk yang TIDAK BOLEH diusulkan dipotong (aturan pemilik: semua kebutuhan anak, mis. Rockstar Gym Gracia);
-        kosong = tidak mengubah tanda yang tersimpan."""
+        berakhir = YYYY-MM tagihan terakhir untuk kontrak yang selesai sendiri (mis. sewa/cicilan Coway).
+        wajib = true untuk yang TIDAK BOLEH diusulkan dipotong (aturan pemilik: semua kebutuhan anak, mis. Rockstar Gym Gracia).
+        note, berakhir dan wajib yang tidak diisi TIDAK mengubah yang tersimpan (mengubah kartu atau harga tidak menghapus catatan
+        pemilik); note="" atau berakhir="" menghapusnya. Catatan maksimal 300 karakter. Sebelum mengubah catatan yang ada, baca
+        dulu subscriptions_status: catatan lama berasal dari pemilik, jangan dianggap karanganmu."""
         return subscriptions.upsert(conn, alias, name, monthly_amount, source, status, note, berakhir, wajib)
 
     @mcp.tool()

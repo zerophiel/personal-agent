@@ -44,7 +44,7 @@ def build(conn, vault, snap: dict) -> str:
         d["parts"] += 1
 
     lt = snap.get("living_transfer")
-    if lt and lt.get("pay_to"):                 # the living money to the owner's daily account: one more transfer to make
+    if lt and lt.get("pay_to") and lt["amount"]:    # the living money to the owner's daily account: one more transfer to make
         d = transfers.setdefault(lt["pay_to"], {"to": lt["to_alias"], "amount": 0, "parts": 0})
         d["amount"] += lt["amount"]
         d["parts"] += 1
@@ -75,9 +75,17 @@ def build(conn, vault, snap: dict) -> str:
     out += rows or ["Tidak ada transfer."]
     if missing:
         out.append("*⚠️ Tujuan belum didaftarkan (nomor belum ada)*\n" + "\n".join(missing))
+    need = snap.get("autodebit_need") or {}
+
+    def account(alias: str) -> str:
+        acct = conn.execute("SELECT bank FROM accounts WHERE alias=?", (alias,)).fetchone()
+        return f"rekening {_bank(acct['bank'])}" if acct else "rekening yang diset"
+
     if lt and lt.get("pay_to") and lt.get("also_move"):
+        keep = "; ".join(f"saldo {account(a)} tetap minimal {format_idr(n['total'])} sampai autodebetnya terpotong"
+                         for a, n in need.items())
         out.append(f"_Tambahan: sisa uang harian {format_idr(lt['also_move'])} yang sudah kamu pegang, bila masih di rekening lain, "
-                   "pindahkan juga ke rekening uang harian (tidak termasuk total di bawah)._")
+                   "pindahkan juga ke rekening uang harian (tidak termasuk total di bawah)" + (f", tetapi {keep}" if keep else "") + "._")
     out.append(f"*🧾 Total transfer: {format_idr(total)}*" + (f"\n_Belum terdanai (tidak termasuk): {format_idr(sum(u['amount'] for u in snap['unfunded']))}_" if snap.get("unfunded") else ""))
     if app_menu:
         lines = []
@@ -97,9 +105,11 @@ def build(conn, vault, snap: dict) -> str:
     if autodebit:
         lines = []
         for t in autodebit:
-            acct = conn.execute("SELECT bank FROM accounts WHERE alias=?", (t.get("pay_to"),)).fetchone()
-            src = f"rekening {_bank(acct['bank'])}" if acct else "rekening yang diset"
-            lines.append(f"• {_nice(t['to_alias'])}: *{format_idr(t['amount'])}* dari {src}")
+            lines.append(f"• {_nice(t['to_alias'])}: *{format_idr(t['amount'])}* dari {account(t.get('pay_to') or '')}")
+        for a, n in need.items():         # one figure per account, computed by the plan: all its debits + what the bank holds
+            lines.append(f"Saldo {account(a)} minimal *{format_idr(n['total'])}*"
+                         + (f" (termasuk {format_idr(n['held'])} yang ditahan bank)" if n["held"] else "")
+                         + " sampai semua autodebetnya terpotong")
         out.append("*🔄 Autodebet (tidak perlu transfer, pastikan saldo cukup)*\n" + "\n".join(lines))
     if emergency:
         out.append(f"*🛟 Sisihkan ke dana darurat*\n{format_idr(emergency)} ke rekening/kantong darurat milik sendiri, terpisah dari uang harian")

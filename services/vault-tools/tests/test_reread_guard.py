@@ -52,7 +52,8 @@ class RereadGuard(unittest.TestCase):
     def test_the_bot_cannot_open_the_window_or_touch_system_keys(self):
         with tempfile.TemporaryDirectory() as d:
             app, call = self.make(d)
-            for key in ("reread_open_until", "ingest_events_cursor", "living_reserve_override", "living_reserve_override_until"):
+            for key in ("reread_open_until", "ingest_events_cursor", "living_reserve_override", "living_reserve_override_until",
+                        "living_leftover", "living_leftover_payday", "living_leftover_at"):
                 with self.assertRaises(Exception):
                     call("set_threshold", {"key": key, "value": 1})
             call("set_threshold", {"key": "net_salary", "value": 10_000_000})                                    # normal keys still work

@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from test_roadmap import full_world  # noqa: E402
 
-from vault_tools import rincian, tools  # noqa: E402
+from vault_tools import rincian, simulate, tools  # noqa: E402
 from vault_tools.payee_vault import PayeeVault  # noqa: E402
 
 try:
@@ -161,9 +161,36 @@ class LeftoverLivingCash(unittest.TestCase):
         self.assertTrue(snap["reserve_source"].startswith("sementara"))
         nxt = tools.generate_payday_plan(conn, date(2026, 11, 28))           # the next payday: back to normal
         self.assertEqual((nxt["payday"], nxt["reserve"]), ("2026-11-30", 3_000_000))
-        self.assertIn("Kelebihan Rp 1.000.000", tools.set_leftover_living_cash(conn, 4_000_000, NOV_1))
         with self.assertRaises(ValueError):
             tools.set_leftover_living_cash(conn, -1, NOV_1)
+
+    def test_more_than_a_month_of_living_money_is_refused(self):
+        """A balance read after the salary came in would leave the owner short all month: refused, the earlier figure stands."""
+        conn = full_world()                                    # living money 3M
+        tools.set_leftover_living_cash(conn, 1_200_000, NOV_1)
+        with self.assertRaisesRegex(ValueError, "SEBELUM gaji masuk"):
+            tools.set_leftover_living_cash(conn, 2_000_000, NOV_1, 1_500_000)
+        self.assertEqual(tools.reserve_for(conn, date(2026, 10, 30))[0], 1_800_000)
+        self.assertIn("Rp 3.000.000 (Rp 2.000.000 + Rp 1.000.000)", tools.set_leftover_living_cash(conn, 2_000_000, NOV_1, 1_000_000))
+        self.assertEqual(tools.reserve_for(conn, date(2026, 10, 30))[0], 0)
+
+    def test_a_new_living_reserve_keeps_the_owners_leftover(self):
+        """Regression 2026-10-28: the leftover was stored as the top-up (7.500.000 - 4.894.157). After living_reserve became
+        7.546.005 the plan told the owner to move 4.940.162, money he never had, leaving the car auto-debit 46.005 short."""
+        conn = full_world()
+        tools.set_pot_schedule(conn, "hutang-teman", None, None, NOV_1, pace="sisa")      # the owner's pattern: pot takes the rest
+        tools.set_threshold(conn, "living_reserve", 7_500_000)
+        tools.set_leftover_living_cash(conn, 4_894_157, date(2026, 10, 28))
+        tools.set_threshold(conn, "living_reserve", 7_546_005)
+        tools.set_threshold(conn, "living_reserve_override", 2_605_843)            # old derived keys are ignored
+        tools.set_threshold(conn, "living_reserve_override_until", 20261030)
+        snap = tools.generate_payday_plan(conn, date(2026, 10, 30))
+        self.assertEqual((snap["reserve"], snap["living_leftover"], snap["cash_to_hold"]), (2_651_848, 4_894_157, 2_651_848))
+        self.assertIn("sisa uang harian Rp 4.894.157 (dicatat 2026-10-28)", snap["reserve_source"])
+        self.assertIn("SISA UANG HARIAN TERCATAT: Rp 4.894.157 untuk gajian 2026-10-30 (dicatat 2026-10-28)",
+                      tools.data_overview(conn, NOV_1))
+        cash = lambda **kw: simulate.simulate(conn, date(2026, 10, 30), months=1, **kw)["rows"][0]["cash"]  # noqa: E731
+        self.assertEqual(cash() - cash(reserve=7_546_005), 4_894_157)             # the pot projection uses the same split
 
 
 class DailyAccount(unittest.TestCase):
@@ -180,13 +207,28 @@ class DailyAccount(unittest.TestCase):
         self.assertEqual((snap["living_transfer"]["amount"], snap["living_transfer"]["also_move"]), (1_800_000, 1_200_000))
         self.assertEqual(snap["cash_to_hold"], 1_800_000)                 # the obligations' arithmetic is unchanged
         self.assertTrue(any("UANG HARIAN: transfer Rp 1.800.000" in r and "pindahkan juga sisa uang harian Rp 1.200.000" in r
+                            and "tetapi saldo mandiri-utama jangan sampai di bawah Rp 5.701.000 sampai 2026-11-02 (autodebet)" in r
                             for r in snap["reminders"]))
         text = rincian.build(conn, vault, snap)
         self.assertIn("Uang Harian (Jago)", text)
         self.assertIn("103000008786", text)
         self.assertIn("Tambahan: sisa uang harian Rp 1.200.000", text)
+        self.assertIn("tetapi saldo rekening Mandiri tetap minimal Rp 5.701.000 sampai autodebetnya terpotong._", text)
         self.assertIn("uang-harian: Rp 1.800.000 (uang harian ke rekening harian)", tools.summarize_plan(snap))
         self.assertNotIn("103000008786", str(snap) + tools.data_overview(conn, NOV_1))
+
+    def test_holding_the_whole_living_money_still_says_to_move_it(self):
+        conn = full_world()                                               # living money 3M
+        vault = PayeeVault(conn, bytes(range(32)))
+        vault.store("uang-harian", "account", "Jago", "103000008786")
+        tools.set_leftover_living_cash(conn, 3_000_000, NOV_1)
+        snap = tools.generate_payday_plan(conn, NOV_1)
+        self.assertEqual((snap["reserve"], snap["living_transfer"]["amount"], snap["living_transfer"]["also_move"]), (0, 0, 3_000_000))
+        self.assertTrue(any(r.startswith("UANG HARIAN: tidak ada yang diambil dari gaji") for r in snap["reminders"]))
+        text = rincian.build(conn, vault, snap)
+        self.assertIn("Tambahan: sisa uang harian Rp 3.000.000", text)
+        self.assertNotIn("103000008786", text)                            # no Rp 0 transfer row
+        self.assertNotIn("uang-harian: Rp 0", tools.summarize_plan(snap))
 
 
 class PotBalance(unittest.TestCase):

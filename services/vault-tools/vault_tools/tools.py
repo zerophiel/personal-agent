@@ -195,8 +195,11 @@ def data_overview(conn, today: date) -> str:
     L.append(f"CICILAN KARTU AKTIF: {format_idr(card_installments.monthly_total(conn))} per bulan | "
              f"LANGGANAN AKTIF: {format_idr(subscriptions.active_total(conn))} per bulan")
     th = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM thresholds")}
-    L.append(f"GAJI: {format_idr(th['net_salary']) if 'net_salary' in th else 'belum diset'} | CADANGAN KAS HARIAN: "
-             f"{format_idr(th['living_reserve']) if 'living_reserve' in th else 'belum diset'}")
+    L.append(f"GAJI: {format_idr(th['net_salary']) if 'net_salary' in th else 'belum diset'} | UANG HARIAN SEBULAN (living_reserve, "
+             f"dilindungi): {format_idr(th['living_reserve']) if 'living_reserve' in th else 'belum diset'}")
+    if "living_leftover" in th and "living_leftover_payday" in th:
+        L.append(f"SISA UANG HARIAN TERCATAT: {format_idr(th['living_leftover'])} untuk gajian {_ymd(th['living_leftover_payday'])}"
+                 + (f" (dicatat {_ymd(th['living_leftover_at'])})" if th.get("living_leftover_at") else ""))
     L.append("ANGGARAN: " + ("; ".join(f"{k[7:]} {format_idr(v)}" for k, v in sorted(th.items()) if k.startswith("budget:")) or "belum ada"))
     return "\n".join(L)
 
@@ -281,34 +284,62 @@ def get_threshold(conn, key: str, default: int | None = None) -> int | None:
     return row["value"] if row else default
 
 
+def _ymd(n: int) -> str:
+    """20261028 -> '2026-10-28' (dates kept in `thresholds` as YYYYMMDD integers)."""
+    s = str(n)
+    return f"{s[:4]}-{s[4:6]}-{s[6:]}"
+
+
+def living_leftover(conn, payday: date) -> tuple[int, int | None] | None:
+    """Last cycle's living money the owner still held at this payday, as he reported it: (amount, YYYYMMDD recorded).
+    The owner's own figure is stored, never a top-up derived from it, so a later change of living_reserve cannot skew it
+    (regression 2026-10-28: a stored top-up made the plan ask him to move money he never had)."""
+    amount, for_payday = get_threshold(conn, "living_leftover"), get_threshold(conn, "living_leftover_payday")
+    if amount is None or for_payday != int(payday.strftime("%Y%m%d")):
+        return None
+    return amount, get_threshold(conn, "living_leftover_at")
+
+
 def reserve_for(conn, payday: date) -> tuple[int | None, str]:
-    """The daily-cash reserve this payday's plan holds back. A one-off override (the owner already holds cash from the
-    last cycle) applies only to paydays up to `living_reserve_override_until` (YYYYMMDD); later plans use the normal one."""
-    ov, until = get_threshold(conn, "living_reserve_override"), get_threshold(conn, "living_reserve_override_until")
-    if ov is not None and until and int(payday.strftime("%Y%m%d")) <= until:
-        normal = get_threshold(conn, "living_reserve")
-        return ov, (f"sementara: dari gaji ini hanya diambil {format_idr(ov)}, karena pemilik masih memegang sisa uang harian yang sudah "
-                    f"dicatat; total uang harian tetap {format_idr(normal or ov)}; berlaku sampai {str(until)[:4]}-{str(until)[4:6]}-{str(until)[6:]}")
-    return get_threshold(conn, "living_reserve"), "diset pemilik"
+    """The living money this payday's plan takes from the salary: living_reserve, less last cycle's leftover when the
+    owner reported one for this payday. Both are read now, so the split always adds up to the current living_reserve."""
+    normal = get_threshold(conn, "living_reserve")
+    left = living_leftover(conn, payday)
+    if normal and left and left[0] > 0:
+        held = min(left[0], normal)
+        when = f" (dicatat {_ymd(left[1])})" if left[1] else ""
+        return normal - held, (f"sementara: pemilik masih memegang sisa uang harian {format_idr(held)}{when}, jadi dari gaji ini "
+                               f"diambil {format_idr(normal - held)}; total uang harian tetap {format_idr(normal)}; hanya untuk "
+                               f"gajian {payday.isoformat()}")
+    return normal, "diset pemilik"
 
 
-def set_leftover_living_cash(conn, amount: int, today: date) -> str:
-    """On payday the owner still holds `amount` of last cycle's living money (card purchases inside the living money are
-    paid from it). This payday's plan then takes only the top-up to living_reserve from the salary; the next payday is
-    planned normally again."""
+def set_leftover_living_cash(conn, amount: int, today: date, other: int = 0) -> str:
+    """On payday the owner still holds `amount` (+ `other`, a second account) of last cycle's living money, counted
+    BEFORE the salary came in. This payday's plan then takes only the top-up to living_reserve from the salary; the next
+    payday is planned normally again. More than a month of living money is refused: it almost always means the salary
+    was counted in, and taking it as leftover would leave the owner short all month."""
     check_idr(amount)
+    check_idr(other)
     normal = get_threshold(conn, "living_reserve")
     if not normal:
         raise ValueError("living_reserve belum diset")
-    if amount < 0:
+    if amount < 0 or other < 0:
         raise ValueError("jumlah harus >= 0")
+    total = amount + other
+    if total > normal:
+        raise ValueError(f"sisa {format_idr(total)} lebih besar dari uang harian sebulan {format_idr(normal)}. Bila gaji sudah masuk, "
+                         "minta saldo SEBELUM gaji masuk. Bila memang ada lebih, catat paling banyak "
+                         f"{format_idr(normal)}; kelebihannya bukan uang harian")
     payday = current_payday(today)
-    reserve = max(0, normal - amount)
-    set_threshold(conn, "living_reserve_override", reserve)
-    set_threshold(conn, "living_reserve_override_until", int(payday.strftime("%Y%m%d")))
-    extra = f" Kelebihan {format_idr(amount - normal)} tidak dihitung di rencana (tetap di rekening)." if amount > normal else ""
-    return (f"Sisa uang harian {format_idr(amount)} dicatat untuk gajian {payday.isoformat()}: uang harian yang diambil dari gaji ini "
-            f"{format_idr(reserve)}, jadi total uang harian tetap {format_idr(normal)}.{extra}")
+    set_threshold(conn, "living_leftover", total)
+    set_threshold(conn, "living_leftover_payday", int(payday.strftime("%Y%m%d")))
+    set_threshold(conn, "living_leftover_at", int(today.strftime("%Y%m%d")))
+    conn.execute("DELETE FROM thresholds WHERE key IN ('living_reserve_override', 'living_reserve_override_until')")
+    conn.commit()
+    parts = f" ({format_idr(amount)} + {format_idr(other)})" if other else ""
+    return (f"Sisa uang harian {format_idr(total)}{parts} dicatat untuk gajian {payday.isoformat()}: uang harian yang diambil dari "
+            f"gaji ini {format_idr(normal - total)}, jadi total uang harian tetap {format_idr(normal)}.")
 
 
 def list_uploads(upload_dir: str, limit: int = 10) -> list[str]:
@@ -793,12 +824,15 @@ def generate_payday_plan(conn, today: date, payday: date | None = None,
     for t in snap["transfers"]:
         if t.get("method") == "autodebit":
             by_account.setdefault(t.get("pay_to") or "", []).append(t)
+    snap["autodebit_need"] = {}
     for acct, items in by_account.items():
         items.sort(key=lambda t: t.get("due") or "")
         held = get_threshold(conn, f"saldo_ditahan:{acct}", 0) or 0 if acct else 0
         total = sum(t["amount"] for t in items) + held
         parts = "; ".join(f"{t['to_alias']} {format_idr(t['amount'])} ({t.get('due') or 'jatuh tempo'})" for t in items)
         first, last = items[0].get("due") or "jatuh tempo", items[-1].get("due") or "jatuh tempo"
+        if acct:
+            snap["autodebit_need"][acct] = {"total": total, "held": held, "first": first, "last": last}
         snap["reminders"].append(
             f"AUTODEBET dari rekening {acct or '(rekening belum diset)'}: {parts}"
             + (f"; ditambah saldo minimum yang ditahan bank {format_idr(held)}" if held else "")
@@ -838,17 +872,24 @@ def generate_payday_plan(conn, today: date, payday: date | None = None,
                     "langganan/belanja, tambah pemasukan, hitung gaji di hari tenggat, atau bicarakan jadwal dengan penerima.")
     # the living money goes to the owner's daily account (he spends only from there); kept outside `transfers`, which hold
     # the salary's obligations, so the cash kept and the spending pace still read the living money as before
+    normal = get_threshold(conn, "living_reserve") or 0
+    left = living_leftover(conn, payday)
+    snap["living_normal"] = normal
+    snap["living_leftover"] = min(left[0], normal) if left and normal else 0     # the owner's figure; checked by invariants
     daily = _payee(conn, LIVING_PAYEE)
-    if daily and snap["reserve"] and snap["cash_to_hold"] > 0:
-        amount = min(snap["reserve"], snap["cash_to_hold"])
-        normal = get_threshold(conn, "living_reserve") or 0
-        elsewhere = normal - snap["reserve"] if str(reserve_source).startswith("sementara") and normal > snap["reserve"] else 0
+    amount = min(snap["reserve"] or 0, max(0, snap["cash_to_hold"]))
+    elsewhere = snap["living_leftover"]
+    if daily and (amount or elsewhere):
         snap["living_transfer"] = {"to_alias": LIVING_PAYEE, "amount": amount, "pay_to": daily, "date": payday.isoformat(),
                                    "also_move": elsewhere}
+        # moving the leftover must never empty an account an auto-debit still needs: the figure comes from the code
+        keep = "; ".join(f"saldo {a} jangan sampai di bawah {format_idr(n['total'])} sampai {n['last']} (autodebet)"
+                         for a, n in snap["autodebit_need"].items())
         snap["reminders"].append(
-            f"UANG HARIAN: transfer {format_idr(amount)} dari gaji ke rekening harian ({LIVING_PAYEE})"
+            (f"UANG HARIAN: transfer {format_idr(amount)} dari gaji ke rekening harian ({LIVING_PAYEE})" if amount else
+             f"UANG HARIAN: tidak ada yang diambil dari gaji ({LIVING_PAYEE})")
             + (f"; pindahkan juga sisa uang harian {format_idr(elsewhere)} bila masih di rekening lain, supaya seluruh "
-               f"{format_idr(normal)} ada di rekening harian" if elsewhere else "")
+               f"{format_idr(normal)} ada di rekening harian" + (f", tetapi {keep}" if keep else "") if elsewhere else "")
             + ". Belanja harian hanya dari rekening itu.")
     snap["advice"] = card_advice(conn, snap, payday, hol)
     if reserve_source == "belum diset" and snap["advice"]:     # only matters when cards or savings are in play
@@ -894,7 +935,7 @@ def summarize_plan(snap: dict) -> str:
         lines.append(f"Cadangan hidup harian: {format_idr(snap['reserve'])} ({snap.get('reserve_source')})")
     lines += [f"> {a}" for a in snap.get("advice", [])]
     lt = snap.get("living_transfer")
-    if lt:
+    if lt and lt["amount"]:
         lines.append(f"- {lt['date']} {lt['to_alias']}: {format_idr(lt['amount'])} (uang harian ke rekening harian)")
     lines.append(f"Kas ditahan: {format_idr(snap['cash_to_hold'])}; jatah harian {format_idr(snap['daily_allowance'])}")
     lines += [f"Peringatan: {w}" for w in snap["warnings"]]

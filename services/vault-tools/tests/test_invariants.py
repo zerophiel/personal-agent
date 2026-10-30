@@ -31,8 +31,12 @@ def random_world(rng):
     tools.set_threshold(conn, "net_salary", rupiah(rng, 3_000_000, 80_000_000))
     if rng.random() < 0.9:
         tools.set_threshold(conn, "living_reserve", rupiah(rng, 0, 12_000_000))
-    if rng.random() < 0.3:
-        tools.set_leftover_living_cash(conn, rupiah(rng, 0, 9_000_000), today) if tools.get_threshold(conn, "living_reserve") else None
+    normal = tools.get_threshold(conn, "living_reserve")
+    if normal and rng.random() < 0.3:
+        part = rupiah(rng, 0, normal + 1)
+        tools.set_leftover_living_cash(conn, part, today, rng.choice([0, rupiah(rng, 0, normal - part + 1)]))
+        if rng.random() < 0.3:                    # living_reserve changed afterwards: the owner's leftover still counts as his
+            tools.set_threshold(conn, "living_reserve", rupiah(rng, 0, 12_000_000))
     for i in range(rng.randint(0, 4)):
         tools.upsert_expense(conn, f"fx{i}", f"fx{i}-va", rupiah(rng, 50_000, 6_000_000), rng.randint(1, 31))
     for i in range(rng.randint(0, 2)):
@@ -111,6 +115,14 @@ class TheChecksCatchBrokenNumbers(unittest.TestCase):
         bad = copy.deepcopy(self.snap())
         bad["transfers"][0]["amount"] = 5_000_000.0                                       # floats are never money
         self.assertTrue(invariants.plan_errors(bad))
+        ok = copy.deepcopy(self.snap())
+        ok.update(reserve=2_651_848, living_leftover=4_894_157, living_normal=7_546_005,
+                  living_transfer={"amount": 2_651_848, "also_move": 4_894_157})
+        self.assertEqual(invariants.plan_errors(ok), [])
+        bad = copy.deepcopy(ok)
+        bad.update(reserve=2_605_843, living_transfer={"amount": 2_605_843, "also_move": 4_940_162})   # the stale top-up of 2026-10-28
+        errs = invariants.plan_errors(bad)
+        self.assertTrue(any("uang harian: dari gaji" in e for e in errs) and any("dipindah" in e for e in errs), errs)
         with self.assertRaises(invariants.CalculationError):
             invariants.require(["x"], "uji")
 

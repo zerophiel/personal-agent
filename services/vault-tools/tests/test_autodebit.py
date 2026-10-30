@@ -144,6 +144,7 @@ class Rincian(unittest.TestCase):
             self.assertIn("Cicilan Mobil", text)
             self.assertIn("dari rekening Mandiri", text)
             self.assertIn("Rp 5.701.000", text)
+            self.assertIn("Saldo rekening Mandiri minimal *Rp 5.701.000* sampai semua autodebetnya terpotong", text)
             self.assertNotIn("`", text)                                              # no copyable number at all
 
 

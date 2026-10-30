@@ -11,14 +11,17 @@ from datetime import datetime, timezone
 from .money import check_idr, format_idr
 
 STATUSES = ("active", "ended", "unsure")
+NOTE_MAX = 300
 
 
 def upsert(conn: sqlite3.Connection, alias: str, name: str, amount: int, source: str, status: str = "active",
            note: str | None = None, ends: str | None = None, essential: bool | None = None) -> str:
     """`ends` = YYYY-MM of the last charge for a contract that stops by itself (e.g. a rental paid off in 24 months).
-    `essential` = never proposed as a cut (the owner's rule, e.g. anything for the children); None keeps what is stored."""
+    `essential` = never proposed as a cut (the owner's rule, e.g. anything for the children).
+    For `note`, `ends` and `essential`, None keeps what is stored: an update that only moves the card or the price must not
+    wipe the owner's facts (2026-10-28 three notes were lost that way). An empty string clears a note or an end month."""
     check_idr(amount)
-    if ends is not None and not re.fullmatch(r"20\d\d-(0[1-9]|1[0-2])", ends):
+    if ends and not re.fullmatch(r"20\d\d-(0[1-9]|1[0-2])", ends):
         raise ValueError("berakhir: format YYYY-MM (bulan tagihan terakhir)")
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,40}", alias):
         raise ValueError("alias: huruf kecil/angka/strip, 2-41 karakter")
@@ -26,14 +29,20 @@ def upsert(conn: sqlite3.Connection, alias: str, name: str, amount: int, source:
         raise ValueError("amount per bulan harus > 0 untuk langganan aktif")
     if status not in STATUSES:
         raise ValueError("status: active, ended, atau unsure")
+    if note and len(note) > NOTE_MAX:
+        raise ValueError(f"catatan maksimal {NOTE_MAX} karakter (sekarang {len(note)}); ringkas tanpa membuang fakta dari pemilik")
+    row = conn.execute("SELECT note, ends, essential FROM subscriptions WHERE alias=?", (alias,)).fetchone()
     if essential is None:
-        row = conn.execute("SELECT essential FROM subscriptions WHERE alias=?", (alias,)).fetchone()
         essential = bool(row and row["essential"])
+    if note is None:
+        note = row["note"] if row else None
+    if ends is None:
+        ends = row["ends"] if row else None
     conn.execute(
         "INSERT INTO subscriptions(alias,name,amount,source,status,note,updated_at,ends,essential) VALUES (?,?,?,?,?,?,?,?,?)"
         " ON CONFLICT(alias) DO UPDATE SET name=excluded.name, amount=excluded.amount, source=excluded.source,"
         " status=excluded.status, note=excluded.note, updated_at=excluded.updated_at, ends=excluded.ends, essential=excluded.essential",
-        (alias, name[:60], amount, source[:40], status, (note or "")[:120] or None, datetime.now(timezone.utc).isoformat(), ends,
+        (alias, name[:60], amount, source[:40], status, note or None, datetime.now(timezone.utc).isoformat(), ends or None,
          1 if essential else 0))
     conn.commit()
     return (f"{alias}: {status}, {format_idr(amount)}/bulan via {source}" + (f", sampai {ends}" if ends else "")

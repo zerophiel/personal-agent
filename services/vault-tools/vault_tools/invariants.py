@@ -3,7 +3,8 @@ A violation can only be a bug, so the numbers are refused (CalculationError) ins
 
 Plan: what is transferred plus the cash kept equals the salary; every amount is a positive whole rupiah; nothing is paid
 above a bill; the living money is never used for saving-type items (emergency fund, pot, card balance above the minimum,
-savings); a shortfall is never reported for money that was paid.
+savings); with a leftover the owner reported, salary part + leftover = the living money; a shortfall is never reported
+for money that was paid.
 Simulation: per cycle nothing is negative and no more than the bill is paid; the card balances add up over the whole run
 (open bills + new charges + gaps + interest - payments = what is left); a pot never exceeds its target."""
 from __future__ import annotations
@@ -36,6 +37,13 @@ def plan_errors(snap: dict, bills: dict[str, int] | None = None) -> list[str]:
     reserve = snap.get("reserve") or 0
     if reserve and any(t["reason"] in ABOVE_RESERVE_REASONS for t in snap["transfers"]) and snap["cash_to_hold"] < reserve:
         errs.append(f"uang harian terpotong: ditahan {snap['cash_to_hold']} < {reserve}")
+    held = snap.get("living_leftover") or 0
+    if held:     # the owner's leftover + what the salary gives = the living money, and he is told to move his own figure
+        if reserve + held != snap.get("living_normal"):
+            errs.append(f"uang harian: dari gaji {reserve} + sisa {held} != {snap.get('living_normal')}")
+        lt = snap.get("living_transfer")
+        if lt and lt.get("also_move") != held:
+            errs.append(f"sisa uang harian yang dipindah {lt.get('also_move')} != sisa yang dicatat {held}")
     for alias, owed in (bills or {}).items():
         got = sum(t["amount"] for t in snap["transfers"] if t["to_alias"] == alias)
         short = sum(u["amount"] for u in snap["unfunded"] if u["to_alias"] == alias)

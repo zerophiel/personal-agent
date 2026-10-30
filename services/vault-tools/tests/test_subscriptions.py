@@ -45,6 +45,24 @@ class OwnerRules(unittest.TestCase):
         self.assertEqual(conn.execute("SELECT essential, amount FROM subscriptions").fetchone()[:], (1, 1_500_000))
         self.assertIn("WAJIB: jangan diusulkan dipotong", sub.format_list(conn))
 
+    def test_an_update_without_note_or_end_keeps_the_owners_facts(self):
+        """Regression 2026-10-28: moving subscriptions to another card wiped their notes and cut one at 120 characters."""
+        conn = connect(":memory:")
+        long_note = "tahunan Rp 184.182, perpanjangan 2027-07-19; harus dipertahankan karena email memakainya; " * 2
+        sub.upsert(conn, "domain-squarespace", "Domain", 15_349, "cimb-1", note=long_note)
+        sub.upsert(conn, "coway-cs", "Coway CS", 400_000, "mega-5855", note="CS 400rb sampai Jan 2027", ends="2027-01")
+        sub.upsert(conn, "domain-squarespace", "Domain", 15_349, "jenius-1")                  # moved card only
+        sub.upsert(conn, "coway-cs", "Coway CS", 410_000, "jenius-1")                         # new price only
+        rows = {r["alias"]: r for r in conn.execute("SELECT * FROM subscriptions")}
+        self.assertEqual((rows["domain-squarespace"]["note"], rows["domain-squarespace"]["source"]), (long_note, "jenius-1"))
+        self.assertEqual((rows["coway-cs"]["note"], rows["coway-cs"]["ends"], rows["coway-cs"]["amount"]),
+                         ("CS 400rb sampai Jan 2027", "2027-01", 410_000))
+        sub.upsert(conn, "coway-cs", "Coway CS", 410_000, "jenius-1", note="", ends="")       # an empty string clears
+        row = conn.execute("SELECT note, ends FROM subscriptions WHERE alias='coway-cs'").fetchone()
+        self.assertEqual(row[:], (None, None))
+        with self.assertRaisesRegex(ValueError, "maksimal 300"):
+            sub.upsert(conn, "coway-cs", "Coway CS", 410_000, "jenius-1", note="x" * 301)     # refused, never cut silently
+
     def test_month_aware_total_drops_a_contract_after_its_last_month(self):
         conn = connect(":memory:")
         sub.upsert(conn, "coway-cs", "Coway CS", 400_000, "mega-5855", ends="2027-01")
