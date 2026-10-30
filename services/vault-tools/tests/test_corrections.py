@@ -320,6 +320,22 @@ class MergedRecords(unittest.TestCase):
         health.edit_expense(self.conn, TODAY, rid, 60_000, "bukan yang itu", unmerge=True)
         self.assertEqual(self.row(again)[1:], ("makan", "verified"))
 
+    def test_a_deleted_records_id_used_again_carries_nothing_of_it(self):
+        """The last ids are used again: a record let go from a row and then deleted, or one that gave a row its category
+        and was deleted, says nothing about the new record that gets its id."""
+        mid = self.upload("jago-utama", "k", ("2026-10-27", "QRIS PHO STREET", -156_541))["QRIS PHO STREET"]
+        rid = self.record(156_541, "PHO STREET", "2026-10-27")
+        health.edit_expense(self.conn, TODAY, rid, 156_541, "bukan yang itu", unmerge=True)
+        health.delete_expense(self.conn, rid, 156_541, "salah catat")
+        again = self.record(156_541, "PHO STREET", "2026-10-27")
+        self.assertEqual((again, self.row(again)[0]), (rid, mid))             # the same id, and it is that row's money
+        out = health.delete_expense(self.conn, again, 156_541, "dobel")
+        self.assertIn("kategorinya makan diambil dari catatan ini", out)       # the row keeps what the record gave it
+        third = self.record(156_541, "PHO STREET", "2026-10-27", category="jajan")
+        self.assertEqual((third, self.row(third)[0], self.row(mid)[1]), (rid, mid, "makan"))
+        health.edit_expense(self.conn, TODAY, third, 156_541, "bukan yang itu", unmerge=True)
+        self.assertEqual(self.row(mid)[1], "makan")                              # not taken back: this record did not give it
+
     def test_a_screenshot_sent_twice(self):
         first = self.record(100_000, "Isi saldo Flazz", "2026-10-28", account="mandiri-utama", category="transport")
         second = health.record_expense(self.conn, TODAY, 100_000, "Isi Flazz BCA", "2026-10-28", "transport",

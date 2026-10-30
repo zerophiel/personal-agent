@@ -183,8 +183,9 @@ def _give(conn, mutation_id: int, receipt_id: int, was, category: str, status: s
 
 
 def _given(conn, mutation_id: int, receipt_id: int):
-    """(before, after) of the category this record gave the row, while the row still has it as given; else None."""
-    for row in conn.execute("SELECT before_json, after_json FROM change_log WHERE tbl='transactions' AND row_key=?"
+    """(before, after) of the category this record gave the row, while the row still has it as given; else None. Not when
+    a record deleted since gave it: the last ids are used again, and a new record with that id gave nothing."""
+    for row in conn.execute("SELECT id, before_json, after_json FROM change_log WHERE tbl='transactions' AND row_key=?"
                             " AND action='ubah' ORDER BY id DESC", (str(mutation_id),)):
         after = json.loads(row["after_json"] or "{}")
         if "catatan" not in after and "kembali" not in after:
@@ -193,16 +194,20 @@ def _given(conn, mutation_id: int, receipt_id: int):
         if after.get("catatan") != receipt_id or now is None or (now["category"], now["status"]) != (after.get("category"),
                                                                                                     after.get("status")):
             return None
+        if conn.execute("SELECT 1 FROM change_log WHERE tbl='transactions' AND row_key=? AND action='hapus' AND id > ?",
+                        (str(receipt_id), row["id"])).fetchone():
+            return None
         return json.loads(row["before_json"]), after
     return None
 
 
 def _refused(conn) -> set[tuple[int, str]]:
     """(record, bank row key) pairs the owner said are not the same money (ubah_belanja lepas=true). By the row's key, not
-    its id: a statement stored again gives its rows new ids."""
+    its id: a statement stored again gives its rows new ids. Not for a record deleted since: a new one may get its id."""
     out = set()
-    for r in conn.execute("SELECT row_key, after_json FROM change_log WHERE tbl='transactions' AND action='ubah'"
-                          " AND after_json LIKE '%\"bukan\"%'"):
+    for r in conn.execute("SELECT c.row_key, c.after_json FROM change_log c WHERE c.tbl='transactions' AND c.action='ubah'"
+                          " AND c.after_json LIKE '%\"bukan\"%' AND NOT EXISTS (SELECT 1 FROM change_log h"
+                          " WHERE h.tbl='transactions' AND h.row_key = c.row_key AND h.action='hapus' AND h.id > c.id)"):
         after = json.loads(r["after_json"])
         if "bukan" in after:
             out.add((int(r["row_key"]), after["bukan"]))
@@ -417,6 +422,7 @@ def delete_expense(conn, txn_id: int, recorded: int, reason: str) -> str:
     ref = conn.execute("SELECT id FROM transactions WHERE merged_into=?", (txn_id,)).fetchone()
     if ref:
         raise ValueError(f"#{ref['id']} merujuk ke #{txn_id}; tidak bisa dihapus (hapus atau lepas #{ref['id']} dulu)")
+    given = _given(conn, r["merged_into"], txn_id) if r["merged_into"] is not None else None   # before the delete is logged
     changelog.log(conn, "transactions", txn_id, "hapus", dict(r), None, why)
     conn.execute("DELETE FROM transactions WHERE id=?", (txn_id,))
     conn.commit()
@@ -424,7 +430,7 @@ def delete_expense(conn, txn_id: int, recorded: int, reason: str) -> str:
     m = _with_aliases(conn, r["merged_into"]) if r["merged_into"] is not None else None
     if m is not None and m["source"] == "mutation":
         out += f" Mutasi bank #{m['id']} ({_shown(m)}) tetap dihitung: uangnya memang keluar"
-        if _given(conn, m["id"], txn_id):
+        if given:
             out += (f"; kategorinya {m['category']} diambil dari catatan ini: bila mutasi itu bukan belanja ini, ubah dengan"
                     f" set_category untuk #{m['id']}.")
         else:
