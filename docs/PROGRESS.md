@@ -114,7 +114,7 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   re-keys `dedupe_key` by id so a later record of the old values cannot hit the unique index; the whole row before/after goes to
   `change_log` with the owner's reason (subscription upserts are logged there too). Bank mutations and statement lines are fixed
   by uploading again. A merged row can point at an earlier owner record (the 28 Oct Flazz screenshot sent twice), not only a
-  mutation. PHO STREET #2440 (Jenius -> Jago daily) is left for the owner to fix through the bot after `/new`.
+  mutation. PHO STREET #2440 (Jenius -> Jago daily) was then fixed by the owner through the bot (change_log #1).
 - #2 `belanja_kartu(kartu=, bulan=)`: every line of one card's latest (or given) statement with its line status, long numbers
   masked, plus that card's per-cycle summary. One-shot check on CIMB answered from the tool exactly (total 1.717.741, minimum
   85.888, due 5 Nov; subscriptions 1.676.161 of which GoPro 1.186.072; no writes).
@@ -139,9 +139,10 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
    or something to stop/move? Owner decides.
 
 ## Next steps
-- Owner: `/new` in Telegram (vault restarted 2026-10-30 twice: leftover fix, then the /usulan tools; one `/new` covers both).
-  Then ask the bot to fix PHO STREET #2440 (from Jago daily, not Jenius) and check `change_log`. On 1 Nov ask for the payday
-  list; the bot asks again on purpose for the leftover living cash just BEFORE the salary (Mandiri usable + daily account); after
+- Done 2026-10-30 10:02 WIB: owner sent `/new` and had the bot fix PHO STREET #2440 (Jenius -> jago-harian): the bot listed it,
+  asked what was wrong, showed before -> after, waited for "ya", then `ubah_belanja`; `change_log` #1 holds only the account and
+  dedupe key change; no new transaction rows.
+- Owner: on 1 Nov ask for the payday list; the bot asks again on purpose for the leftover living cash just BEFORE the salary (Mandiri usable + daily account); after
   paying, tell the bot (card payments, pot balance, emergency fund balance) and the Mandiri balance shown in the app.
 - After the November statements: calibration per `docs/calibration.md` (Google One, Apple, Coway, bot quality, spend).
 - Remaining plan: M3 front/control/applier, M4 comms, M2 gate checks (`docs/assumptions.md`).
