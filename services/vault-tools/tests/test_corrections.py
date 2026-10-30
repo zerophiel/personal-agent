@@ -10,7 +10,7 @@ import unittest
 from datetime import date
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from vault_tools import health, subscriptions, tools  # noqa: E402
+from vault_tools import health, mutations, subscriptions, tools  # noqa: E402
 from vault_tools.ledger import connect  # noqa: E402
 
 try:
@@ -155,6 +155,40 @@ class OnlyTheOwnersRecords(unittest.TestCase):
         self.assertEqual((row["action"], row["after_json"], before["amount"], before["source"], before["account_alias"]),
                          ("hapus", None, -156_541, "receipt", "jenius-akun"))
         self.assertTrue(before["dedupe_key"])                         # every column, not only what was shown
+
+
+class CorrectedSourceFindsItsStatementRow(unittest.TestCase):
+    """A record with the wrong bank stays out of the statement row of the bank that really paid (2026-10-30); once the owner
+    corrects the source it is merged, and the change log shows it."""
+
+    def setUp(self):
+        self.conn = world()
+        self.conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('jago-utama','jago','main')")
+        self.conn.commit()
+        self.id = pho(self.conn)
+        mutations.record_mutations(self.conn, "jago-utama", "a" * 64, "2026-10-01", "2026-10-31", None, None,
+                                   [{"date": "2026-10-29", "description": "Monthly spending: PHO STREET POS Transaction",
+                                     "amount": -156_541}])
+        self.mut = self.conn.execute("SELECT id FROM transactions WHERE source='mutation'").fetchone()[0]
+
+    def merged(self):
+        return self.conn.execute("SELECT merged_into FROM transactions WHERE id=?", (self.id,)).fetchone()[0]
+
+    def test_the_corrected_bank_merges_it_and_the_log_shows_it(self):
+        self.assertIsNone(self.merged())                          # Jenius is another bank: counted twice until corrected
+        out = health.edit_expense(self.conn, TODAY, self.id, 156_541, "dari Jago harian", account_alias="jago-harian")
+        self.assertIn(f"Sekarang cocok dengan mutasi bank #{self.mut} (Monthly spending: PHO STREET POS Transaction, 2026-10-29,"
+                      " Rp 156.541, rekening jago-utama)", out)
+        self.assertEqual(self.merged(), self.mut)
+        self.assertEqual(json.loads(log(self.conn)[-1]["after_json"])["merged_into"], self.mut)
+        self.assertEqual(self.conn.execute("SELECT category FROM transactions WHERE id=?", (self.mut,)).fetchone()[0], "makan")
+        with self.assertRaisesRegex(ValueError, "sudah digabung"):
+            health.edit_expense(self.conn, TODAY, self.id, 156_541, "lagi", category="jajan")
+
+    def test_another_bank_still_does_not_merge(self):
+        out = health.edit_expense(self.conn, TODAY, self.id, 156_541, "dari Mandiri", account_alias="mandiri-utama")
+        self.assertNotIn("Sekarang cocok", out)
+        self.assertIsNone(self.merged())
 
 
 class SubscriptionLog(unittest.TestCase):

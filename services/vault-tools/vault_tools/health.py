@@ -6,7 +6,8 @@ Conventions
 - Categories that are NOT discretionary spending: 'transfer_internal', anything starting with
   'wajib:' (obligations such as school, lessons, loans, card bills) or 'sinking:' (pot deposits).
   Everything else (including uncategorized) counts as day-to-day spending.
-- A receipt later seen in a bank mutation is merged (`merged_into`), so it is never counted twice.
+- A receipt later seen in a mutation of the same bank is merged (`merged_into`), so it is never counted twice; a card
+  purchase never is (it is on the card statement).
 """
 from __future__ import annotations
 
@@ -86,19 +87,57 @@ def record_expense(conn: sqlite3.Connection, today: date, amount: int, merchant:
             "alerts": alerts_for(conn, today, ("kartu:" + cat) if cat and card_alias else cat, d)}
 
 
-def merge_receipt_into_mutation(conn, mutation_id: int, txn_date: str, amount: int) -> None:
-    """Called when a mutation row is stored: an earlier receipt for the same money becomes part of it."""
-    d = date.fromisoformat(txn_date)
-    lo, hi = (d - timedelta(days=MATCH_DAYS)).isoformat(), (d + timedelta(days=MATCH_DAYS)).isoformat()
-    r = conn.execute("SELECT id, category, status FROM transactions WHERE source='receipt' AND merged_into IS NULL"
-                     " AND amount=? AND txn_date BETWEEN ? AND ? ORDER BY ABS(julianday(txn_date) - julianday(?)), id LIMIT 1",
-                     (amount, lo, hi, txn_date)).fetchone()
-    if r is None:
-        return
-    conn.execute("UPDATE transactions SET merged_into=? WHERE id=?", (mutation_id, r["id"]))
-    if r["category"]:
-        conn.execute("UPDATE transactions SET category=COALESCE(category, ?), status=? WHERE id=?",
-                     (r["category"], r["status"], mutation_id))
+def _window(day: str) -> tuple[str, str]:
+    d = date.fromisoformat(day)
+    return (d - timedelta(days=MATCH_DAYS)).isoformat(), (d + timedelta(days=MATCH_DAYS)).isoformat()
+
+
+def merge_receipts(conn, mutation_ids: list[int] | None = None, receipt_id: int | None = None) -> list[tuple[int, int]]:
+    """A receipt for money a bank mutation also shows becomes part of that mutation (`merged_into`), so it counts once.
+
+    The same money is the same amount within MATCH_DAYS at the same bank: one statement can carry several of the owner's
+    accounts (the Jago statement lists every pocket), and a receipt without a source can be any bank's. Never merged
+    (2026-10-30, the old rule matched any account): a card purchase, which is on the card statement, and a purchase with
+    a move between the owner's own accounts or the other way round (the Jago statement is full of round pocket moves).
+    Closest dates pair first and each mutation takes one receipt, so of two equal debits a day apart the one on the
+    receipt's date gets it. Runs over the new rows of a mutation file, or for one receipt just corrected. The caller
+    commits. Returns the (receipt, mutation) pairs merged."""
+    only, one = "", ()
+    if receipt_id is not None:
+        r = conn.execute("SELECT txn_date, amount FROM transactions WHERE id=?", (receipt_id,)).fetchone()
+        mutation_ids = [m["id"] for m in conn.execute(
+            "SELECT id FROM transactions WHERE source='mutation' AND amount=? AND txn_date BETWEEN ? AND ?",
+            (r["amount"], *_window(r["txn_date"])))]
+        only, one = " AND t.id=?", (receipt_id,)
+    pairs = []
+    for mid in mutation_ids or ():
+        m = conn.execute("SELECT t.id, t.account_id, t.txn_date, t.amount, t.category, a.bank FROM transactions t"
+                         " JOIN accounts a ON a.id = t.account_id WHERE t.id=? AND t.source='mutation' AND t.amount < 0"
+                         " AND NOT EXISTS (SELECT 1 FROM transactions x WHERE x.merged_into = t.id)", (mid,)).fetchone()
+        if m is None:
+            continue
+        for r in conn.execute("SELECT t.id, t.account_id, t.txn_date, t.category, t.status, a.bank FROM transactions t"
+                              " LEFT JOIN accounts a ON a.id = t.account_id WHERE t.source='receipt' AND t.merged_into IS NULL"
+                              " AND t.card_id IS NULL AND t.amount=? AND t.txn_date BETWEEN ? AND ?" + only,
+                              (m["amount"], *_window(m["txn_date"]), *one)):
+            if r["account_id"] is not None and (r["bank"] or "").strip().lower() != (m["bank"] or "").strip().lower():
+                continue                                    # another bank's money ('Jago' and 'jago' are one bank)
+            if m["category"] is not None and (m["category"] == INTERNAL) != (r["category"] == INTERNAL):
+                continue
+            days = abs((date.fromisoformat(r["txn_date"]) - date.fromisoformat(m["txn_date"])).days)
+            source = 0 if r["account_id"] == m["account_id"] else 1 if r["account_id"] is not None else 2
+            pairs.append((days, source, r["id"], m["id"], r))
+    taken, merged = set(), []                               # receipt and mutation ids never collide: one table
+    for _, _, rid, mid, r in sorted(pairs, key=lambda p: p[:4]):
+        if rid in taken or mid in taken:
+            continue
+        taken.update((rid, mid))
+        conn.execute("UPDATE transactions SET merged_into=? WHERE id=?", (mid, rid))
+        if r["category"]:
+            conn.execute("UPDATE transactions SET category=COALESCE(category, ?), status=? WHERE id=?",
+                         (r["category"], r["status"], mid))
+        merged.append((rid, mid))
+    return merged
 
 
 # ---- corrections: only what the owner recorded himself ---------------------------------------
@@ -218,6 +257,8 @@ def edit_expense(conn, today: date, txn_id: int, recorded: int, reason: str, acc
     before = dict(r)
     conn.execute("UPDATE transactions SET account_id=?, card_id=?, txn_date=?, merchant=?, amount=?, category=?, status=?,"
                  " dedupe_key=? WHERE id=?", (*new.values(), txn_id))
+    # a record with the wrong bank stays out of that bank's statement row; corrected, it finds the row it belongs to
+    merged = merge_receipts(conn, receipt_id=txn_id)
     after = _with_aliases(conn, txn_id)
     changelog.log(conn, "transactions", txn_id, "ubah", before, dict(after), why)
     conn.commit()
@@ -226,6 +267,9 @@ def edit_expense(conn, today: date, txn_id: int, recorded: int, reason: str, acc
     diff = [f"{n} {f(before)} -> {f(after)}" for n, f in names.items() if f(before) != f(after)]
     out = (f"Belanja #{txn_id} diubah: " + ("; ".join(diff) if diff else "kategori dipastikan pemilik")
            + f". Alasan: {why}. Sebelum dan sesudahnya tersimpan di catatan perubahan.")
+    if merged:
+        m = _with_aliases(conn, merged[0][1])
+        out += f" Sekarang cocok dengan mutasi bank #{m['id']} ({_shown(m)}) dan digabung ke sana: yang itu yang dihitung, tidak dobel."
     cat = after["category"]
     alerts = alerts_for(conn, today, ("kartu:" + cat) if cat and after["card_id"] else cat, date.fromisoformat(after["txn_date"]))
     return out + "".join(f"\nPeringatan: {a}" for a in alerts)

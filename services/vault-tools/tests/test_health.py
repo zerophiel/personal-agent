@@ -109,6 +109,71 @@ class Merge(unittest.TestCase):
         self.assertEqual(merged, 1)
 
 
+class MergeRules(unittest.TestCase):
+    """Only the same money merges (2026-10-30; the old rule took any account's debit of that amount): the same bank, never
+    a card purchase, never a purchase with a move between the owner's own accounts."""
+
+    def setUp(self):
+        self.conn = planned()
+        for alias, bank in (("bca-utama", "BCA"), ("jago-utama", "jago"), ("jago-harian", "Jago")):
+            self.conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES (?,?,'main')", (alias, bank))
+        self.conn.commit()
+        tools.upsert_card(self.conn, "cimb-1", "CIMB", "2222", 5, 5, 10_000_000)
+
+    def upload(self, account, h, *rows):
+        mu.record_mutations(self.conn, account, h * 64, "2026-11-01", "2026-11-30", None, None,
+                            [{"date": d, "description": desc, "amount": a} for d, desc, a in rows])
+
+    def merged(self, rid):
+        return self.conn.execute("SELECT merged_into FROM transactions WHERE id=?", (rid,)).fetchone()[0]
+
+    def spent(self):
+        return hl.spending_pace(self.conn, TODAY)["spent"]
+
+    def test_another_banks_debit_of_the_same_amount_is_other_money(self):
+        rid = spend(self.conn, 100_000, "ISI FLAZZ", category="transport", account_alias="mandiri-utama")["id"]
+        self.upload("bca-utama", "a", ("2026-11-05", "TRSF E-BANKING 1234567", -100_000))
+        self.assertIsNone(self.merged(rid))
+        self.assertEqual(self.spent(), 200_000)                                   # two payments, both counted
+        self.upload("mandiri-utama", "b", ("2026-11-06", "FLAZZ TOPUP 998877", -100_000))
+        self.assertEqual(self.merged(rid), self.conn.execute("SELECT id FROM transactions WHERE merchant LIKE 'FLAZZ%'").fetchone()[0])
+        self.assertEqual(self.spent(), 200_000)                                   # the receipt is inside its own bank's row
+
+    def test_a_pocket_is_in_its_banks_one_statement(self):
+        rid = spend(self.conn, 156_541, "PHO STREET", category="makan", account_alias="jago-harian")["id"]
+        self.upload("jago-utama", "c", ("2026-11-05", "Monthly spending: PHO STREET POS Transaction", -156_541))
+        self.assertIsNotNone(self.merged(rid))                                    # 'Jago' and 'jago' are one bank
+        self.assertEqual(self.spent(), 156_541)
+
+    def test_a_card_purchase_is_never_a_bank_debit(self):
+        rid = spend(self.conn, 75_000, "GRAB", category="transport", card_alias="cimb-1")["id"]
+        self.upload("mandiri-utama", "d", ("2026-11-05", "QRIS GRAB", -75_000))
+        self.assertIsNone(self.merged(rid))
+
+    def test_a_purchase_is_never_a_move_between_own_accounts(self):
+        mu.set_category_rule(self.conn, "Danu Pocket Pocket Money In", "transfer_internal")
+        parkir = spend(self.conn, 100_000, "PARKIR", category="transport", account_alias="jago-harian")["id"]
+        flazz = spend(self.conn, 100_000, "Isi saldo Flazz", day="2026-11-04", category="transfer_internal",
+                      account_alias="jago-harian")["id"]
+        self.upload("jago-utama", "e", ("2026-11-05", "Danu Pocket Pocket Money In", -100_000))
+        self.assertIsNone(self.merged(parkir))                    # the closer date, but a pocket move is not a purchase
+        self.assertIsNotNone(self.merged(flazz))                  # a move the owner recorded is one
+        self.assertEqual(self.spent(), 100_000)
+
+    def test_of_two_equal_debits_the_one_on_the_receipts_date_takes_it(self):
+        rid = spend(self.conn, 50_000, "KOPI KENANGAN", day="2026-11-06", category="makan", account_alias="mandiri-utama")["id"]
+        self.upload("mandiri-utama", "f", ("2026-11-05", "TRSF KE ANDI", -50_000), ("2026-11-06", "QRIS KOPI KENANGAN", -50_000))
+        rows = {r["merchant"]: r for r in self.conn.execute("SELECT id, merchant, category FROM transactions WHERE source='mutation'")}
+        self.assertEqual(self.merged(rid), rows["QRIS KOPI KENANGAN"]["id"])     # the old rule gave it to the first row
+        self.assertEqual((rows["QRIS KOPI KENANGAN"]["category"], rows["TRSF KE ANDI"]["category"]), ("makan", None))
+
+    def test_the_receipt_from_that_account_goes_before_one_without_a_source(self):
+        loose = spend(self.conn, 80_000, "WARUNG")["id"]
+        own = spend(self.conn, 80_000, "WARUNG BU SRI", account_alias="mandiri-utama")["id"]
+        self.upload("mandiri-utama", "g", ("2026-11-05", "QRIS WARUNG BU SRI", -80_000))
+        self.assertEqual((self.merged(loose) is None, self.merged(own) is None), (True, False))
+
+
 class Pace(unittest.TestCase):
     def test_status_thresholds_against_the_daily_allowance(self):
         for spent, status in ((3_000_000, "ok"), (4_500_000, "ok"), (5_500_000, "watch"), (8_000_000, "watch"), (10_000_001, "over")):

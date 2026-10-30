@@ -104,7 +104,7 @@ def record_mutations(conn: sqlite3.Connection, account_alias: str, file_hash: st
     reconciled = balanced and missing == 0
 
     counts: dict[tuple, int] = defaultdict(int)
-    new = 0
+    new, debits = 0, []
     rules = {p: c for p, c in conn.execute("SELECT pattern, category FROM category_rules")}
     for d, desc, amount in parsed:
         key_base = (d, amount, normalize(desc))
@@ -118,9 +118,12 @@ def record_mutations(conn: sqlite3.Connection, account_alias: str, file_hash: st
             (acct["id"], d, desc, amount, category, "verified" if category else "unverified",
              "mutation", key, file_hash))
         new += cur.rowcount
-        if cur.rowcount and amount < 0:           # a purchase already captured from a screenshot is merged, not double counted
-            from .health import merge_receipt_into_mutation
-            merge_receipt_into_mutation(conn, cur.lastrowid, d, amount)
+        if cur.rowcount and amount < 0:
+            debits.append(cur.lastrowid)
+    # a purchase already captured from a screenshot is merged, not double counted; matched once the whole file is in, so of
+    # two equal debits the one on the receipt's own date gets it
+    from .health import merge_receipts
+    merge_receipts(conn, debits)
     conn.execute(
         "INSERT INTO mutation_files VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         (file_hash, acct["id"], period_start, period_end, opening_balance, closing_balance,
