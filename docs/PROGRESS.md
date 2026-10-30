@@ -1,6 +1,6 @@
 # Progress and resume point (finance / vault)
 
-Last updated: 2026-10-30. Branch `worktree-m1-skeleton`, draft PR #1. 383 vault-tools tests pass.
+Last updated: 2026-10-30. Branch `worktree-m1-skeleton`, draft PR #1. 384 vault-tools tests pass.
 No secrets or personal amounts are recorded here; the numbers live in the ledger on the VPS.
 
 ## Done
@@ -184,6 +184,10 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   while a BCA record merges; plan identical (2.651.848 / 4.894.157, invariants clean). Backup `ledger.db.bak-pre-unmerge`;
   vault-tools rebuilt, vault restarted; MCP `tools/list` 53 tools, `ubah_belanja` with `lepas`/`tunai`, `record_expense`
   with `tunai`; counts unchanged; logs clean. Tool fields and SOUL changed, so the owner sends `/new` once.
+- Same day, 45dfc1e: ids are used again on the record side too, so a `bukan` mark or a category given by a record deleted
+  since no longer applies to the new record that gets its id (a record let go and then deleted kept the next one out of
+  that row, counted twice). 384 tests; the new one fails without either half. Dry run on live copies clean; backup
+  `ledger.db.bak-pre-unmerge-2`; redeployed with the same checks; no further `/new`.
 
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
