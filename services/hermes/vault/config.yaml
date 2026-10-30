@@ -39,7 +39,8 @@ auxiliary:
 
 compression:
   threshold_tokens: 100000     # was 60000: three compactions in six minutes lost the owner's answers (re-asked questions)
-  idle_compact_after_seconds: 1800
+  # idle_compact_after_seconds: Hermes default 0 (off). 1800 would summarise the owner's answers when they step away to
+  # make the payday transfers and come back to report (it fires above 20% of threshold_tokens; it never fired 27-30 Oct)
   min_tail_user_messages: 3    # default 1: the owner's last answers stay verbatim, not only in the summary
 
 memory:

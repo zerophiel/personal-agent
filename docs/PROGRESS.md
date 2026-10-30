@@ -210,7 +210,8 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 - SOUL: `status_gajian` first (up to 7 days after a payday, and after every compaction), one question per message, never
   re-ask what is recorded; open items are knowledge, not questions. Hermes compaction at 100K tokens (was 60K) with the
   owner's last 3 messages verbatim; `protect_first_n` stays at Hermes's default (it stops protecting the session opening
-  after the first compaction by itself).
+  after the first compaction by itself); idle compaction back to Hermes's default (off): set to 1800 s since 27 Oct, it
+  would summarise the owner's answers while they step away to make the payday transfers (it never fired 27-30 Oct).
 - 401 vault-tools tests (16 new in `test_payday_progress.py`; the first 15 fail on the old code), 479 across all suites.
   Dry runs on in-memory copies of the live ledger (old vs new code). Backup `ledger.db.bak-pre-payday-progress` (v12,
   61 plans, 1.915 transactions); vault-tools rebuilt (v13: 7 card payments, 2 fund reports, dates 2026-10-30); data fix;
