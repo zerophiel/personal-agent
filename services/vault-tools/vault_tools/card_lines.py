@@ -266,13 +266,26 @@ def _netted(conn) -> set[int]:
     return out
 
 
-def summary(conn, cycles: int = 3) -> dict:
-    months = [r[0] for r in conn.execute("SELECT DISTINCT substr(cycle,1,7) m FROM card_lines ORDER BY m DESC LIMIT ?", (max(1, cycles),))]
+def _card(conn, card_alias: str):
+    row = conn.execute("SELECT id, alias, bank, last4 FROM cards WHERE alias=?", (card_alias,)).fetchone()
+    if row is None:
+        raise ValueError(f"kartu {card_alias} belum terdaftar (lihat ringkasan_data)")
+    return row
+
+
+def summary(conn, cycles: int = 3, card_alias: str | None = None) -> dict:
+    """Per statement cycle, all cards together, or one card with `card_alias`."""
+    if card_alias is not None:
+        _card(conn, card_alias)
+    where, args = ("", ()) if card_alias is None else (" AND c.alias = ?", (card_alias,))
+    months = [r[0] for r in conn.execute("SELECT DISTINCT substr(l.cycle,1,7) m FROM card_lines l JOIN cards c ON c.id = l.card_id"
+                                         f" WHERE 1=1{where} ORDER BY m DESC LIMIT ?", (*args, max(1, cycles)))]
     months.sort()
-    out = {"months": months, "by_month": {}, "missing": [], "mismatch": []}
+    out = {"months": months, "by_month": {}, "missing": [], "mismatch": [], "card": card_alias}
     netted = _netted(conn)
     for m in months:
-        rows = conn.execute("SELECT l.*, c.alias AS card FROM card_lines l JOIN cards c ON c.id = l.card_id WHERE substr(l.cycle,1,7)=?", (m,)).fetchall()
+        rows = conn.execute("SELECT l.*, c.alias AS card FROM card_lines l JOIN cards c ON c.id = l.card_id WHERE substr(l.cycle,1,7)=?"
+                            + where, (m, *args)).fetchall()
         kinds, cats, merchants, big = defaultdict(int), defaultdict(int), defaultdict(int), []
         cancelled = 0
         for r in rows:
@@ -286,20 +299,21 @@ def summary(conn, cycles: int = 3) -> dict:
                 merchants[" ".join(key[:3]).upper()] += r["amount"]
                 if r["amount"] >= ONE_OFF_FROM:
                     big.append((r["description"], r["amount"], r["card"]))
-        cards = [r[0] for r in conn.execute("SELECT DISTINCT c.alias FROM card_lines l JOIN cards c ON c.id=l.card_id WHERE substr(l.cycle,1,7)=?", (m,))]
+        cards = [r[0] for r in conn.execute("SELECT DISTINCT c.alias FROM card_lines l JOIN cards c ON c.id=l.card_id WHERE substr(l.cycle,1,7)=?"
+                                            + where, (m, *args))]
         out["by_month"][m] = {"kinds": dict(kinds), "categories": dict(sorted(cats.items(), key=lambda kv: -kv[1])),
                               "merchants": sorted(merchants.items(), key=lambda kv: -kv[1])[:6], "big": big, "cards": cards,
                               "cancelled": cancelled}
     for r in conn.execute("SELECT c.alias, s.statement_date, s.lines_status, s.lines_diff FROM statements s JOIN cards c ON c.id = s.card_id"
-                          " WHERE s.statement_date >= ? AND IFNULL(s.lines_status,'') != 'cocok' ORDER BY s.statement_date",
-                          ((months[0] + "-01") if months else "0000",)):
+                          f" WHERE s.statement_date >= ? AND IFNULL(s.lines_status,'') != 'cocok'{where} ORDER BY s.statement_date",
+                          ((months[0] + "-01") if months else "0000", *args)):
         (out["missing"] if r["lines_status"] in (None, "tanpa-berkas") else out["mismatch"]).append((r["alias"], r["statement_date"], r["lines_diff"]))
     return out
 
 
 def format_summary(s: dict) -> str:
     if not s["months"]:
-        return "Belum ada baris tagihan kartu yang terbaca."
+        return "Belum ada baris tagihan kartu yang terbaca" + (f" untuk {s['card']}." if s.get("card") else ".")
     lines = []
     for m in s["months"]:
         d = s["by_month"][m]
@@ -322,3 +336,54 @@ def format_summary(s: dict) -> str:
                      + ", ".join(f"{a} {d} selisih {format_idr(abs(x or 0))}" for a, d, x in s["mismatch"]))
     lines.append("Arti: 'belanja' = pembelian yang bisa diatur; langganan, cicilan, bunga, dan biaya dipisah. Angka dihitung kode dari baris tagihan.")
     return "\n".join(lines)
+
+
+DETAIL_MAX = 60                      # lines listed for one statement; the rest is summed
+_LONG_DIGITS = re.compile(r"\d{6,}")
+_KIND_ORDER = ("belanja", "langganan", "cicilan", "bunga", "biaya", "refund", "pembayaran")
+
+
+def card_detail(conn, card_alias: str, month: str | None = None) -> dict:
+    """Every line of one card's statement: the latest one, or the one printed in `month` (YYYY-MM)."""
+    card = _card(conn, card_alias)
+    if month is not None and not re.fullmatch(r"20\d\d-(0[1-9]|1[0-2])", month):
+        raise ValueError("bulan: format YYYY-MM (bulan cetak tagihan)")
+    st = conn.execute("SELECT * FROM statements WHERE card_id=? AND (? IS NULL OR substr(statement_date,1,7) = ?)"
+                      " ORDER BY statement_date DESC, id DESC LIMIT 1", (card["id"], month, month)).fetchone()
+    if st is None:
+        return {"card": dict(card), "statement": None, "lines": [], "month": month}
+    netted = _netted(conn)
+    rows = conn.execute("SELECT * FROM card_lines WHERE statement_id=? ORDER BY COALESCE(txn_date, cycle), id", (st["id"],)).fetchall()
+    return {"card": dict(card), "statement": dict(st), "month": month,
+            "lines": [{"date": r["txn_date"], "description": _LONG_DIGITS.sub("[angka]", r["description"])[:50], "amount": r["amount"],
+                       "kind": r["kind"], "category": r["category"], "netted": r["id"] in netted} for r in rows]}
+
+
+def format_detail(d: dict) -> str:
+    c, st = d["card"], d["statement"]
+    name = f"{c['bank']} …{c['last4']} ({c['alias']})"
+    if st is None:
+        return f"{name}: belum ada tagihan tersimpan" + (f" yang dicetak {d['month']}." if d["month"] else ".")
+    read = {"cocok": "semua baris terbaca dan cocok dengan total tagihan",
+            "selisih": f"baris BELUM cocok dengan total (selisih {format_idr(abs(st['lines_diff'] or 0))}): daftar ini bisa kurang",
+            "tanpa-berkas": "berkas tagihan tidak ada, baris tidak terbaca"}.get(st["lines_status"] or "", "baris belum dibaca")
+    out = [f"TAGIHAN {name}: cetak {st['statement_date']}, jatuh tempo {st['due_date']}, total {format_idr(st['total_due'])}, "
+           f"minimum {format_idr(st['minimum_due'])}" + (f", sudah dibayar {format_idr(st['paid_amount'])}" if st["paid_amount"] else "")
+           + f"; {read}."]
+    kinds: dict[str, int] = defaultdict(int)
+    for x in d["lines"]:
+        if not x["netted"]:
+            kinds[x["kind"]] += x["amount"]
+    if kinds:
+        out.append("Per jenis: " + "; ".join(f"{'dibayar' if k == 'pembayaran' else k} {format_idr(abs(kinds[k]))}"
+                                              for k in _KIND_ORDER if kinds.get(k)))
+    for x in d["lines"][:DETAIL_MAX]:
+        out.append(f"- {x['date'] or 'tanpa tanggal'} | {x['description']} | {format_idr(abs(x['amount']))}"
+                   + (" kredit" if x["amount"] < 0 else "") + f" | {x['kind']}" + (f" ({x['category']})" if x["kind"] == "belanja" else "")
+                   + (" | dibatalkan/dikonversi ke cicilan, tidak dihitung" if x["netted"] else ""))
+    rest = d["lines"][DETAIL_MAX:]
+    if rest:
+        out.append(f"... dan {len(rest)} baris lain: tagihan {format_idr(sum(x['amount'] for x in rest if x['amount'] > 0))}, "
+                   f"kredit {format_idr(-sum(x['amount'] for x in rest if x['amount'] < 0))}")
+    out.append("Angka dibaca kode dari baris tagihan; nomor panjang disamarkan.")
+    return "\n".join(out)

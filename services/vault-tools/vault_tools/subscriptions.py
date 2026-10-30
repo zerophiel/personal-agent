@@ -8,6 +8,7 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 
+from . import changelog
 from .money import check_idr, format_idr
 
 STATUSES = ("active", "ended", "unsure")
@@ -31,7 +32,7 @@ def upsert(conn: sqlite3.Connection, alias: str, name: str, amount: int, source:
         raise ValueError("status: active, ended, atau unsure")
     if note and len(note) > NOTE_MAX:
         raise ValueError(f"catatan maksimal {NOTE_MAX} karakter (sekarang {len(note)}); ringkas tanpa membuang fakta dari pemilik")
-    row = conn.execute("SELECT note, ends, essential FROM subscriptions WHERE alias=?", (alias,)).fetchone()
+    row = conn.execute("SELECT * FROM subscriptions WHERE alias=?", (alias,)).fetchone()
     if essential is None:
         essential = bool(row and row["essential"])
     if note is None:
@@ -44,6 +45,9 @@ def upsert(conn: sqlite3.Connection, alias: str, name: str, amount: int, source:
         " status=excluded.status, note=excluded.note, updated_at=excluded.updated_at, ends=excluded.ends, essential=excluded.essential",
         (alias, name[:60], amount, source[:40], status, note or None, datetime.now(timezone.utc).isoformat(), ends or None,
          1 if essential else 0))
+    after = conn.execute("SELECT * FROM subscriptions WHERE alias=?", (alias,)).fetchone()
+    if row is None or any(row[k] != after[k] for k in after.keys() if k != "updated_at"):    # every change stays traceable
+        changelog.log(conn, "subscriptions", alias, "ubah" if row else "baru", dict(row) if row else None, dict(after))
     conn.commit()
     return (f"{alias}: {status}, {format_idr(amount)}/bulan via {source}" + (f", sampai {ends}" if ends else "")
             + (", WAJIB (tidak diusulkan untuk dipotong)." if essential else "."))

@@ -185,6 +185,15 @@ class UsulanReport(unittest.TestCase):
         self.assertIn("🆕 <b>#1 Simulasi skenario</b>", text)
         self.assertIn("menunggu dikerjakan manusia", text)
 
+    def test_what_was_built_is_shown(self):
+        conn = connect(":memory:")
+        conn.execute("INSERT INTO feature_requests(created_at,title,detail,status,resolution) VALUES ('2026-10-28T01:00:00+00:00',"
+                     "'Rincian per kartu','apa saja di CIMB','selesai','Sudah bisa: tanya apa saja isi tagihan CIMB')")
+        conn.commit()
+        text = reports.build(conn, "usulan", TODAY)
+        self.assertIn("✅ <b>#1 Rincian per kartu</b>", text)
+        self.assertIn("➡️ Sudah bisa: tanya apa saja isi tagihan CIMB", text)
+
 
 if __name__ == "__main__":
     unittest.main()

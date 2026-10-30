@@ -100,6 +100,58 @@ class InThePlan(unittest.TestCase):
         self.assertFalse(any("AUTODEBET" in r for r in snap["reminders"]))
 
 
+class BalanceCheck(unittest.TestCase):
+    """Usulan #1 (2026-10-28): the owner reads the Mandiri balance in the app; code says whether the auto-debits still to
+    come (plus what the bank holds back) fit, so the car debit does not fail."""
+    def world(self):
+        conn = setup()
+        car(conn, pay_method="autodebit", debit_account_alias="mandiri-utama")
+        tools.upsert_debt(conn, "spaylater", "Shopee", 5 * 270_000, 270_000, 5, 1, None, pay_method="autodebit",
+                          debit_account_alias="mandiri-utama")
+        tools.set_threshold(conn, "saldo_ditahan:mandiri-utama", 100_000)
+        return conn
+
+    def test_enough_to_the_rupiah_and_one_rupiah_short(self):
+        conn = self.world()
+        ok = tools.record_account_balance(conn, date(2026, 10, 30), "mandiri-utama", 6_071_000)
+        self.assertIn("spaylater Rp 270.000 (2026-11-01); cicilan-mobil Rp 5.701.000 (2026-11-02); ditambah saldo minimum "
+                      "yang ditahan bank Rp 100.000", ok)
+        self.assertIn("Butuh Rp 6.071.000 sebelum 2026-11-01: saldo CUKUP (lebih Rp 0)", ok)
+        self.assertIn("hanya benar bila semua transfer gajian sudah dilakukan", ok)      # payday: transfers may still be due
+        self.assertIn("KURANG Rp 1", tools.record_account_balance(conn, date(2026, 10, 30), "mandiri-utama", 6_070_999))
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM balance_reports").fetchone()[0], 2)
+
+    def test_a_debit_due_today_gives_both_figures(self):
+        out = tools.record_account_balance(self.world(), date(2026, 11, 1), "mandiri-utama", 5_900_000)
+        self.assertIn("BELUM terpotong: butuh Rp 6.071.000, saldo KURANG Rp 171.000", out)
+        self.assertIn("SUDAH terpotong: butuh Rp 5.801.000, saldo CUKUP (lebih Rp 99.000)", out)
+
+    def test_after_the_last_debit_nothing_is_due_until_the_next_salary(self):
+        out = tools.record_account_balance(self.world(), date(2026, 11, 10), "mandiri-utama", 500_000)
+        self.assertIn("Tidak ada autodebet dari mandiri-utama sampai gajian berikutnya (2026-11-30)", out)
+        self.assertNotIn("transfer gajian", out)
+
+    def test_the_plan_reads_a_balance_from_this_payday_only(self):
+        conn = self.world()
+        tools.record_account_balance(conn, date(2026, 10, 20), "mandiri-utama", 9_000_000)      # before this payday
+        self.assertFalse([r for r in tools.generate_payday_plan(conn, date(2026, 10, 30))["reminders"] if r.startswith("SALDO")])
+        tools.record_account_balance(conn, date(2026, 10, 30), "mandiri-utama", 6_000_000)
+        rem = [r for r in tools.generate_payday_plan(conn, date(2026, 10, 30))["reminders"] if r.startswith("SALDO")]
+        self.assertEqual(len(rem), 1)
+        self.assertIn("Rp 6.000.000, dilaporkan 2026-10-30 pukul", rem[0])
+        self.assertIn("saldo KURANG Rp 71.000", rem[0])
+        self.assertRegex(tools.data_overview(conn, TODAY), r"- mandiri-utama \| Mandiri \| main \| 0001 \| Rp 100\.000 \| "
+                                                            r"Rp 6\.000\.000, dilaporkan 2026-10-30 pukul \d\d:\d\d WIB")
+
+    def test_unknown_account_and_negative_balance_are_refused(self):
+        conn = self.world()
+        with self.assertRaisesRegex(ValueError, "belum terdaftar"):
+            tools.record_account_balance(conn, TODAY, "ghost", 1_000)
+        with self.assertRaisesRegex(ValueError, "negatif"):
+            tools.record_account_balance(conn, TODAY, "mandiri-utama", -1)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM balance_reports").fetchone()[0], 0)
+
+
 class Migration(unittest.TestCase):
     def test_v4_ledger_gets_the_debt_columns(self):
         with tempfile.TemporaryDirectory() as d:

@@ -16,6 +16,7 @@ import re
 import sqlite3
 from datetime import date, datetime, timedelta, timezone
 
+from . import changelog
 from .money import check_idr, format_idr
 from .mutations import INTERNAL, cashflow, clean_text, normalize
 
@@ -98,6 +99,149 @@ def merge_receipt_into_mutation(conn, mutation_id: int, txn_date: str, amount: i
     if r["category"]:
         conn.execute("UPDATE transactions SET category=COALESCE(category, ?), status=? WHERE id=?",
                      (r["category"], r["status"], mutation_id))
+
+
+# ---- corrections: only what the owner recorded himself ---------------------------------------
+# Bank mutations and card statement lines come from documents and are corrected by uploading the document again.
+
+OWN_SOURCES = ("receipt", "manual")
+_LONG_DIGITS = re.compile(r"\d{6,}")
+
+
+def _with_aliases(conn, txn_id: int):
+    return conn.execute("SELECT t.*, a.alias AS account_alias, c.alias AS card_alias FROM transactions t"
+                        " LEFT JOIN accounts a ON a.id = t.account_id LEFT JOIN cards c ON c.id = t.card_id WHERE t.id=?",
+                        (txn_id,)).fetchone()
+
+
+def _paid_from(r) -> str:
+    return (f"kartu {r['card_alias']}" if r["card_alias"] else f"rekening {r['account_alias']}" if r["account_alias"]
+            else "sumber belum diisi")
+
+
+def _merged_target(conn, txn_id: int) -> str:
+    """What a merged row points at: usually the bank mutation that showed the same money, sometimes an earlier record of
+    the owner's (a screenshot sent twice, 2026-10-28)."""
+    t = conn.execute("SELECT source FROM transactions WHERE id=?", (txn_id,)).fetchone()
+    return f"mutasi bank #{txn_id}" if t and t["source"] == "mutation" else f"catatan #{txn_id}"
+
+
+def _shown(r, sep: str = ", ") -> str:
+    return sep.join((_LONG_DIGITS.sub("[angka]", r["merchant"]), r["txn_date"], format_idr(-r["amount"]), _paid_from(r)))
+
+
+def list_expenses(conn, today: date, days: int = 14) -> list[str]:
+    """Purchases the owner recorded (screenshots, his words) in the last `days` days, newest first, each with its id: a
+    new chat session remembers no ids, and a correction must name the right row."""
+    since = (today - timedelta(days=max(1, min(days, 120)))).isoformat()
+    rows = conn.execute("SELECT t.*, a.alias AS account_alias, c.alias AS card_alias FROM transactions t"
+                        " LEFT JOIN accounts a ON a.id = t.account_id LEFT JOIN cards c ON c.id = t.card_id"
+                        " WHERE t.source IN ('receipt','manual') AND t.txn_date >= ? ORDER BY t.txn_date DESC, t.id DESC LIMIT 60",
+                        (since,)).fetchall()
+    twins: dict[tuple, int] = {}
+    for r in rows:
+        if r["merged_into"] is None:             # a merged row is already settled, it is nobody's twin
+            k = (r["txn_date"], r["amount"], r["account_id"], r["card_id"])
+            twins[k] = twins.get(k, 0) + 1
+    out = []
+    for r in rows:
+        line = f"#{r['id']} | {_shown(r, ' | ')} | {r['category'] or 'belum dikategorikan'}"
+        if r["merged_into"] is not None:
+            line += f" | sudah digabung dengan {_merged_target(conn, r['merged_into'])} (yang itu yang dihitung; tidak diubah di sini)"
+        elif twins[(r["txn_date"], r["amount"], r["account_id"], r["card_id"])] > 1:
+            line += " | ada catatan lain dengan tanggal, jumlah, dan sumber yang sama"
+        out.append(line)
+    return out or [f"Tidak ada belanja yang dicatat dari screenshot atau ucapan pemilik sejak {since}."]
+
+
+def _own_row(conn, txn_id: int, recorded: int):
+    """The row to correct, after the guards: it exists, the owner recorded it, it still counts, and `recorded` (the positive
+    size the bot read from daftar_belanja) matches what is stored, so a wrong id is refused rather than corrected."""
+    check_idr(recorded)
+    r = _with_aliases(conn, txn_id)
+    if r is None:
+        raise ValueError(f"belanja #{txn_id} tidak ditemukan; cari id-nya dengan daftar_belanja")
+    if r["source"] not in OWN_SOURCES:
+        raise ValueError(f"#{txn_id} berasal dari {'mutasi bank' if r['source'] == 'mutation' else 'tagihan kartu'}, bukan catatan "
+                         "pemilik; perbaiki dengan mengunggah ulang berkasnya")
+    if r["merged_into"] is not None:
+        raise ValueError(f"#{txn_id} sudah digabung dengan {_merged_target(conn, r['merged_into'])}; yang itu yang dihitung")
+    if -r["amount"] != recorded:
+        raise ValueError(f"#{txn_id} adalah {_shown(r)}, bukan belanja {format_idr(recorded)}: id-nya salah? cek daftar_belanja")
+    return r
+
+
+def _reason(text: str) -> str:
+    why = clean_text(text, 200)
+    if not why:
+        raise ValueError("alasan wajib: kata-kata pemilik (mis. 'salah sumber, sebenarnya dari Jago')")
+    return why
+
+
+def edit_expense(conn, today: date, txn_id: int, recorded: int, reason: str, account_alias: str | None = None,
+                 card_alias: str | None = None, amount: int | None = None, txn_date: str | None = None,
+                 merchant: str | None = None, category: str | None = None) -> str:
+    """Correct one purchase the owner recorded. Fields left out keep their value; the source is an account OR a card.
+    The row before and after goes to change_log with the owner's reason."""
+    why = _reason(reason)
+    if account_alias and card_alias:
+        raise ValueError("isi rekening ATAU kartu, bukan keduanya")
+    r = _own_row(conn, txn_id, recorded)
+    new = {k: r[k] for k in ("account_id", "card_id", "txn_date", "merchant", "amount", "category", "status")}
+    if account_alias or card_alias:
+        table, alias = ("accounts", account_alias) if account_alias else ("cards", card_alias)
+        row = conn.execute(f"SELECT id FROM {table} WHERE alias=?", (alias,)).fetchone()
+        if row is None:
+            raise ValueError(f"{'rekening' if account_alias else 'kartu'} {alias} belum terdaftar (lihat ringkasan_data)")
+        new["account_id"], new["card_id"] = (row["id"], None) if account_alias else (None, row["id"])
+    if amount is not None:
+        check_idr(amount)
+        if amount <= 0:
+            raise ValueError("jumlah harus > 0 (besar pengeluaran)")
+        new["amount"] = -amount
+    if txn_date is not None:
+        if date.fromisoformat(txn_date) > today + timedelta(days=1):
+            raise ValueError("tanggal transaksi di masa depan")
+        new["txn_date"] = txn_date
+    if merchant is not None:
+        new["merchant"] = clean_text(merchant, 120)
+        if not new["merchant"]:
+            raise ValueError("merchant kosong")
+    if category is not None:
+        new["category"] = clean_text(category, 40).lower() or None
+        new["status"] = "verified"                          # the owner said it, as with set_category
+    if all(new[k] == r[k] for k in new):
+        raise ValueError("tidak ada yang berubah")
+    # an id-based key: record_expense's keys end in a count, so a later record of the old values can never collide
+    new["dedupe_key"] = hashlib.sha256(f"receipt|{new['txn_date']}|{-new['amount']}|{normalize(new['merchant'])}|id{txn_id}"
+                                       .encode()).hexdigest()
+    before = dict(r)
+    conn.execute("UPDATE transactions SET account_id=?, card_id=?, txn_date=?, merchant=?, amount=?, category=?, status=?,"
+                 " dedupe_key=? WHERE id=?", (*new.values(), txn_id))
+    after = _with_aliases(conn, txn_id)
+    changelog.log(conn, "transactions", txn_id, "ubah", before, dict(after), why)
+    conn.commit()
+    names = {"sumber": _paid_from, "tanggal": lambda x: x["txn_date"], "merchant": lambda x: _LONG_DIGITS.sub("[angka]", x["merchant"]),
+             "jumlah": lambda x: format_idr(-x["amount"]), "kategori": lambda x: x["category"] or "belum dikategorikan"}
+    diff = [f"{n} {f(before)} -> {f(after)}" for n, f in names.items() if f(before) != f(after)]
+    out = (f"Belanja #{txn_id} diubah: " + ("; ".join(diff) if diff else "kategori dipastikan pemilik")
+           + f". Alasan: {why}. Sebelum dan sesudahnya tersimpan di catatan perubahan.")
+    cat = after["category"]
+    alerts = alerts_for(conn, today, ("kartu:" + cat) if cat and after["card_id"] else cat, date.fromisoformat(after["txn_date"]))
+    return out + "".join(f"\nPeringatan: {a}" for a in alerts)
+
+
+def delete_expense(conn, txn_id: int, recorded: int, reason: str) -> str:
+    """Remove one purchase the owner recorded (e.g. recorded twice). The whole row is kept in change_log."""
+    why = _reason(reason)
+    r = _own_row(conn, txn_id, recorded)
+    ref = conn.execute("SELECT id FROM transactions WHERE merged_into=?", (txn_id,)).fetchone()
+    if ref:
+        raise ValueError(f"#{ref['id']} merujuk ke #{txn_id}; tidak bisa dihapus")
+    changelog.log(conn, "transactions", txn_id, "hapus", dict(r), None, why)
+    conn.execute("DELETE FROM transactions WHERE id=?", (txn_id,))
+    conn.commit()
+    return f"Belanja #{txn_id} dihapus: {_shown(r)}. Alasan: {why}. Isinya tetap tersimpan di catatan perubahan."
 
 
 def estimate_living_reserve(conn, before: date, salary: int | None = None) -> int:

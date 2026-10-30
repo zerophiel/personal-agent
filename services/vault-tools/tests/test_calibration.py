@@ -101,6 +101,15 @@ class ReserveAndPot(unittest.TestCase):
         self.assertIn("hitung gaji di hari tenggat", w[0])
         self.assertIn("KURANG", tools.sinking_status(conn, NOV_1))
 
+    def test_the_choices_do_not_offer_the_due_day_salary_once_it_is_counted(self):
+        conn = full_world()
+        tools.set_threshold(conn, "net_salary", 26_000_000)
+        tools.set_pot_schedule(conn, "hutang-teman", None, None, NOV_1, pace="sisa", due_payday=True)
+        w = [x for x in tools.generate_payday_plan(conn, NOV_1)["warnings"] if x.startswith("hutang-teman") and "KURANG" in x]
+        self.assertEqual(len(w), 1)
+        self.assertNotIn("hitung gaji di hari tenggat", w[0])
+        self.assertIn("tambah pemasukan, atau bicarakan jadwal dengan penerima", w[0])
+
     def test_switching_patterns_is_validated(self):
         conn = full_world()
         with self.assertRaises(ValueError):

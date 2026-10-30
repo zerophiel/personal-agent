@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 11  # 11: subscriptions.ends/essential, sinking_funds.pace/due_payday; 10: card_lines, doc_files, statements.lines_status/lines_diff, sinking_funds.low_*; 9: card_installments, skipped_files; 8: statements.paid_amount; 7: cards.interest_bp_month; 6: transactions.merged_into, net_snapshots; 5: debts.pay_method/pay_to_alias/debit_account_alias; 2: cards.pay_method/pay_to_alias; 3: transaction dedupe, mutation_files, category_rules; 4: sinking_funds
+SCHEMA_VERSION = 12  # 12: change_log, balance_reports, feature_requests.resolution; 11: subscriptions.ends/essential, sinking_funds.pace/due_payday; 10: card_lines, doc_files, statements.lines_status/lines_diff, sinking_funds.low_*; 9: card_installments, skipped_files; 8: statements.paid_amount; 7: cards.interest_bp_month; 6: transactions.merged_into, net_snapshots; 5: debts.pay_method/pay_to_alias/debit_account_alias; 2: cards.pay_method/pay_to_alias; 3: transaction dedupe, mutation_files, category_rules; 4: sinking_funds
 
 
 def _money(col: str, nullable: bool = False) -> str:
@@ -95,7 +95,14 @@ CREATE INDEX IF NOT EXISTS idx_card_lines_cycle ON card_lines(cycle);
 CREATE TABLE IF NOT EXISTS doc_files (hash TEXT PRIMARY KEY, path TEXT NOT NULL);   -- which uploaded/ingested file has which sha256
 CREATE TABLE IF NOT EXISTS feature_requests (   -- what the bot could not do; the owner decides, a human builds it
   id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'baru' CHECK (status IN ('baru','dikerjakan','selesai','ditolak')));
+  status TEXT NOT NULL DEFAULT 'baru' CHECK (status IN ('baru','dikerjakan','selesai','ditolak')),
+  resolution TEXT);                     -- what was built (or why not), shown in /usulan
+CREATE TABLE IF NOT EXISTS change_log (   -- rows changed or removed by hand: the row before and after, so a human can trace or undo it
+  id INTEGER PRIMARY KEY, at TEXT NOT NULL, tbl TEXT NOT NULL, row_key TEXT NOT NULL,
+  action TEXT NOT NULL CHECK (action IN ('baru','ubah','hapus')), before_json TEXT, after_json TEXT, reason TEXT);
+CREATE TABLE IF NOT EXISTS balance_reports (   -- an account balance as the owner read it in the bank app (not a mutation file)
+  id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL REFERENCES accounts(id),
+  as_of TEXT NOT NULL, at TEXT NOT NULL, {_money('balance')} NOT NULL);
 CREATE TABLE IF NOT EXISTS subscriptions (
   alias TEXT PRIMARY KEY, name TEXT NOT NULL, {_money('amount')} NOT NULL,   -- IDR per month (USD ones: approximate)
   source TEXT NOT NULL,                 -- card or account alias it is charged to
@@ -175,4 +182,6 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE subscriptions ADD COLUMN ends TEXT")
     if "essential" not in scols3:
         conn.execute("ALTER TABLE subscriptions ADD COLUMN essential INTEGER NOT NULL DEFAULT 0 CHECK (essential IN (0,1))")
+    if "resolution" not in {r["name"] for r in conn.execute("PRAGMA table_info(feature_requests)")}:              # v12
+        conn.execute("ALTER TABLE feature_requests ADD COLUMN resolution TEXT")
     conn.commit()

@@ -43,7 +43,8 @@ MCP_TOOL_NAMES = ("upsert_card", "upsert_debt", "upsert_expense", "set_threshold
                   "add_owner_name", "suggest_categories", "apply_suggestions", "living_cost_analysis",
                   "record_card_installments", "card_installments_status", "pending_statements", "skip_statement_file",
                   "upsert_subscription", "subscriptions_status", "set_category_keyword", "link_card_payees", "ringkasan_data", "simulasi_skenario", "catat_usulan", "atur_jadwal_pot", "belanja_kartu",
-                  "saldo_pot", "dana_darurat", "periksa_data", "sisa_uang_harian")
+                  "saldo_pot", "dana_darurat", "periksa_data", "sisa_uang_harian", "saldo_rekening", "daftar_belanja",
+                  "ubah_belanja", "hapus_belanja")
 
 
 class Installment(BaseModel):
@@ -153,6 +154,15 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
         harian sebulan ditolak (biasanya gaji ikut terhitung). Rencana gajian ini lalu hanya mengambil kekurangannya dari gaji:
         belanja kartu yang dibayar dari uang harian tidak memotong pot. Berlaku untuk gajian yang sedang berjalan saja."""
         return tools.set_leftover_living_cash(conn, jumlah, today(), jumlah_lain)
+
+    @mcp.tool()
+    @locked
+    def saldo_rekening(rekening: str, saldo: int) -> str:
+        """Catat SALDO REKENING biasa (bukan pot) yang TAMPIL di aplikasi bank sekarang, apa adanya (jangan dikurangi saldo
+        yang ditahan bank: kode yang menghitung). Kode menjawab CUKUP/KURANG untuk autodebet dari rekening itu sampai gajian
+        berikutnya; sampaikan apa adanya. Saat gajian: tanyakan SETELAH pemilik selesai transfer. Ini bukan sisa uang harian
+        (itu sisa_uang_harian, sebelum gaji masuk)."""
+        return tools.record_account_balance(conn, today(), rekening, saldo)
 
     @mcp.tool()
     @locked
@@ -317,6 +327,32 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
 
     @mcp.tool()
     @locked
+    def daftar_belanja(hari: int = 14) -> str:
+        """DAFTAR BELANJA yang dicatat dari screenshot/struk/ucapan pemilik dalam `hari` terakhir, tiap baris dengan id-nya.
+        Panggil sebelum ubah_belanja/hapus_belanja: id dan jumlah diambil dari sini, jangan dari ingatan."""
+        return "\n".join(health.list_expenses(conn, today(), hari))
+
+    @mcp.tool()
+    @locked
+    def ubah_belanja(id: int, jumlah_tercatat: int, alasan: str, rekening: str | None = None, kartu: str | None = None,
+                     jumlah: int | None = None, tanggal: str | None = None, merchant: str | None = None,
+                     kategori: str | None = None) -> str:
+        """UBAH SATU belanja catatan pemilik (salah rekening/kartu, jumlah, tanggal YYYY-MM-DD, merchant, kategori). id dan
+        jumlah_tercatat (jumlah yang tersimpan sekarang) dari daftar_belanja; isi hanya yang berubah; rekening ATAU kartu;
+        alasan = kata-kata pemilik. Tunjukkan dulu sebelum -> sesudah dan tunggu 'ya'. Mutasi bank dan baris tagihan kartu
+        tidak diubah di sini (unggah ulang berkasnya). Jangan mencatat ulang untuk memperbaiki."""
+        return health.edit_expense(conn, today(), id, jumlah_tercatat, alasan, rekening or None, kartu or None, jumlah or None,
+                                   tanggal or None, merchant or None, kategori or None)
+
+    @mcp.tool()
+    @locked
+    def hapus_belanja(id: int, jumlah_tercatat: int, alasan: str) -> str:
+        """HAPUS SATU belanja catatan pemilik (mis. tercatat dua kali). Aturannya sama dengan ubah_belanja; isinya tetap
+        tersimpan di catatan perubahan."""
+        return health.delete_expense(conn, id, jumlah_tercatat, alasan)
+
+    @mcp.tool()
+    @locked
     def add_owner_name(name: str) -> str:
         """Tambahkan nama pemilik persis seperti tercetak di mutasi (mis. 'DANUARTA WIRATAMA'). Transfer ke nama ini
         diusulkan sebagai pindah dana antar rekening sendiri (transfer_internal)."""
@@ -399,12 +435,19 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
 
     @mcp.tool()
     @locked
-    def belanja_kartu(siklus: int = 3) -> str:
+    def belanja_kartu(siklus: int = 3, kartu: str | None = None, bulan: str | None = None) -> str:
         """RINCIAN BELANJA KARTU dari baris tagihan yang sudah dibaca kode (JANGAN membaca PDF untuk ini): per siklus
         tagihan, dipisah belanja (yang bisa diatur), langganan, cicilan, bunga, biaya, refund; belanja per kategori;
         merchant terbesar; pembelian besar sekali. Pakai untuk "apa yang bisa dipotong", "belanja kartu 2 bulan terakhir
-        selain cicilan", "kenapa tagihan besar"."""
-        return card_lines.format_summary(card_lines.summary(conn, max(1, min(siklus, 12))))
+        selain cicilan", "kenapa tagihan besar". kartu = alias satu kartu (lihat ringkasan_data): semua baris tagihannya
+        (terbaru, atau bulan = YYYY-MM bulan cetak), untuk "apa saja yang di CIMB"."""
+        n = max(1, min(siklus, 12))
+        if not kartu:
+            if bulan:
+                raise ValueError("bulan hanya dipakai bersama kartu")
+            return card_lines.format_summary(card_lines.summary(conn, n))
+        return (card_lines.format_detail(card_lines.card_detail(conn, kartu, bulan or None))
+                + "\n\nPER SIKLUS, KARTU INI SAJA:\n" + card_lines.format_summary(card_lines.summary(conn, n, kartu)))
 
     @mcp.tool()
     @locked

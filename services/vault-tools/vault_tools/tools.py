@@ -188,10 +188,13 @@ def data_overview(conn, today: date) -> str:
     L.append("PENGELUARAN TETAP")
     for e in conn.execute("SELECT alias, amount, due_day FROM fixed_expenses ORDER BY alias"):
         L.append(f"- {e['alias']} | {format_idr(e['amount'])} | tanggal {e['due_day']}")
-    L.append("REKENING MILIK PEMILIK (alias | bank | jenis | 4 digit | saldo minimum yang ditahan bank)")
+    L.append("REKENING MILIK PEMILIK (alias | bank | jenis | 4 digit | saldo minimum yang ditahan bank | saldo terakhir yang "
+             "dilaporkan pemilik)")
     for a in conn.execute("SELECT alias, bank, kind, last4 FROM accounts ORDER BY alias"):
         held = get_threshold(conn, f"saldo_ditahan:{a['alias']}", 0) or 0
-        L.append(f"- {a['alias']} | {a['bank']} | {a['kind']} | {a['last4'] or '-'} | {format_idr(held) if held else '-'}")
+        rep = latest_balance(conn, a["alias"])
+        L.append(f"- {a['alias']} | {a['bank']} | {a['kind']} | {a['last4'] or '-'} | {format_idr(held) if held else '-'} | "
+                 + (_reported(rep) if rep else "-"))
     L.append(f"CICILAN KARTU AKTIF: {format_idr(card_installments.monthly_total(conn))} per bulan | "
              f"LANGGANAN AKTIF: {format_idr(subscriptions.active_total(conn))} per bulan")
     th = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM thresholds")}
@@ -752,19 +755,90 @@ def collect_obligations(conn, payday: date, nxt: date, holidays=()) -> list[Obli
     target = get_threshold(conn, "monthly_savings_target", 0)
     if target and target > 0:     # savings come after card balances: card interest (about 2-3% a month) beats any savings yield
         obs.append(Obligation("saving", "tabungan", payday, target))
+    obs.extend(debt_obligations(conn, payday, nxt))
+    for r in conn.execute("SELECT payee_alias, amount, due_day FROM fixed_expenses"):
+        for d in due_dates_in_window(r["due_day"], payday, nxt):
+            obs.append(Obligation("fixed", r["payee_alias"], d, r["amount"], pay_to=r["payee_alias"]))
+    return obs
+
+
+def debt_obligations(conn, start: date, end: date) -> list[Obligation]:
+    """Debt instalments due in [start, end); an auto-debited one names the debited account in `pay_to`."""
+    obs: list[Obligation] = []
     for r in conn.execute("SELECT alias, installment, due_day, rate_bp, pay_method, pay_to_alias, debit_account_alias"
                           " FROM debts WHERE tenor_left > 0"):
         auto = r["pay_method"] == "autodebit"
-        for d in due_dates_in_window(r["due_day"], payday, nxt):
+        for d in due_dates_in_window(r["due_day"], start, end):
             # rate_bp is the ANNUAL rate; the delay cost estimate is per month
             obs.append(Obligation("debt", r["alias"], d, r["installment"],
                                   late_cost_bp=(r["rate_bp"] or 0) // 12,
                                   method="autodebit" if auto else "transfer",
                                   pay_to=r["debit_account_alias"] if auto else r["pay_to_alias"]))
-    for r in conn.execute("SELECT payee_alias, amount, due_day FROM fixed_expenses"):
-        for d in due_dates_in_window(r["due_day"], payday, nxt):
-            obs.append(Obligation("fixed", r["payee_alias"], d, r["amount"], pay_to=r["payee_alias"]))
     return obs
+
+
+# ---- an account balance the owner read in the bank app, checked against the auto-debits that still have to go ----
+
+def next_salary_after(today: date, holidays) -> date:
+    """The next salary still to come (on a payday the salary has already arrived)."""
+    p = last_working_day(today.year, today.month, holidays)
+    return p if p > today else next_payday(p, holidays)
+
+
+def autodebit_check(conn, alias: str, balance: int, as_of: date, holidays=None) -> dict:
+    """Is `balance` (as shown in the bank app on `as_of`) enough for the auto-debits from `alias` due from `as_of` until the
+    next salary, plus the minimum the bank holds back? A debit due on `as_of` itself may or may not have gone: both figures."""
+    hol = frozenset(holidays) if holidays is not None else id_holidays(as_of.year)
+    until = next_salary_after(as_of, hol)
+    debits = sorted((o for o in debt_obligations(conn, as_of, until) if o.method == "autodebit" and o.pay_to == alias),
+                    key=lambda o: o.due)
+    held = get_threshold(conn, f"saldo_ditahan:{alias}", 0) or 0
+    need = sum(o.amount for o in debits) + held
+    due_today = sum(o.amount for o in debits if o.due == as_of)
+    return {"alias": alias, "balance": balance, "held": held, "until": until, "debits": debits, "need": need,
+            "need_if_debited": need - due_today, "due_today": due_today}
+
+
+def format_autodebit_check(c: dict) -> str:
+    def verdict(need: int) -> str:
+        diff = c["balance"] - need
+        return f"CUKUP (lebih {format_idr(diff)})" if diff >= 0 else f"KURANG {format_idr(-diff)}"
+    held = f"; ditambah saldo minimum yang ditahan bank {format_idr(c['held'])}" if c["held"] else ""
+    if not c["debits"]:
+        return f"Tidak ada autodebet dari {c['alias']} sampai gajian berikutnya ({c['until'].isoformat()}){held}."
+    head = (f"Autodebet dari {c['alias']} sampai gajian berikutnya ({c['until'].isoformat()}): "
+            + "; ".join(f"{o.payee_alias} {format_idr(o.amount)} ({o.due.isoformat()})" for o in c["debits"]) + held)
+    if c["due_today"]:
+        return (head + f". Bila autodebet hari ini BELUM terpotong: butuh {format_idr(c['need'])}, saldo {verdict(c['need'])}. "
+                f"Bila SUDAH terpotong: butuh {format_idr(c['need_if_debited'])}, saldo {verdict(c['need_if_debited'])}.")
+    first = c["debits"][0].due.isoformat()
+    return head + f". Butuh {format_idr(c['need'])} sebelum {first}: saldo {verdict(c['need'])}."
+
+
+def latest_balance(conn, alias: str, since: date | None = None):
+    return conn.execute("SELECT r.* FROM balance_reports r JOIN accounts a ON a.id = r.account_id WHERE a.alias=? AND r.as_of >= ?"
+                        " ORDER BY r.as_of DESC, r.id DESC LIMIT 1", (alias, since.isoformat() if since else "")).fetchone()
+
+
+def _reported(r) -> str:
+    return f"{format_idr(r['balance'])}, dilaporkan {r['as_of']} pukul {r['at'][11:16]} WIB"
+
+
+def record_account_balance(conn, today: date, alias: str, balance: int) -> str:
+    """Store a balance the owner read in the bank app (gross, as shown) and say whether the auto-debits still to come fit."""
+    check_idr(balance)
+    if balance < 0:
+        raise ValueError("saldo tidak boleh negatif")
+    acct = conn.execute("SELECT id FROM accounts WHERE alias=?", (alias,)).fetchone()
+    if acct is None:
+        raise ValueError(f"rekening {alias} belum terdaftar (lihat ringkasan_data)")
+    conn.execute("INSERT INTO balance_reports(account_id, as_of, at, balance) VALUES (?,?,?,?)",
+                 (acct["id"], today.isoformat(), datetime.now(WIB).isoformat(timespec="minutes"), balance))
+    conn.commit()
+    out = f"Saldo {alias} {_reported(latest_balance(conn, alias))}. " + format_autodebit_check(autodebit_check(conn, alias, balance, today))
+    if current_payday(today) <= today:   # the payday days: a balance read before the salary transfers still holds their money
+        out += " Angka ini hanya benar bila semua transfer gajian sudah dilakukan; bila belum, laporkan lagi setelah transfer."
+    return out
 
 
 def plan_to_dict(plan: Plan) -> dict:
@@ -838,6 +912,11 @@ def generate_payday_plan(conn, today: date, payday: date | None = None,
             + (f"; ditambah saldo minimum yang ditahan bank {format_idr(held)}" if held else "")
             + f". Pastikan saldo minimal {format_idr(total)} sebelum {first}"
             + (f" dan jangan dipakai sampai {last}" if last != first or held else "") + "; tidak perlu transfer ke kreditur.")
+        rep = latest_balance(conn, acct, since=payday) if acct else None
+        if rep:     # a balance the owner read since this payday, checked by code; older ones say nothing about this window
+            snap["reminders"].append(
+                f"SALDO {acct} yang dilaporkan pemilik: {_reported(rep)} (benar bila dibaca setelah transfer gajian). "
+                + format_autodebit_check(autodebit_check(conn, acct, rep["balance"], date.fromisoformat(rep["as_of"]), hol)))
     for f in conn.execute("SELECT * FROM sinking_funds"):
         due = date.fromisoformat(f["due_date"])
         s = sinking_required(conn, f, payday, hol)
@@ -869,7 +948,9 @@ def generate_payday_plan(conn, today: date, payday: date | None = None,
             if pr["gap"] > 0:
                 snap["warnings"].append(
                     f"{f['alias']}: dengan pola ini pot diperkirakan KURANG {format_idr(pr['gap'])} pada {f['due_date']}. Pilihan: kurangi "
-                    "langganan/belanja, tambah pemasukan, hitung gaji di hari tenggat, atau bicarakan jadwal dengan penerima.")
+                    "langganan/belanja, tambah pemasukan, "
+                    # once the salary on the due date is counted, suggesting it again would offer nothing new
+                    + ("" if f["due_payday"] else "hitung gaji di hari tenggat, ") + "atau bicarakan jadwal dengan penerima.")
     # the living money goes to the owner's daily account (he spends only from there); kept outside `transfers`, which hold
     # the salary's obligations, so the cash kept and the spending pace still read the living money as before
     normal = get_threshold(conn, "living_reserve") or 0

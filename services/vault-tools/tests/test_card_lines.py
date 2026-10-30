@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from datetime import date
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -248,6 +249,60 @@ class Recovery(unittest.TestCase):
         self.assertEqual(conn.execute("SELECT amount, kind FROM card_lines WHERE description LIKE 'Pembayaran (dari%'").fetchone()[:], (-445_077, "pembayaran"))
 
 
+class PerCard(unittest.TestCase):
+    """Usulan #2 (2026-10-28): "apa aja yang di CIMB Niaga" needs one card's lines, not all cards together."""
+    def world(self):
+        conn = card_world()
+        cl.store(conn, add_statement(conn), cl.parse_text(STATEMENT, date(2026, 10, 12)))
+        tools.upsert_card(conn, "cimb-9", "CIMB", "9888", 5, 25, 10_000_000)
+        sid = record_statement(conn, "cimb-9", "b" * 64, "2026-10-05", "2026-10-25", 0, 0, 1_234_567, 0, 1_234_567, 50_000)["statement_id"]
+        cl.store(conn, sid, cl.parse_text("20-SEP 20-SEP TOKO VA 8808123456789 JAKARTA 1.234.567", date(2026, 10, 5)))
+        return conn
+
+    def test_the_summary_can_be_one_card(self):
+        conn = self.world()
+        self.assertEqual(sorted(cl.summary(conn)["by_month"]["2026-10"]["cards"]), ["bca-1", "cimb-9"])
+        one = cl.summary(conn, 3, "cimb-9")
+        self.assertEqual(one["by_month"]["2026-10"]["cards"], ["cimb-9"])
+        self.assertEqual(sum(one["by_month"]["2026-10"]["kinds"].values()), 1_234_567)
+        with self.assertRaisesRegex(ValueError, "belum terdaftar"):
+            cl.summary(conn, 3, "ghost")
+
+    def test_every_line_of_one_statement_with_long_numbers_masked(self):
+        conn = self.world()
+        text = cl.format_detail(cl.card_detail(conn, "cimb-9"))
+        self.assertIn("cetak 2026-10-05, jatuh tempo 2026-10-25, total Rp 1.234.567, minimum Rp 50.000", text)
+        self.assertIn("semua baris terbaca dan cocok", text)
+        self.assertIn("- 2026-09-20 | TOKO VA [angka] JAKARTA | Rp 1.234.567", text)
+        self.assertNotIn("8808123456789", text)
+        bca = cl.format_detail(cl.card_detail(conn, "bca-1"))
+        self.assertEqual(bca.count("\n- "), 10)
+        self.assertIn("Per jenis: belanja Rp 3.040.845; langganan Rp 99.510; cicilan Rp 289.853; bunga Rp 150.928; "
+                      "biaya Rp 215.502; dibayar Rp 727.869", bca)
+        self.assertIn("| PEMBAYARAN - MBCA | Rp 727.869 kredit | pembayaran", bca)
+        self.assertNotIn("8808", bca)
+
+    def test_a_long_statement_is_cut_with_the_rest_summed(self):
+        conn = self.world()
+        with mock.patch.object(cl, "DETAIL_MAX", 3):
+            text = cl.format_detail(cl.card_detail(conn, "bca-1"))
+        self.assertEqual(text.count("\n- "), 3)
+        self.assertIn("... dan 7 baris lain: tagihan Rp 3.249.783, kredit Rp 727.869", text)
+
+    def test_a_month_without_a_statement_and_bad_input(self):
+        conn = self.world()
+        self.assertIn("belum ada tagihan tersimpan yang dicetak 2026-09", cl.format_detail(cl.card_detail(conn, "bca-1", "2026-09")))
+        with self.assertRaisesRegex(ValueError, "YYYY-MM"):
+            cl.card_detail(conn, "bca-1", "Oktober")
+        with self.assertRaisesRegex(ValueError, "belum terdaftar"):
+            cl.card_detail(conn, "ghost")
+
+    def test_a_statement_whose_lines_do_not_add_up_says_so(self):
+        conn = card_world()
+        cl.store(conn, add_statement(conn), cl.parse_text(STATEMENT, date(2026, 10, 12))[1:])
+        self.assertIn("baris BELUM cocok dengan total (selisih Rp 125.000)", cl.format_detail(cl.card_detail(conn, "bca-1")))
+
+
 @unittest.skipUnless(HAVE_SERVER, "mcp/starlette not installed")
 class ThroughTheTools(unittest.TestCase):
     def test_recording_a_statement_reads_its_lines_without_the_model(self):
@@ -267,6 +322,11 @@ class ThroughTheTools(unittest.TestCase):
             self.assertRegex(out, r"lines.{0,8}10")
             self.assertIn("cocok", out)
             self.assertIn("game-digital", json.dumps(call("belanja_kartu", {})))
+            one = json.dumps(call("belanja_kartu", {"kartu": "bca-1"}))
+            self.assertIn("TAGIHAN BCA", one)
+            self.assertIn("PER SIKLUS, KARTU INI SAJA", one)
+            with self.assertRaises(Exception):
+                call("belanja_kartu", {"bulan": "2026-10"})
 
 
 if __name__ == "__main__":

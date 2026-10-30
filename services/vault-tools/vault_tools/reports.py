@@ -280,12 +280,14 @@ def _periksa(conn, today: date) -> str:
 
 
 def _usulan(conn, today: date) -> str:
-    rows = conn.execute("SELECT id, created_at, title, detail, status FROM feature_requests ORDER BY CASE status WHEN 'baru' THEN 0 WHEN 'dikerjakan' THEN 1 ELSE 2 END, id DESC LIMIT 15").fetchall()
+    rows = conn.execute("SELECT id, created_at, title, detail, status, resolution FROM feature_requests ORDER BY CASE status WHEN 'baru' THEN 0 WHEN 'dikerjakan' THEN 1 ELSE 2 END, id DESC LIMIT 15").fetchall()
     if not rows:
         return f"💡 {b('Usulan')}\nBelum ada. Kalau saya menabrak batas, saya catat di sini agar bisa dibuatkan."
     mark = {"baru": "🆕", "dikerjakan": "🔧", "selesai": "✅", "ditolak": "⛔"}
     out = [f"💡 {b('Usulan kemampuan baru')}\n<i>Saya tidak bisa mengubah alat sendiri; usulan ini menunggu dikerjakan manusia.</i>"]
-    out += [f"{mark[r['status']]} {b('#' + str(r['id']) + ' ' + r['title'])}\n    {e(r['detail'][:200])}\n    <i>{e(r['status'])} · {e(tgl(r['created_at']))}</i>" for r in rows]
+    out += [f"{mark[r['status']]} {b('#' + str(r['id']) + ' ' + r['title'])}\n    {e(r['detail'][:200])}"
+            + (f"\n    ➡️ {e(r['resolution'][:400])}" if r["resolution"] else "")
+            + f"\n    <i>{e(r['status'])} · {e(tgl(r['created_at']))}</i>" for r in rows]
     return "\n\n".join(out)
 
 
