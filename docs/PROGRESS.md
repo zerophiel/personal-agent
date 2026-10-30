@@ -1,6 +1,6 @@
 # Progress and resume point (finance / vault)
 
-Last updated: 2026-10-28. Branch `worktree-m1-skeleton`, draft PR #1. 221 vault-tools tests pass.
+Last updated: 2026-10-30. Branch `worktree-m1-skeleton`, draft PR #1. 333 vault-tools tests pass.
 No secrets or personal amounts are recorded here; the numbers live in the ledger on the VPS.
 
 ## Done
@@ -10,7 +10,8 @@ No secrets or personal amounts are recorded here; the numbers live in the ledger
 - Card statements recorded for all 7 cards (BCA/Jenius/CIMB/Mandiri Jan-Oct, HSBC Feb-Oct, DBS 3, Mega 2). Reconciliation tolerates Rp 3 (cents).
 - Card installments (x/y): 10 active, tracked per scanned statement; they count in the roadmap and shrink card capacity. Subscriptions table (active/ended/unsure).
 - Owner answers applied: pot for the friend's debt stays 9M/month; salary 42M net, no other income; house/gold proceeds are NOT the owner's (spouse handles them); car installment 5.706.000 incl. admin; Apple One, Spotify, Microsoft, gym (child), Telkomsel are active recurring costs.
-- `living_reserve` = Rp 7.500.000 (owner approved 2026-10-28): cash daily living only; median Jan-Sep cash living ~7.4M with the Sep hospital stay marked `sekali:medis`. Card spending is controlled separately by the budgets below.
+- `living_reserve` = Rp 7.546.005 (owner's choice via the bot on 2026-10-28 18:40: September's living cost; first approved
+  7.500.000): cash daily living only; median Jan-Sep cash living ~7.4M with the Sep hospital stay marked `sekali:medis`. Card spending is controlled separately by the budgets below.
 - Oct BCA mutation CSV recorded (39 rows, reconciled). Jago has no Oct statement (owner barely uses it); Mandiri through 26 Oct.
 - Owner-explained names are stored as `category_keywords` in the ledger (teachers -> `wajib:les`), never in the repo.
 
@@ -23,7 +24,7 @@ Biggest avoidable costs: game/digital top-ups (PlayStation, Steam, Apple non-One
 Fixed this session: the current bill is the latest by statement date; the same card+statement date is one bill (duplicates from email + Telegram).
 
 ## Payday 30 Oct 2026: scenario A (owner approved 2026-10-28)
-Owner paid BCA 1.538.834 on 28 Oct from Mandiri (recorded) and holds ~5.06M in Mandiri, which counts as part of the 7.5M daily cash. One-off `living_reserve_override` = 2.438.834 until 2026-10-31 (`reserve_for`); from the Nov payday the normal 7.5M applies again by itself. Effect: Jenius paid in full (6.361.689 + minimum on 10 Nov), HSBC +1.179.205, other cards minimum; card interest next month ~173k instead of ~309k; card balance ~10.6M, cleared ~Jul 2027 (was ~Oct 2027). SPayLater autodebit day 1 (270k x 5, Nov-Mar), car autodebit day 2; salary must land in Mandiri on 30 Oct. The plan's "jatah harian" for this cycle shows only the 2.44M part; real daily cash is the full 7.5M.
+Owner paid BCA 1.538.834 on 28 Oct from Mandiri (recorded); the living cash he still holds counts toward this payday's living money (since 2026-10-30 stored as the owner's own figure `living_leftover`, see "Leftover living cash as a fact" below; the derived `living_reserve_override` is gone). Effect at the time: Jenius paid in full (6.361.689 + minimum on 10 Nov), HSBC +1.179.205, other cards minimum; card interest next month ~173k instead of ~309k; card balance ~10.6M, cleared ~Jul 2027 (was ~Oct 2027). SPayLater autodebit day 1 (270k x 5, Nov-Mar), car autodebit day 2; salary must land in Mandiri on 30 Oct. The plan's living transfer for this cycle is only the part taken from the salary; real daily cash is the full `living_reserve`.
 Roadmap now subtracts confirmed subscriptions and grows the card-clearing capacity as installments, the pot and the car end.
 
 ## Telegram bot (vault) 2026-10-28
@@ -55,7 +56,7 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 - Pot pattern `sisa` (cards first, pot takes the rest), set on `hutang-teman` (owner asked for small-first, growing deposits and
   never being squeezed). Real data: cards clean after the Dec 2026 bill, card interest ~23k total (even 9M: ~7.2M interest,
   cards at ~33M). Projection on 31 Jan 2028: 121.437.703, short 13.562.297; counting the 31 Jan 2028 salary (Monday, the due
-  date itself; `due_payday`, NOT set: owner's decision): 133.539.315, short 1.460.685. Card spending beyond the 7.5M living money
+  date itself; `due_payday`, NOT set: owner's decision): 133.539.315, short 1.460.685. Card spending beyond the living money
   is the big risk (+1M/month -> short 27.6M).
 - Emergency fund: `emergency_target` 3M, `emergency_monthly` 500k, `emergency_saved` set only via `dana_darurat(saldo)`.
 - New tools: `periksa_data` (+ `/periksa`; also feeds "Data:" warnings into the payday plan), `saldo_pot`, `dana_darurat`,
@@ -87,6 +88,26 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   screenshot was stored twice after /new; corrected in the ledger, nothing deleted). Transfers to own accounts are not spending.
 - Owner decided on 2026-10-28 (via the bot) to count the 31 Jan 2028 salary: `due_payday=1`; projection 133.539.315, short 1.460.685.
 
+## Leftover living cash as a fact; subscription notes kept (2026-10-30)
+- Bug: `sisa_uang_harian` stored a derived top-up (`living_reserve_override` = living money - leftover). When the owner later
+  changed `living_reserve` (7.500.000 -> 7.546.005) the 30 Oct plan #53 said "move 4.940.162", a figure he never had;
+  following it would have left Mandiri 46.005 short of the auto-debits (SPayLater 1 Nov + car 2 Nov + 100.000 the bank holds).
+- Fix: the owner's figure is stored (`living_leftover`, `_payday`, `_at`; blocked in `set_threshold`); the salary part
+  (`living_reserve` - leftover) is computed when the plan is made; invariant: salary part + leftover = living money, amount to
+  move = the owner's figure. A leftover above a month of living money is refused (the salary was counted in);
+  `jumlah_lain` adds the daily account, summed by code. The living reminder and `/rincian` say how much each auto-debit account
+  must keep. SOUL: the living money is read from `ringkasan_data` (UANG HARIAN SEBULAN), never a remembered number; on the 1st
+  the leftover just before the salary is always confirmed again.
+- Bug: right after a context compaction (three in 6 minutes, 28 Oct 18:51-18:57) the bot rewrote subscription notes it no
+  longer remembered; `upsert` replaced note/end even when not given and cut notes at 120 characters. Fix: an empty field keeps
+  what is stored, "" clears, notes up to 300 characters (longer is refused, not cut); SOUL: stored notes come from the owner.
+- Data (backup `ledger.db.bak-pre-leftover-fix`): leftover 4.894.157 (Mandiri, usable, reported 28 Oct) for payday
+  2026-10-30, override keys removed; notes of apple-one, microsoft, domain-squarespace, squarespace-workspace and coway-cs
+  restored from the bot's own 18:51 output, the "rencana pindah ke Jenius" marker kept. Plan #54: 2.651.848 from the salary to
+  the daily account, move 4.894.157, transfers 39.348.152 + cash 2.651.848 = 42.000.000; Mandiri ends at exactly 6.076.000;
+  unfunded DBS 696.020 (+46.005) and CIMB 1.631.853; pot projection 132.732.499, short 2.267.501 (sisa pattern, due-date
+  salary counted).
+
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
 2. Closing the pot gap without the children's needs: games (owner's own), apps not marked `wajib`, or talking to the friend.
@@ -98,8 +119,9 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 6. Listrik and internet as fixed expenses (due day, how paid); sender allowlist (CIMB collections address) only with the owner.
 
 ## Next steps
-- Owner: `/new` in Telegram. On 1 Nov ask for the payday list and give the leftover living cash; after paying, tell the bot (card
-  payments, pot balance, emergency fund balance).
+- Owner: `/new` in Telegram (vault restarted 2026-10-30 with the new SOUL and tool). On 1 Nov ask for the payday list; the bot
+  asks again on purpose for the leftover living cash just BEFORE the salary (Mandiri usable + daily account); after paying, tell
+  the bot (card payments, pot balance, emergency fund balance).
 - After the November statements: calibration per `docs/calibration.md` (Google One, Apple, Coway, bot quality, spend).
 - Remaining plan: M3 front/control/applier, M4 comms, M2 gate checks (`docs/assumptions.md`).
 

@@ -9,7 +9,7 @@ the model or the data drifted.
 - `docs/PROGRESS.md` (open questions, last calibration), open PR, `git log`.
 - Owner's rules that are not negotiable (also in `services/hermes/vault/SOUL.md`): anything for the children (school, lessons,
   Rockstar Gym = Gracia's gym) is never proposed as a cut; games are the owner's own spending; apps: ask per app; living money
-  Rp 7.5 juta is protected; the owner pays everything on the 1st and wants no proactive reminders.
+  (`living_reserve`, the owner's choice: Rp 7.546.005 since 2026-10-28) is protected; the owner pays everything on the 1st and wants no proactive reminders.
 
 ## 2. Spend and quality (read-only)
 - `ops/calibration/bot_usage.py`: cost per day and source at list prices. Hermes shows `cost_status: unknown` for
