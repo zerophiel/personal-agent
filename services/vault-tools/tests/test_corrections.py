@@ -374,7 +374,7 @@ class Migration(unittest.TestCase):
                               " INSERT INTO feature_requests(created_at,title,detail) VALUES ('2026-10-28','x','y'); PRAGMA user_version = 11;")
             old.close()
             conn = connect(path)
-            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 12)
+            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 13)
             self.assertEqual(conn.execute("SELECT title, resolution FROM feature_requests").fetchone()[:], ("x", None))
             for t in ("change_log", "balance_reports"):
                 self.assertTrue(conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (t,)).fetchone(), t)

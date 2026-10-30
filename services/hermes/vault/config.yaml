@@ -38,8 +38,10 @@ auxiliary:
     model: claude-sonnet-5-5
 
 compression:
-  threshold_tokens: 60000
+  threshold_tokens: 100000     # was 60000: three compactions in six minutes lost the owner's answers (re-asked questions)
   idle_compact_after_seconds: 1800
+  protect_first_n: 0           # default 3 pinned a stale session opening above every later summary
+  min_tail_user_messages: 3    # default 1: the owner's last answers stay verbatim, not only in the summary
 
 memory:
   memory_enabled: false      # financial facts live in the ledger, never in Hermes memory

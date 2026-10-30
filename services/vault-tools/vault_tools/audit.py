@@ -3,7 +3,7 @@ quietly flowing into a plan. No model judgement: each finding is a fixed rule ov
 
 - a statement whose totals do not reconcile, or whose lines (read by code from the PDF) do not add up to them;
 - a card whose next statement should already be here;
-- a bill past its due date that is not recorded as paid;
+- a bill past its due date whose minimum is not recorded as paid (a rest carried after the minimum only earns interest);
 - a subscription whose recorded monthly amount differs from what the cards actually charged, or that was not charged;
 - a charge that repeats every month but is not recorded as a subscription;
 - a card instalment that no longer appears on the card's latest statement;
@@ -69,7 +69,8 @@ def run(conn, today: date) -> list[tuple[str, str]]:
                 out.append(("bad", f"Kartu {r['alias']}: tagihan jatuh tempo {r['due_date']} belum tercatat dibayar minimal "
                                    f"{format_idr(r['minimum_due'])}. Kalau sudah dibayar, catat dengan record_card_payment."))
             else:
-                out.append(("warn", f"Kartu {r['alias']}: sisa {format_idr(owed)} dari tagihan jatuh tempo {r['due_date']} belum tercatat lunas (berbunga)."))
+                out.append(("info", f"Kartu {r['alias']}: minimum tagihan jatuh tempo {r['due_date']} sudah terpenuhi (tidak telat, "
+                                    f"tidak ada denda); sisa {format_idr(owed)} dibawa ke tagihan berikutnya dan berbunga."))
     # 4. and 5. subscriptions against what the cards charged in the latest cycle
     cycle = _latest_cycle(conn)
     if cycle:

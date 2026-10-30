@@ -167,7 +167,9 @@ class CardPayments(unittest.TestCase):
         return tools.record_card_payment(self.conn, TODAY, "bca-1", amount)
 
     def test_partial_then_full_payment(self):
-        self.assertEqual(self.pay(3_000_000), "bca-1: dibayar Rp 3.000.000 dari Rp 8.000.000; sisa Rp 5.000.000.")
+        self.assertEqual(self.pay(3_000_000), "bca-1: dibayar Rp 3.000.000 dari Rp 8.000.000 (minimum Rp 800.000); minimum sudah "
+                                              "terpenuhi: tidak telat, tidak ada denda. Sisa Rp 5.000.000 dibawa ke tagihan berikutnya "
+                                              "dan berbunga ±Rp 137.500/bulan.")
         row = self.conn.execute("SELECT paid_amount, paid_at FROM statements").fetchone()
         self.assertEqual((row["paid_amount"], row["paid_at"]), (3_000_000, None))
         self.assertEqual(self.pay(5_000_000), "bca-1: LUNAS.")

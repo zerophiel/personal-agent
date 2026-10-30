@@ -6,7 +6,8 @@ above a bill; the living money is never used for saving-type items (emergency fu
 savings); with a leftover the owner reported, salary part + leftover = the living money; a shortfall is never reported
 for money that was paid.
 Simulation: per cycle nothing is negative and no more than the bill is paid; the card balances add up over the whole run
-(open bills + new charges + gaps + interest - payments = what is left); a pot never exceeds its target."""
+(open bills + new charges + gaps + interest - payments - payments from outside the salary = what is left); a pot never
+exceeds its target."""
 from __future__ import annotations
 
 ABOVE_RESERVE_REASONS = ("dana darurat", "transfer pool", "setoran pot (sisa setelah kartu)",
@@ -57,14 +58,14 @@ def plan_errors(snap: dict, bills: dict[str, int] | None = None) -> list[str]:
 def simulation_errors(r: dict) -> list[str]:
     errs = []
     for row in r["rows"]:
-        for key in ("cash", "due", "paid", "balance", "interest", "ef", "pot", "free", "short", "new"):
+        for key in ("cash", "due", "paid", "balance", "interest", "ef", "pot", "free", "short", "new", "outside"):
             if not _whole(row[key]) or row[key] < 0:
                 errs.append(f"{row['month']}: {key} tidak valid: {row[key]!r}")
         if row["paid"] > row["due"]:
             errs.append(f"{row['month']}: kartu dibayar {row['paid']} > tagihan {row['due']}")
         if row["cash"] != row["ef"] + row["pot"] + row["paid"] + row["free"]:
             errs.append(f"{row['month']}: kas tidak habis terbagi")
-    left = r["start_balance"] + sum(x["new"] + x["short"] + x["interest"] - x["paid"] for x in r["rows"])
+    left = r["start_balance"] + sum(x["new"] + x["short"] + x["interest"] - x["paid"] - x["outside"] for x in r["rows"])
     if r["rows"] and left != r["rows"][-1]["balance"]:
         errs.append(f"saldo kartu tidak seimbang: {left} != {r['rows'][-1]['balance']}")
     for f in r["funds"]:

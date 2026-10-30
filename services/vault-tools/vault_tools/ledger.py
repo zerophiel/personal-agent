@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timedelta, timezone
 
-SCHEMA_VERSION = 12  # 12: change_log, balance_reports, feature_requests.resolution; 11: subscriptions.ends/essential, sinking_funds.pace/due_payday; 10: card_lines, doc_files, statements.lines_status/lines_diff, sinking_funds.low_*; 9: card_installments, skipped_files; 8: statements.paid_amount; 7: cards.interest_bp_month; 6: transactions.merged_into, net_snapshots; 5: debts.pay_method/pay_to_alias/debit_account_alias; 2: cards.pay_method/pay_to_alias; 3: transaction dedupe, mutation_files, category_rules; 4: sinking_funds
+WIB = timezone(timedelta(hours=7))
+
+SCHEMA_VERSION = 13  # 13: card_payments, debt_payments, plan_progress, fund_reports; 12: change_log, balance_reports, feature_requests.resolution; 11: subscriptions.ends/essential, sinking_funds.pace/due_payday; 10: card_lines, doc_files, statements.lines_status/lines_diff, sinking_funds.low_*; 9: card_installments, skipped_files; 8: statements.paid_amount; 7: cards.interest_bp_month; 6: transactions.merged_into, net_snapshots; 5: debts.pay_method/pay_to_alias/debit_account_alias; 2: cards.pay_method/pay_to_alias; 3: transaction dedupe, mutation_files, category_rules; 4: sinking_funds
 
 
 def _money(col: str, nullable: bool = False) -> str:
@@ -103,6 +106,18 @@ CREATE TABLE IF NOT EXISTS change_log (   -- rows changed or removed by hand: th
 CREATE TABLE IF NOT EXISTS balance_reports (   -- an account balance as the owner read it in the bank app (not a mutation file)
   id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL REFERENCES accounts(id),
   as_of TEXT NOT NULL, at TEXT NOT NULL, {_money('balance')} NOT NULL);
+CREATE TABLE IF NOT EXISTS card_payments (   -- each payment towards a statement, dated: a plan subtracts only those made BEFORE its payday
+  id INTEGER PRIMARY KEY, statement_id INTEGER NOT NULL REFERENCES statements(id), paid_on TEXT NOT NULL,
+  {_money('amount')} NOT NULL CHECK (amount > 0), created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS debt_payments (   -- an instalment recorded as paid (early by hand, or an auto-debit the owner reported)
+  id INTEGER PRIMARY KEY, debt_alias TEXT NOT NULL, due_date TEXT NOT NULL, {_money('amount')} NOT NULL,
+  paid_on TEXT NOT NULL, how TEXT NOT NULL CHECK (how IN ('manual','autodebit')), created_at TEXT NOT NULL,
+  UNIQUE (debt_alias, due_date));
+CREATE TABLE IF NOT EXISTS plan_progress (   -- a transfer of a payday's plan the owner said is done (cards: card_payments)
+  payday TEXT NOT NULL, item TEXT NOT NULL, {_money('amount')} NOT NULL, done_on TEXT NOT NULL, created_at TEXT NOT NULL,
+  PRIMARY KEY (payday, item));
+CREATE TABLE IF NOT EXISTS fund_reports (   -- emergency fund / pot balances as the owner read them: a plan uses the last one BEFORE its payday
+  id INTEGER PRIMARY KEY, fund TEXT NOT NULL, reported_on TEXT NOT NULL, {_money('balance')} NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS subscriptions (
   alias TEXT PRIMARY KEY, name TEXT NOT NULL, {_money('amount')} NOT NULL,   -- IDR per month (USD ones: approximate)
   source TEXT NOT NULL,                 -- card or account alias it is charged to
@@ -184,4 +199,25 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE subscriptions ADD COLUMN essential INTEGER NOT NULL DEFAULT 0 CHECK (essential IN (0,1))")
     if "resolution" not in {r["name"] for r in conn.execute("PRAGMA table_info(feature_requests)")}:              # v12
         conn.execute("ALTER TABLE feature_requests ADD COLUMN resolution TEXT")
+    _backfill_v13(conn)
     conn.commit()
+
+
+def _backfill_v13(conn: sqlite3.Connection) -> None:
+    """v13: payments and fund balances get dates. What was recorded before becomes one dated row each (once: a statement or fund
+    that already has rows is left alone). A card's latest statement is dated by paid_at, or today when only part is paid (all
+    such payments were made on or after the payday being planned); an older statement by paid_at or its due date."""
+    now = datetime.now(WIB)
+    today, at = now.date().isoformat(), now.isoformat(timespec="seconds")
+    conn.execute(
+        "INSERT INTO card_payments(statement_id, paid_on, amount, created_at)"
+        " SELECT s.id, COALESCE(substr(s.paid_at, 1, 10), CASE WHEN s.id = (SELECT id FROM statements WHERE card_id = s.card_id"
+        "   ORDER BY statement_date DESC, id DESC LIMIT 1) THEN ? ELSE s.due_date END), s.paid_amount, ?"
+        " FROM statements s WHERE s.paid_amount > 0 AND NOT EXISTS (SELECT 1 FROM card_payments p WHERE p.statement_id = s.id)",
+        (today, at))
+    if not conn.execute("SELECT 1 FROM fund_reports WHERE fund = 'darurat'").fetchone():
+        conn.execute("INSERT INTO fund_reports(fund, reported_on, balance, created_at) SELECT 'darurat', ?, value, ?"
+                     " FROM thresholds WHERE key = 'emergency_saved'", (today, at))
+    conn.execute("INSERT INTO fund_reports(fund, reported_on, balance, created_at)"
+                 " SELECT 'pot:' || alias, date(saved_asof, '-1 day'), saved_so_far, ? FROM sinking_funds f"
+                 " WHERE NOT EXISTS (SELECT 1 FROM fund_reports r WHERE r.fund = 'pot:' || f.alias)", (at,))

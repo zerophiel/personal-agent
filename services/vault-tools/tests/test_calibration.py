@@ -134,11 +134,21 @@ class Emergency(unittest.TestCase):
         text = rincian.build(conn, PayeeVault(conn, bytes(range(32))), snap)
         self.assertIn("Sisihkan ke dana darurat", text)
         self.assertIn("Rp 500.000", text)
-        self.assertIn("Rp 2.800.000 dari Rp 3.000.000", tools.set_emergency_balance(conn, 2_800_000))
+        before = date(2026, 10, 29)                                                  # read before the 30 Oct salary came in
+        self.assertIn("Rp 2.800.000 dari Rp 3.000.000", tools.set_emergency_balance(conn, 2_800_000, before))
         self.assertEqual(amounts(tools.generate_payday_plan(conn, NOV_1))["dana-darurat"], 200_000)    # only the last 200k
-        tools.set_emergency_balance(conn, 3_000_000)
+        tools.set_emergency_balance(conn, 3_000_000, before)
         self.assertNotIn("dana-darurat", amounts(tools.generate_payday_plan(conn, NOV_1)))
         self.assertIn("PENUH", tools.format_emergency(conn))
+
+    def test_a_balance_read_after_the_payday_is_that_salarys_deposit_not_a_smaller_plan(self):
+        conn = full_world()
+        tools.set_threshold(conn, "emergency_target", 3_000_000)
+        tools.set_threshold(conn, "emergency_monthly", 500_000)
+        tools.set_emergency_balance(conn, 2_800_000, date(2026, 10, 29))
+        tools.set_emergency_balance(conn, 3_000_000, date(2026, 10, 31))           # after depositing the 200k from this salary
+        self.assertEqual(amounts(tools.generate_payday_plan(conn, NOV_1))["dana-darurat"], 200_000)    # the plan stays
+        self.assertNotIn("dana-darurat", amounts(tools.generate_payday_plan(conn, date(2026, 11, 30))))  # next salary: full
 
     def test_once_the_pocket_number_is_registered_the_deposit_is_a_transfer_with_its_number(self):
         conn = full_world()

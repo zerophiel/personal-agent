@@ -1,14 +1,18 @@
 """What-if simulator: how the card bills, the pot and the emergency fund move over the coming pay cycles.
 
 Pure arithmetic over the ledger (no model). One row per pay cycle; cycle 1 is the payday a plan made today belongs to
-(the one just passed when the owner asks on the 1st). It works from the card STATEMENTS, so nothing is counted twice:
-- cycle 1 pays the statements that are open now; they already hold this month's card instalments, subscriptions,
-  purchases and interest;
+(the one just passed when the owner asks on the 1st), taken as the ledger stood BEFORE that payday, like its plan: what the
+owner paid from that salary is that cycle's own spending, not a smaller bill next to a still whole salary. It works from the
+card STATEMENTS, so nothing is counted twice:
+- cycle 1 pays the statements that were open on the payday, in the plan's order (minimums first, then the highest interest);
+  they already hold this month's card instalments, subscriptions, purchases and interest. A card paid beyond its planned
+  amount since then was paid with money outside the salary (`outside`): it lowers that card, never the cash;
 - each later cycle's statements = what was carried (+ interest) + that month's new charges: card instalments and
   subscriptions, plus card spending ON TOP of the living money (`belanja_kartu`). Card spending inside the living money is
   paid from it and nets out.
 Cash per cycle = salary - fixed costs - loan instalments - living money. It goes, in order, to the emergency fund, a set pot
-deposit (pattern 'rata'), the card statements (highest interest first), then the pot (pattern 'sisa': what is left). A cycle
+deposit (pattern 'rata'), the card statements (highest interest first), then the pot (pattern 'sisa': what is left, or at
+most a set amount while a deferral or a low start applies; the rest stays free). A cycle
 that cannot cover its bills leaves the rest on the cards, with interest. Interest is charged only on what is carried; a
 bank usually also charges it on new purchases while a balance is carried, so the real cost of carrying is higher."""
 from __future__ import annotations
@@ -18,10 +22,18 @@ from datetime import date
 from . import card_installments, invariants, subscriptions
 from .money import format_idr
 from .roadmap import add_months
-from .tools import (DEFAULT_CARD_INTEREST_BP, SINKING_BUFFER_DAYS, _low_cycles, _round_up, bp_of_idr, current_payday,
-                    emergency_status, get_threshold, id_holidays, reserve_for, sinking_paydays_left, sinking_saved)
+from .tools import (DEFAULT_CARD_INTEREST_BP, SINKING_BUFFER_DAYS, _low_cycles, _round_up, bp_of_idr, card_bills, card_rate,
+                    current_payday, debts_paid, emergency_status, get_threshold, id_holidays, payday_plan, reserve_for,
+                    sinking_paydays_left, sinking_saved)
 
 NEW_CHARGES = "tagihan-baru"     # the next statements' new charges: paid before any older carried balance
+
+
+def _sisa_cap(f: dict, k: int) -> int | None:
+    """The most a 'sisa' pot takes on cycle k while the scenario defers it (0) or starts it low; None = whatever is left.
+    Only the scenario caps it: the plan gives a 'sisa' pot all that is left, whatever schedule is stored."""
+    amount, n = f["cap"]
+    return amount if amount is not None and k <= n else None
 
 
 def _rata_deposit(f: dict, k: int) -> int:
@@ -53,41 +65,60 @@ def simulate(conn, today: date, *, belanja_kartu: int = 0, tunda_pot: int = 0, e
     if first is None:
         first = reserve_for(conn, payday)[0]          # the one-off override when the owner already holds last cycle's cash
         first = normal if first is None else first
-    debts = conn.execute("SELECT installment, tenor_left FROM debts WHERE tenor_left > 0").fetchall()
+    p = payday.isoformat()
+    paid_debts, debts = debts_paid(conn), []
+    for d in conn.execute("SELECT alias, installment, tenor_left FROM debts ORDER BY alias").fetchall():
+        done = paid_debts.get(d["alias"], {})
+        left = d["tenor_left"] + sum(1 for x in done.values() if x["paid_on"] >= p)       # instalments left as of the payday
+        ahead = {due[:7] for due, x in done.items() if x["paid_on"] < p}                 # months already paid before it
+        if left > 0:
+            debts.append({"installment": d["installment"], "left": left, "ahead": ahead})
     inst = card_installments.active(conn)
-    ef = emergency_status(conn)
+    ef = emergency_status(conn, payday)
     funds = []
     for f in conn.execute("SELECT * FROM sinking_funds ORDER BY due_date, alias").fetchall():
         on_due = f["due_payday"] if gaji_hari_tenggat is None else int(bool(gaji_hari_tenggat))
-        low = (f["low_amount"], _low_cycles(f, payday))
+        low, cap = (f["low_amount"], _low_cycles(f, payday)), (None, 0)
         if pot_awal is not None:
-            low = (pot_awal, pot_awal_bulan)
+            low = cap = (pot_awal, pot_awal_bulan)
         elif tunda_pot:
-            low = (0, tunda_pot)
-        saved = sinking_saved(conn, f)
-        funds.append({"alias": f["alias"], "target": f["target"], "due": f["due_date"], "pace": pola_pot or f["pace"], "low": low,
+            low = cap = (0, tunda_pot)
+        saved = sinking_saved(conn, f, payday)
+        funds.append({"alias": f["alias"], "target": f["target"], "due": f["due_date"], "pace": pola_pot or f["pace"], "low": low, "cap": cap,
                       "left": sinking_paydays_left(payday, date.fromisoformat(f["due_date"]), hol, 0 if on_due else SINKING_BUFFER_DAYS),
                       "saved": saved, "start": saved, "at_due": None, "deposits": []})
     for f in funds:
         if f["left"] == 0:
             f["at_due"] = f["saved"]
     default_rate = get_threshold(conn, "default_card_interest_bp", DEFAULT_CARD_INTEREST_BP)
-    bal, rate = {}, {}
-    for r in conn.execute(
-            "SELECT c.alias, s.total_due - s.paid_amount AS owed, c.interest_bp_month AS rate FROM statements s JOIN cards c ON c.id = s.card_id"
-            " WHERE s.id = (SELECT id FROM statements WHERE card_id = s.card_id ORDER BY statement_date DESC, id DESC LIMIT 1)"):
-        if r["owed"] > 0:
-            bal[r["alias"]] = r["owed"]
-            rate[r["alias"]] = r["rate"] if r["rate"] is not None else default_rate
+    bal, rate, minimum, due_on, paid_since = {}, {}, {}, {}, {}
+    for b in card_bills(conn, payday):              # the bills as they stood on the payday, like its plan
+        if b["owed"] > 0:
+            bal[b["alias"]] = b["owed"]
+            rate[b["alias"]] = card_rate(conn, b["interest_bp_month"])
+            minimum[b["alias"]], due_on[b["alias"]] = min(b["minimum"], b["owed"]), b["due_date"]
+            paid_since[b["alias"]] = b["paid_since"]
     rate[NEW_CHARGES] = max(list(rate.values()) + [default_rate])
     start_balance = sum(bal.values())
+    beyond = {}
+    if any(paid_since.values()):
+        # what the owner paid on a card beyond the plan's amount for it came from money outside the salary (30 Oct 2026: the
+        # rest of CIMB, from an account balance): it clears that much of the card, and the salary still goes as planned
+        planned: dict[str, int] = {}
+        for t in payday_plan(conn, payday, hol)[0].transfers:
+            planned[t.to_alias] = planned.get(t.to_alias, 0) + t.amount
+        beyond = {a: v - planned.get(a, 0) for a, v in paid_since.items() if v > planned.get(a, 0)}
     first_month = date(payday.year, payday.month, 1)
     ef_saved = ef["saved"] if ef else 0
     rows, interest_total, paid_off = [], 0, None
     for k in range(1, months + 1):
         month = add_months(first_month, k)                        # the month whose dues this cycle pays
         stmt = add_months(first_month, k - 1)                     # ... printed on the statements of the month before
-        loans = sum(d["installment"] for d in debts if k <= d["tenor_left"])
+        loans = 0
+        for d in debts:
+            if d["left"] > 0 and month.strftime("%Y-%m") not in d["ahead"]:
+                d["left"] -= 1
+                loans += d["installment"]
         cash = salary - fixed - loans - (first if k == 1 else normal) + (ekstra_sekarang if k == 1 else 0)
         new = 0
         if k > 1:                                                 # the statements of this cycle: what was carried + new charges
@@ -97,12 +128,26 @@ def simulate(conn, today: date, *, belanja_kartu: int = 0, tunda_pot: int = 0, e
                 bal[NEW_CHARGES] = bal.get(NEW_CHARGES, 0) + new
             else:
                 cash -= new                                       # savings beyond the new charges stay as cash
+        outside = 0
+        if k == 1:
+            for a, v in sorted(beyond.items()):
+                take = min(bal.get(a, 0), v)
+                if take:
+                    bal[a] -= take
+                    outside += take
         short = 0
         if cash < 0:                                              # the bills outrun the salary: the gap lands on a card
             short = -cash
             bal[NEW_CHARGES] = bal.get(NEW_CHARGES, 0) + short
             cash = 0
         due = sum(bal.values())
+        paid = 0
+        if k == 1:                                                # the plan's order: every minimum first
+            for a in sorted(minimum):
+                take = min(bal.get(a, 0), minimum[a], cash)
+                bal[a] -= take
+                cash -= take
+                paid += take
         ef_dep = 0
         if ef and ef_saved < ef["target"] and cash > 0:
             ef_dep = min(ef["monthly"], ef["target"] - ef_saved, cash)
@@ -116,15 +161,15 @@ def simulate(conn, today: date, *, belanja_kartu: int = 0, tunda_pot: int = 0, e
                 cash -= d
                 pot += d
                 f["deposits"].append(d)
-        paid = 0
-        for a in sorted(bal, key=lambda x: (-rate[x], x)):
+        for a in sorted(bal, key=lambda x: (-rate[x], due_on.get(x, "") if k == 1 else "", x)):
             take = min(bal[a], cash)
             bal[a] -= take
             cash -= take
             paid += take
         for f in funds:                                           # 'sisa': cards first, the pot takes what is left
             if f["pace"] == "sisa" and k <= f["left"]:
-                d = min(max(0, f["target"] - f["saved"]), cash)
+                cap = _sisa_cap(f, k)
+                d = min(max(0, f["target"] - f["saved"]), cash, cash if cap is None else cap)
                 f["saved"] += d
                 cash -= d
                 pot += d
@@ -146,7 +191,8 @@ def simulate(conn, today: date, *, belanja_kartu: int = 0, tunda_pot: int = 0, e
             paid_off = k
         rows.append({"k": k, "month": month.strftime("%Y-%m"), "cash": cash + ef_dep + pot + paid, "due": due, "paid": paid,
                      "balance": total, "interest": month_interest, "ef": ef_dep, "pot": pot,
-                     "pot_total": sum(f["saved"] for f in funds), "free": cash, "short": short, "new": max(0, new), "loans": loans})
+                     "pot_total": sum(f["saved"] for f in funds), "free": cash, "short": short, "new": max(0, new), "loans": loans,
+                     "outside": outside})
     out_funds = [{"alias": f["alias"], "target": f["target"], "due": f["due"], "pace": f["pace"], "paydays": f["left"],
                   "start": f["start"], "at_due": f["at_due"], "gap": (f["target"] - f["at_due"]) if f["at_due"] is not None else None,
                   "deposits": f["deposits"]} for f in funds]
@@ -203,7 +249,10 @@ def format_result(base: dict, sc: dict) -> str:
                if p["gaji_hari_tenggat"] is not None else ""]
     changed = [c for c in changed if c]
     lines = ["SKENARIO: " + ("; ".join(changed) if changed else "tanpa perubahan (kondisi sekarang)"),
-             f"Gajian pertama: {sc['payday']}; tagihan kartu terbuka yang dibayar dari gaji itu: {format_idr(sc['start_balance'])}"]
+             f"Gajian pertama: {sc['payday']} (dihitung dari data sebelum gaji itu masuk, sama dengan rencananya); tagihan kartu "
+             f"terbuka pada gajian itu: {format_idr(sc['start_balance'])}"
+             + (f", {format_idr(sc['rows'][0]['outside'])} di antaranya sudah dibayar dengan uang di luar gaji"
+                if sc["rows"] and sc["rows"][0]["outside"] else "")]
 
     def verdict(r):
         end = r["rows"][-1]["balance"]

@@ -109,8 +109,11 @@ Tujuan kita: bebas pinjaman dan keuangan yang membaik bertahap.
 def _rencana(conn, today: date) -> str:
     snap = tools.generate_payday_plan(conn, today)
     banks = _banks(conn)
+    prog = snap.get("progress") or {}
+    state = {it["to"]: it for it in prog.get("items", [])}
     out = [f"📅 {b('Rencana gajian ' + tgl(snap['payday']) + ' ' + str(date.fromisoformat(snap['payday']).year))}\n"
-           f"Gaji {b(format_idr(snap['salary']))} · berlaku sampai {tgl(snap['next_payday'])}"]
+           f"Gaji {b(format_idr(snap['salary']))} · berlaku sampai {tgl(snap['next_payday'])}\n"
+           "<i>Dihitung dari data sebelum gaji masuk; yang sudah dibayar ditandai ✅, rencananya tidak berubah.</i>"]
     by_date: dict[str, dict[str, dict]] = {}
     for t in snap["transfers"]:
         row = by_date.setdefault(t["date"], {}).setdefault(t["to_alias"], {"amount": 0, "notes": []})
@@ -128,12 +131,35 @@ def _rencana(conn, today: date) -> str:
                 notes = ["minimum + tambahan, BELUM lunas"] if partly else ["minimum + sisa tagihan, lunas"]
             elif "bayar penuh" in joined and partly:
                 notes = ["sebagian, BELUM lunas"]
+            it = state.get(alias)
+            mark = "" if not it or not it["done"] else "✅ " if it["done"] >= it["planned"] else "◐ "
+            if mark == "◐ ":
+                notes.append(f"sudah {format_idr(it['done'])}")
             note = "; ".join(notes)
-            rows.append(f"• {e(label(alias, banks))}: {b(format_idr(r['amount']))}" + (f" <i>({e(note)})</i>" if note else ""))
+            rows.append(f"• {mark}{e(label(alias, banks))}: {b(format_idr(r['amount']))}" + (f" <i>({e(note)})</i>" if note else ""))
         out.append(head + "\n" + "\n".join(rows))
-    if snap["unfunded"]:
-        rows = [f"• {e(label(u['to_alias'], banks))}: {b(format_idr(u['amount']))} <i>(bunga ± {e(format_idr(u['est_delay_cost']))}/bulan)</i>" for u in snap["unfunded"]]
-        out.append(f"⚠️ {b('Belum terdanai: sisa tagihan yang belum terbayar')}\n" + "\n".join(rows))
+    unf = prog.get("unfunded") or []
+    if unf:
+        min_short = {u["to"] for u in unf if u["reason"] == "tagihan kartu - minimum" and u["left"] > 0}
+        rows = []
+        for u in unf:
+            name = e(label(u["to"], banks))
+            if u["left"] <= 0:
+                rows.append(f"• ✅ {name}: {format_idr(u['amount'])} <i>(sudah dibayar dengan uang di luar gaji)</i>")
+                continue
+            part = f"; {format_idr(u['covered'])} sudah dibayar di luar gaji" if u["covered"] else ""
+            if u["reason"] == "tagihan kartu - minimum":
+                why = "MINIMUM belum terdanai: harus dibayar sebelum jatuh tempo agar tidak telat"
+            elif u["reason"] == tools.CARD_REST and u["to"] not in min_short:
+                why = (f"minimum terpenuhi, tidak telat dan tidak ada denda; sisa dibawa ke tagihan berikutnya, "
+                       f"bunga ± {format_idr(u['cost'])}/bulan")
+            else:
+                why = f"bunga ± {format_idr(u['cost'])}/bulan"
+            rows.append(f"• {name}: {b(format_idr(u['left']))} <i>({e(why + part)})</i>")
+        out.append(f"⚠️ {b('Belum terdanai dari gaji ini')}\n" + "\n".join(rows))
+    if prog.get("extra"):
+        out.append(f"➕ {b('Dibayar di luar rencana')} <i>(uang di luar gaji ini)</i>\n"
+                   + "\n".join(f"• {e(label(a, banks))}: {b(format_idr(v))}" for a, v in sorted(prog["extra"].items())))
     if snap.get("reminders"):
         out.append(f"📌 {b('Pengingat')}\n" + "\n".join(f"• {e(pretty(r, conn, banks))}" for r in snap["reminders"]))
     choices = [a for a in snap.get("advice", []) if a.startswith(("Opsi", "Jika tidak"))]
@@ -152,7 +178,7 @@ def _rencana(conn, today: date) -> str:
 
 def _tagihan(conn, today: date) -> str:
     rows = conn.execute(
-        "SELECT k.alias, s.due_date, s.total_due - s.paid_amount AS owed, MAX(0, s.minimum_due - s.paid_amount) AS minimum"
+        "SELECT k.alias, k.interest_bp_month AS rate, s.due_date, s.total_due - s.paid_amount AS owed, MAX(0, s.minimum_due - s.paid_amount) AS minimum"
         " FROM cards k JOIN statements s ON s.card_id = k.id WHERE s.id = (SELECT id FROM statements WHERE card_id = k.id"
         " ORDER BY statement_date DESC, id DESC LIMIT 1) ORDER BY s.due_date").fetchall()
     banks = _banks(conn)
@@ -164,11 +190,14 @@ def _tagihan(conn, today: date) -> str:
             out.append(f"✅ {b(name)}\n    Lunas")
             continue
         total += owed
+        if r["minimum"] == 0:       # the minimum is paid: nothing is due any more, the rest only earns interest
+            out.append(f"🔵 {b(name)}\n    {e(tools.bill_status(owed, 0, tools.card_rate(conn, r['rate'])))}")
+            continue
         days = (date.fromisoformat(r["due_date"]) - today).days
         icon = "🔴" if days <= 3 else "🟡" if days <= 10 else "🟢"
         when = f"{tgl(r['due_date'])} ({days} hari lagi)" if days >= 0 else f"{tgl(r['due_date'])} (LEWAT {-days} hari)"
         out.append(f"{icon} {b(name)}\n    Sisa {b(format_idr(owed))} · minimum {e(format_idr(r['minimum']))}\n    Jatuh tempo {e(when)}")
-    out.append(f"🧾 {b('Total sisa: ' + format_idr(total))}\n<i>🔴 ≤ 3 hari · 🟡 ≤ 10 hari · 🟢 lebih lama</i>")
+    out.append(f"🧾 {b('Total sisa: ' + format_idr(total))}\n<i>🔴 ≤ 3 hari · 🟡 ≤ 10 hari · 🟢 lebih lama · 🔵 minimum sudah dibayar</i>")
     return "\n\n".join(out)
 
 

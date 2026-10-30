@@ -9,7 +9,7 @@ from datetime import date
 
 from . import card_installments
 from .money import format_idr
-from .tools import current_payday, get_threshold, id_holidays, sinking_required
+from .tools import current_payday, debts_paid, get_threshold, id_holidays, sinking_required
 
 MAX_MONTHS = 36
 
@@ -33,8 +33,11 @@ def roadmap(conn, today: date) -> dict:
     payday = current_payday(today, hol)
     items, freed, fund_aliases = [], [], set()
 
+    paid = debts_paid(conn)
     for d in conn.execute("SELECT * FROM debts WHERE tenor_left > 0 ORDER BY alias"):
         first = next_due(d["due_day"], today)
+        while first.isoformat() in paid.get(d["alias"], {}):    # paid ahead: tenor_left already counts it off
+            first = add_months(first, 1, d["due_day"])
         last = add_months(first, d["tenor_left"] - 1, d["due_day"])
         items.append({"kind": "cicilan", "alias": d["alias"], "remaining": d["tenor_left"] * d["installment"],
                       "ends": last.isoformat(), "per_month": d["installment"], "detail": f"{d['tenor_left']} angsuran lagi"})

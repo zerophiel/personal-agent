@@ -78,7 +78,7 @@ def amounts_of(plan, alias):
 
 
 class Advice(unittest.TestCase):
-    def test_pay_one_card_in_full_partly_pay_the_other_with_cost_and_option_a(self):
+    def test_pay_one_card_in_full_partly_pay_the_other_and_never_offer_cutting_the_living_money(self):
         conn = world()
         snap = tools.generate_payday_plan(conn, TODAY)
         self.assertEqual(amounts(snap, "bca-1"), [800_000, 7_200_000])        # highest rate: cleared completely
@@ -88,7 +88,8 @@ class Advice(unittest.TestCase):
         self.assertIn("bca-1: LUNASI Rp 8.000.000. Tidak ada bunga.", text)
         self.assertIn("cimb-1: bayar sebagian Rp 5.000.000 dari Rp 6.000.000 (minimum Rp 600.000). "
                       "Sisa Rp 1.000.000 berbunga sekitar Rp 22.500 bulan depan (2.25%/bulan).", text)
-        self.assertIn("Opsi A: kurangi cadangan harian Rp 1.000.000 untuk melunasi lebih banyak (hemat bunga sekitar Rp 22.500)", text)
+        self.assertNotIn("cadangan harian", text)                              # owner rule: the living money is never cut
+        self.assertNotIn("Opsi A", text)
         self.assertIn("total bunga kartu bulan depan sekitar Rp 22.500", text)
         self.assertNotIn("Opsi B", text)                                       # no pot in this world
         self.assertIn("> bca-1: LUNASI", tools.summarize_plan(snap))
@@ -173,8 +174,10 @@ class DueBeforePayday(unittest.TestCase):
         conn.commit()
         tools.record_card_payment(conn, TODAY, "bca-1", 1_000_000)                          # more than the 800,000 minimum
         first = tools.generate_payday_plan(conn, TODAY)["reminders"][0]
-        self.assertTrue(first.startswith("INFO: tagihan bca-1 sudah memenuhi minimum; sisa Rp 7.000.000 jatuh tempo 2026-10-28"), first)
+        self.assertTrue(first.startswith("INFO: tagihan bca-1: minimum sudah terpenuhi: tidak telat, tidak ada denda. "
+                                         "Sisa Rp 7.000.000 dibawa ke tagihan berikutnya"), first)
         self.assertNotIn("MENDESAK", first)
+        self.assertNotIn("jatuh tempo", first)                                  # nothing is due once the minimum is paid
         self.assertNotIn("Rp 0", first)
 
     def test_bill_already_past_due_says_so(self):

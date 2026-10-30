@@ -44,7 +44,7 @@ MCP_TOOL_NAMES = ("upsert_card", "upsert_debt", "upsert_expense", "set_threshold
                   "record_card_installments", "card_installments_status", "pending_statements", "skip_statement_file",
                   "upsert_subscription", "subscriptions_status", "set_category_keyword", "link_card_payees", "ringkasan_data", "simulasi_skenario", "catat_usulan", "atur_jadwal_pot", "belanja_kartu",
                   "saldo_pot", "dana_darurat", "periksa_data", "sisa_uang_harian", "saldo_rekening", "daftar_belanja",
-                  "ubah_belanja", "hapus_belanja")
+                  "ubah_belanja", "hapus_belanja", "cicilan_dibayar", "transfer_selesai", "status_gajian")
 
 
 class Installment(BaseModel):
@@ -181,7 +181,7 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
         yang pemilik baca di aplikasi bank (setelah menyetor atau setelah memakainya). Target dan setoran per gajian diatur
         dengan set_threshold emergency_target / emergency_monthly, hanya setelah pemilik setuju."""
         if saldo is not None:
-            return tools.set_emergency_balance(conn, saldo)
+            return tools.set_emergency_balance(conn, saldo, today())
         return tools.format_emergency(conn)
 
     @mcp.tool()
@@ -205,7 +205,9 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
         """Simpan/ubah utang. Semua uang dalam Rupiah bulat; rate_bp = bunga TAHUNAN dalam basis poin.
         pay_method: 'autodebit' (kreditur mendebet rekening pemilik: isi debit_account_alias, rekening
         terdaftar via upsert_account; rencana hanya mengingatkan menjaga saldo) atau 'transfer' (isi
-        pay_to_alias, alias nomor rekening/VA dari /rekening atau /va)."""
+        pay_to_alias, alias nomor rekening/VA dari /rekening atau /va). tenor_left = sisa angsuran SETELAH yang sudah
+        tercatat dibayar. Angsuran yang dibayar dicatat dengan cicilan_dibayar (yang menurunkan tenor_left dan sisa utang
+        sendiri); jangan ubah tenor_left atau outstanding lewat alat ini untuk itu."""
         return tools.upsert_debt(conn, alias, lender, outstanding, installment, tenor_left,
                                  due_day, rate_bp, pay_method, pay_to_alias, debit_account_alias)
 
@@ -228,7 +230,8 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
     def generate_payday_plan(payday: str | None = None) -> str:
         """Hitung rencana gajian (deterministik). Tanpa payday: gajian yang sedang berjalan; sampai 7 hari setelah gajian
         (mis. pemilik bertanya tanggal 1) itu gajian yang BARU LEWAT, jadi daftar bayar tanggal 1 memakai gaji akhir bulan
-        lalu. payday opsional, format YYYY-MM-DD."""
+        lalu. payday opsional, format YYYY-MM-DD. Rencana dihitung dari data SEBELUM gaji masuk, jadi pembayaran sesudahnya
+        tidak mengecilkannya (gajinya sudah terpakai untuk itu); yang sudah dan belum dibayar: status_gajian."""
         snap = tools.generate_payday_plan(conn, today(), date.fromisoformat(payday) if payday else None)
         return tools.summarize_plan(snap)
 
@@ -520,11 +523,41 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
 
     @mcp.tool()
     @locked
-    def record_card_payment(card_alias: str, amount: int) -> str:
+    def record_card_payment(card_alias: str, amount: int, ulang: bool = False) -> str:
         """Catat bahwa pemilik SUDAH membayar kartu (penuh atau sebagian) untuk tagihan terbarunya. Wajib dipanggil
         setelah pemilik bilang sudah transfer/bayar, supaya rencana berikutnya tidak menagih saldo yang sudah dibayar
-        dan sisa tagihan terbawa dengan benar."""
-        return tools.record_card_payment(conn, today(), card_alias, amount)
+        dan sisa tagihan terbawa dengan benar. Jawabannya memuat status tagihan (mis. minimum sudah terpenuhi): sampaikan
+        kalimat itu apa adanya. Pembayaran dengan jumlah sama di hari yang sama ditolak sebagai dobel; ulang=true hanya
+        bila pemilik memastikan memang membayar dua kali."""
+        return tools.record_card_payment(conn, today(), card_alias, amount, ulang)
+
+    @mcp.tool()
+    @locked
+    def cicilan_dibayar(alias: str, jumlah: int, cara: str = "manual", jatuh_tempo: str | None = None) -> str:
+        """Catat SATU angsuran utang (cicilan mobil, SPayLater, dll.) yang SUDAH dibayar: cara 'manual' bila pemilik
+        membayar sendiri (sering lebih awal dari autodebet), 'autodebit' bila bank sudah memotongnya. jumlah = angsuran
+        penuh. jatuh_tempo (YYYY-MM-DD) opsional: tanpa itu, manual = angsuran berikutnya yang belum tercatat, autodebit =
+        yang terakhir jatuh tempo. Sisa angsuran dan sisa utang turun sendiri, dan rencana serta pengingat autodebet tidak
+        menghitungnya lagi. Bila pemilik sudah bilang caranya, jangan tanyakan lagi; jangan ubah tenor lewat upsert_debt."""
+        return tools.record_debt_payment(conn, today(), alias, jumlah, cara, jatuh_tempo)
+
+    @mcp.tool()
+    @locked
+    def transfer_selesai(tujuan: list[str] | None = None, semua: bool = False, batal: bool = False) -> str:
+        """Tandai transfer rencana gajian yang SUDAH dilakukan pemilik, selain kartu dan cicilan: pengeluaran tetap
+        (sekolah, les, IPL), dana darurat, pot, uang harian. tujuan = alias seperti di status_gajian; semua=true untuk
+        semua yang belum; batal=true menghapus tanda. Kartu dicatat dengan record_card_payment, cicilan dengan
+        cicilan_dibayar."""
+        return tools.mark_transfers_done(conn, today(), [t for t in tujuan or [] if t] or None, semua, batal)
+
+    @mcp.tool()
+    @locked
+    def status_gajian() -> str:
+        """Progres rencana gajian yang sedang berjalan menurut LEDGER: yang sudah dibayar, yang belum, yang dibayar di luar
+        rencana, status tiap kartu SEKARANG (pakai kalimatnya apa adanya), dan fakta yang sudah dilaporkan pemilik (jangan
+        ditanyakan ulang). Panggil ini dulu di awal percakapan atau setelah konteks dipadatkan, sebelum bertanya apa pun
+        tentang pembayaran gajian ini."""
+        return tools.payday_status(conn, today())
 
     @mcp.tool()
     @locked
@@ -553,17 +586,24 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
     def list_statements(limit: int = 10, card_alias: str | None = None) -> list[str]:
         """Tagihan kartu yang tersimpan (terbaru dulu): tanggal cetak, jatuh tempo, total, minimum, status rekonsiliasi,
         dan file_ref bila berkasnya masih ada (untuk dibuka lagi dengan ingest_statement). card_alias opsional."""
-        rows = conn.execute("SELECT c.alias, s.statement_date, s.due_date, s.total_due, s.minimum_due, s.reconciled, s.paid_at,"
+        rows = conn.execute("SELECT c.alias, c.interest_bp_month, s.statement_date, s.due_date, s.total_due, s.minimum_due, s.reconciled, s.paid_at,"
                             " s.paid_amount, s.file_hash"
                             " FROM statements s JOIN cards c ON c.id = s.card_id WHERE (? IS NULL OR c.alias = ?)"
                             " ORDER BY s.statement_date DESC, s.id DESC LIMIT ?",
                             (card_alias, card_alias, max(1, min(limit, 30)))).fetchall()
         def ref(h: str) -> str:
             return f" | file_ref {h}.pdf" if os.path.isfile(os.path.join(ingest_dir, h + ".pdf")) else ""
+
+        def paid(r) -> str:
+            if r["paid_at"]:
+                return " | LUNAS"
+            if not r["paid_amount"]:
+                return ""
+            return (f" | dibayar {format_idr(r['paid_amount'])}; " + tools.bill_status(
+                r["total_due"] - r["paid_amount"], r["minimum_due"] - r["paid_amount"], tools.card_rate(conn, r["interest_bp_month"])))
         return [f"{r['alias']} | cetak {r['statement_date']} | jatuh tempo {r['due_date']} | total {format_idr(r['total_due'])} | "
                 f"minimum {format_idr(r['minimum_due'])} | {'cocok' if r['reconciled'] else 'TIDAK COCOK'}"
-                f"{' | LUNAS' if r['paid_at'] else (' | dibayar ' + format_idr(r['paid_amount']) if r['paid_amount'] else '')}"
-                f"{ref(r['file_hash'])}"
+                f"{paid(r)}{ref(r['file_hash'])}"
                 for r in rows] or ["Belum ada tagihan tersimpan."]
 
     @mcp.tool()

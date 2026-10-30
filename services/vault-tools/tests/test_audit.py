@@ -65,7 +65,8 @@ class Audit(unittest.TestCase):
         self.assertTrue(any("Tagihan bulan ini belum diunggah" in t for t in found(conn, "warn")))
         conn.execute("UPDATE statements SET paid_amount=300000")
         conn.commit()
-        self.assertTrue(any("sisa Rp 700.000" in t and "belum tercatat lunas" in t for t in found(conn, "warn")))
+        self.assertTrue(any("sisa Rp 700.000" in t and "sudah terpenuhi (tidak telat" in t for t in found(conn, "info")))
+        self.assertFalse(any("Rp 700.000" in t for t in found(conn, "warn") + found(conn, "bad")))   # minimum met: no warning
 
     def test_subscriptions_against_what_the_cards_charged(self):
         conn = world()
