@@ -137,11 +137,17 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 6. Listrik and internet as fixed expenses (due day, how paid); sender allowlist (CIMB collections address) only with the owner.
 7. CIMB Oct statement: GoPro Rp 1.186.072 (USD 65.16) took the card's subscriptions from 524.089 to 1.676.161. Annual charge,
    or something to stop/move? Owner decides.
+8. The receipt-to-mutation merge ignores the account (`health.merge_receipt_into_mutation`, run by `mutations` for every new
+   debit): the nearest own record with the same amount within 2 days merges into a mutation of ANY account, a card purchase
+   included, and the mutation takes that record's category (a `transfer_internal` record would drop a real expense out of the
+   living cost). Live on 2026-10-30: 3 own records, 1 merge (record into record, same account), none wrong. Proposed fix:
+   same account, or a record without a source; never a card record. Waiting for the owner's go.
 
 ## Next steps
-- Done 2026-10-30 10:02 WIB: owner sent `/new` and had the bot fix PHO STREET #2440 (Jenius -> jago-harian): the bot listed it,
-  asked what was wrong, showed before -> after, waited for "ya", then `ubah_belanja`; `change_log` #1 holds only the account and
-  dedupe key change; no new transaction rows.
+- Done 2026-10-30 (session from 10:02 WIB, edit 10:04 WIB): owner sent `/new` and had the bot fix PHO STREET #2440 (Jenius ->
+  jago-harian): the bot listed it, asked what was wrong, showed before -> after, waited for "ya", then `ubah_belanja`;
+  `change_log` #1 holds only the account and dedupe key change; no warnings; no new transaction rows. The account of an own
+  record feeds no plan or living-cost figure (`living.monthly` sums by month and category).
 - Owner: on 1 Nov ask for the payday list; the bot asks again on purpose for the leftover living cash just BEFORE the salary (Mandiri usable + daily account); after
   paying, tell the bot (card payments, pot balance, emergency fund balance) and the Mandiri balance shown in the app.
 - After the November statements: calibration per `docs/calibration.md` (Google One, Apple, Coway, bot quality, spend).
