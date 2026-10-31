@@ -238,7 +238,17 @@ def data_overview(conn, today: date) -> str:
         L.append(f"SISA UANG HARIAN TERCATAT: {format_idr(th['living_leftover'])} untuk gajian {_ymd(th['living_leftover_payday'])}"
                  + (f" (dicatat {_ymd(th['living_leftover_at'])})" if th.get("living_leftover_at") else "")
                  + (f"; belanja tunai sejak gajian sebelum laporan itu {format_idr(th['living_leftover_spent'])} sudah keluar "
-                    "dari sisa ini (tidak dihitung lagi di jatah harian)" if th.get("living_leftover_spent") else ""))
+                    "dari sisa ini (tidak dihitung lagi di uang harian)" if th.get("living_leftover_spent") else ""))
+    pace = spending_pace(conn, today)
+    if pace:        # the figure the owner asks for ("sisa uang harian berapa"): from the code, never worked out in chat
+        rd = pace["reading"]
+        L.append(f"UANG HARIAN BULAN INI (sampai gajian {pace['next_payday']}): terpakai {format_idr(pace['spent'])} dari "
+                 f"{format_idr(pace['allowance'])} ({pace['pct_used']}%), "
+                 + (f"sisa {format_idr(pace['remaining'])}" if pace["remaining"] >= 0 else f"lewat {format_idr(-pace['remaining'])}")
+                 + (f"; mengikuti saldo {rd['alias']} {format_idr(rd['balance'])} yang dilaporkan {rd['as_of']} pukul {rd['at']} WIB"
+                    + (f", selisih dengan catatan {'+' if pace['correction'] > 0 else '-'}{format_idr(abs(pace['correction']))}"
+                       if pace["correction"] else "") if rd else "")
+                 + ". Jangan dibagi per hari (uang harian juga membayar listrik, telepon, air)")
     L.append("ANGGARAN: " + ("; ".join(f"{k[7:]} {format_idr(v)}" for k, v in sorted(th.items()) if k.startswith("budget:")) or "belum ada"))
     return "\n".join(L)
 
@@ -396,7 +406,7 @@ def set_leftover_living_cash(conn, amount: int, today: date, other: int = 0) -> 
     return (f"Sisa uang harian {format_idr(total)}{parts} dicatat untuk gajian {payday.isoformat()}: uang harian yang diambil dari "
             f"gaji ini {format_idr(normal - total)}, jadi total uang harian tetap {format_idr(normal)}."
             + (f" Belanja tunai sejak gajian yang sudah tercatat sebelum {report} ({format_idr(spent)}) sudah keluar dari sisa "
-               "ini, jadi tidak dihitung lagi di jatah harian." if spent else ""))
+               "ini, jadi tidak dihitung lagi di uang harian." if spent else ""))
 
 
 def list_uploads(upload_dir: str, limit: int = 10) -> list[str]:

@@ -327,6 +327,8 @@ class LivingMoneyPace(unittest.TestCase):
         self.assertEqual((p["spent"], p["spent_before_leftover"], p["pct_used"], p["status"]),
                          (624_075, 17_000, 8, "ok"))                        # the coffee is already out of the leftover
         self.assertEqual((p["remaining"], p["correction"], p["reading"]), (6_921_930, 0, None))
+        self.assertIn("UANG HARIAN BULAN INI (sampai gajian 2026-11-30): terpakai Rp 624.075 dari Rp 7.546.005 (8%), sisa "
+                      "Rp 6.921.930. Jangan dibagi per hari", tools.data_overview(conn, self.DAY2))
 
     def test_the_same_figure_given_again_keeps_the_first_reading(self):
         conn = self.world()
@@ -389,6 +391,10 @@ class LivingMoneyPace(unittest.TestCase):
         self.assertIn("Terpakai <b>Rp 624.075</b> dari Rp 7.675.427 (Rp 7.546.005 rencana + Rp 129.422 selisih saldo)\n"
                       "Sisa <b>Rp 7.051.352</b>\n<i>mengikuti saldo jago-harian Rp 7.051.352 (1 Nov ", budget)
         self.assertIn("selisih dengan catatan +Rp 129.422</i>", budget)
+        overview = tools.data_overview(conn, self.NOV1)              # what the bot reads when asked how much is left
+        self.assertIn("UANG HARIAN BULAN INI (sampai gajian 2026-11-30): terpakai Rp 624.075 dari Rp 7.675.427 (8%), sisa "
+                      "Rp 7.051.352; mengikuti saldo jago-harian Rp 7.051.352 yang dilaporkan 2026-11-01 pukul ", overview)
+        self.assertIn(", selisih dengan catatan +Rp 129.422. Jangan dibagi per hari", overview)
         self.assertEqual(tools.get_threshold(conn, "living_balance_mark"),
                          conn.execute("SELECT MAX(id) FROM transactions").fetchone()[0])
 
