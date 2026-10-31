@@ -372,21 +372,24 @@ def set_leftover_living_cash(conn, amount: int, today: date, other: int = 0) -> 
                          f"{format_idr(normal)}; kelebihannya bukan uang harian")
     payday = current_payday(today)
     key = int(payday.strftime("%Y%m%d"))
-    # The same figure given again is the same reading: purchases since then are not in it, so the first count stands
-    if not (get_threshold(conn, "living_leftover_payday") == key and get_threshold(conn, "living_leftover") == total
-            and get_threshold(conn, "living_leftover_spent") is not None):
-        set_threshold(conn, "living_leftover", total)
-        set_threshold(conn, "living_leftover_payday", key)
+    # Cash spent from the payday until the first reading on or after it is already out of the leftover: the spending pace
+    # must not count it again. The bot does not ask twice, so a later figure for the same payday corrects that reading and
+    # the count made then stands; counting again would take every purchase since the payday as already out of it.
+    counted = (get_threshold(conn, "living_leftover_payday") == key and (get_threshold(conn, "living_leftover_at") or 0) >= key
+               and get_threshold(conn, "living_leftover_spent") is not None)
+    set_threshold(conn, "living_leftover", total)
+    set_threshold(conn, "living_leftover_payday", key)
+    if not counted:
         set_threshold(conn, "living_leftover_at", int(today.strftime("%Y%m%d")))
-        # cash spent from the payday until this reading is already out of it: the spending pace must not count it again
         set_threshold(conn, "living_leftover_spent", cash_spent(conn, payday, today))
     conn.execute("DELETE FROM thresholds WHERE key IN ('living_reserve_override', 'living_reserve_override_until')")
     conn.commit()
     parts = f" ({format_idr(amount)} + {format_idr(other)})" if other else ""
     spent = get_threshold(conn, "living_leftover_spent") or 0
+    report = f"laporan sisa pertama {_ymd(get_threshold(conn, 'living_leftover_at'))}" if counted else "laporan ini"
     return (f"Sisa uang harian {format_idr(total)}{parts} dicatat untuk gajian {payday.isoformat()}: uang harian yang diambil dari "
             f"gaji ini {format_idr(normal - total)}, jadi total uang harian tetap {format_idr(normal)}."
-            + (f" Belanja tunai sejak gajian yang sudah tercatat sebelum laporan ini ({format_idr(spent)}) sudah keluar dari sisa "
+            + (f" Belanja tunai sejak gajian yang sudah tercatat sebelum {report} ({format_idr(spent)}) sudah keluar dari sisa "
                "ini, jadi tidak dihitung lagi di jatah harian." if spent else ""))
 
 

@@ -227,6 +227,31 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   7.164.623, 3 x 7.564.623, 9.433.427, 3 x 11.855.363, 3 x 12.055.607). Before the data fix it showed short 299.954: the
   500.000 deposit was counted twice.
 
+## Daily money is the top-up plus the leftover (2026-10-31, owner: "x + y adalah 7.5 juta, jadi bukan x doang yg dipakai menghitungnya")
+- On 31 Oct 22:26 the bot recorded ANKER 249.000 and its system warning said 22% of the daily money was used after 6% of
+  the time, Rp 2.186.814 left for 29 days. The spending pace measured against `cash_to_hold`, the 2.827.889 the plan took
+  from the salary; the owner's month was that top-up plus the 4.718.116 leftover already held: 7.546.005
+  (`living_reserve`). The same salary-only base showed in the plan summary ("jatah harian 91.222") and the `/rencana` footer.
+- `payday.living_money(snap)` = `cash_to_hold + living_leftover` of the stored plan, and `living_per_day` over the payday
+  window, feed the spending pace (purchase alerts, `health_check`, `/anggaran`), the plan summary, the `/rencana` footer and
+  the Notion plan note. The stored `daily_allowance` stays the salary part, so stored plans are not rewritten and
+  regenerating plan #62 adds no row. Every month with a reported leftover counts the same way: top-up + leftover =
+  `living_reserve`.
+- Cash spent from the payday until the first leftover reading on or after it is already out of that figure:
+  `set_leftover_living_cash` keeps it (`living_leftover_spent`, protected like the other `living_leftover*` keys) and the
+  pace does not count it again. A later figure for the same payday corrects that reading (the bot does not ask twice), so
+  the count made then stands; an estimate made before the payday is counted again at the payday reading. Card purchases
+  were never in the leftover and still count. On 30 Oct, Warkop Dani 17.000 (#2441, recorded 15:23) came before the 15:27
+  reading of 4.718.116.
+- Dry run of the new code on an in-memory copy of the live ledger (31 Oct, after ANKER): 624.075 of 7.546.005 used (8%,
+  6% of the time), ok, no warning; 6.921.930 left for 29 days (238.687/day); 243.419/day over the window; 62 plans before
+  and after regenerating. 407 vault-tools tests (6 new in `test_health.py`), 495 across all suites.
+- Deploy waits for the owner's go-ahead (this session's permission check refused writes to the VPS):
+  `deploy_pace.sh` in the session's tmp backs up `ledger.db.bak-pre-pace-fix`, sets `living_leftover_spent` = 17.000 for
+  payday 20261030 on the code still deployed (with the key missing, the next `sisa_uang_harian` on the new code would take
+  every purchase since the payday as already out of the leftover), rebuilds vault-tools only, restarts the vault when idle,
+  and checks read-only. Then the owner sends `/new` (the session still holds the 22% warning).
+
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
 2. Closing the pot gap without the children's needs: games (owner's own), apps not marked `wajib`, or talking to the friend.
@@ -251,8 +276,11 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 15. Transport over its October budget (1.420.000 of 1.000.000 with the parking): raise the budget or keep it as a warning.
 
 ## Next steps
-- Owner: send `/new` now (2026-10-30 evening deploy: new tools, SOUL, compaction config). Then: les Mandarin once paid
-  (`transfer_selesai`), and the Mandiri October e-statement again (sent 30 Oct 16:14, never recorded).
+- Deploy the daily-money fix (section above), then the owner sends `/new` once.
+- (done 2026-10-31 14:04) Owner sent `/new` after the 30 Oct evening deploy. Still open: les Mandarin once paid
+  (`transfer_selesai`), and the Mandiri October e-statement sent 30 Oct 16:14: it is still in /ingest/telegram (90-day
+  retention); the bot read it twice with `ingest_statement` but the session reset at 16:17 before `record_mutations`, so
+  the owner only asks the bot to record that file, no re-send.
 - Before the 30 Nov payday (deploy 2): admin fees as an estimated essential cost (/usulan #4: 7.500 per card payment,
   6.500 per transfer); one-off bills such as the Coway arrears (/usulan #6); an undo for `cicilan_dibayar`; the
   `format_autodebit_check` sentence when nothing is debited. After a week: compare cached tokens per turn and compactions

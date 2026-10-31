@@ -290,13 +290,15 @@ class LivingMoneyPace(unittest.TestCase):
     2.827.889 top-up from the salary. The owner's month was that plus the 4.718.116 leftover already held: 7.546.005."""
     PAYDAY, DAY2 = date(2026, 10, 30), date(2026, 10, 31)
 
-    def world(self, card=False):
+    def world(self, card=False, early=False):
         conn = connect(":memory:")
         conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('jago-harian','Jago','main')")
         conn.commit()
         tools.upsert_card(conn, "cimb-1", "CIMB", "2222", 5, 5, 10_000_000)
         tools.set_threshold(conn, "net_salary", 2_827_889)                   # no bills: the whole salary is the top-up
         tools.set_threshold(conn, "living_reserve", 7_546_005)
+        if early:
+            tools.set_leftover_living_cash(conn, 4_894_157, date(2026, 10, 28))   # an estimate two days before the payday
         hl.record_expense(conn, self.PAYDAY, 17_000, "WARKOP DANI", "2026-10-30", "makan", "jago-harian")  # before the reading
         if card:
             hl.record_expense(conn, self.PAYDAY, 90_000, "GRAB", "2026-10-30", "transport", card_alias="cimb-1")
@@ -325,6 +327,21 @@ class LivingMoneyPace(unittest.TestCase):
         self.assertEqual((p["spent_before_leftover"], p["spent"]), (17_000, 375_075))
         self.assertIn("SISA UANG HARIAN TERCATAT: Rp 4.718.116 untuk gajian 2026-10-30 (dicatat 2026-10-30); belanja tunai "
                       "sejak gajian sebelum laporan itu Rp 17.000 sudah keluar", tools.data_overview(conn, self.DAY2))
+
+    def test_a_corrected_figure_days_later_keeps_the_payday_count(self):
+        conn = self.world()
+        msg = tools.set_leftover_living_cash(conn, 4_500_000, date(2026, 11, 2))
+        self.assertIn("sebelum laporan sisa pertama 2026-10-30 (Rp 17.000)", msg)
+        self.assertEqual((tools.get_threshold(conn, "living_leftover"), tools.get_threshold(conn, "living_leftover_at")),
+                         (4_500_000, 20261030))
+        p = hl.spending_pace(conn, date(2026, 11, 2))      # the purchases since the payday were not in the figure: still counted
+        self.assertEqual((p["spent_before_leftover"], p["spent"]), (17_000, 375_075))
+
+    def test_an_estimate_before_the_payday_is_counted_again_on_the_payday(self):
+        conn = self.world(early=True)
+        p = hl.spending_pace(conn, self.DAY2)
+        self.assertEqual((p["spent_before_leftover"], p["spent"], tools.get_threshold(conn, "living_leftover_at")),
+                         (17_000, 375_075, 20261030))
 
     def test_a_card_purchase_was_never_in_the_leftover(self):
         p = hl.spending_pace(self.world(card=True), self.DAY2)
