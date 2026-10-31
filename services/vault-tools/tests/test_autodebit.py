@@ -130,6 +130,12 @@ class BalanceCheck(unittest.TestCase):
         out = tools.record_account_balance(self.world(), date(2026, 11, 10), "mandiri-utama", 500_000)
         self.assertIn("Tidak ada autodebet dari mandiri-utama sampai gajian berikutnya (2026-11-30)", out)
         self.assertNotIn("transfer gajian", out)
+        # the free balance in the code's words (30 Oct: the bot took the held 100.000 off itself)
+        self.assertIn("(2026-11-30). Yang bisa dipakai Rp 400.000: saldo Rp 500.000 dikurangi saldo minimum yang ditahan bank "
+                      "Rp 100.000.", out)
+        self.assertNotIn("; ditambah", out)
+        low = tools.record_account_balance(self.world(), date(2026, 11, 10), "mandiri-utama", 60_000)
+        self.assertIn("Saldo Rp 60.000 di bawah saldo minimum yang ditahan bank Rp 100.000: tidak ada yang bisa dipakai.", low)
 
     def test_the_plan_reads_a_balance_from_this_payday_only(self):
         conn = self.world()

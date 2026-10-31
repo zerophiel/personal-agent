@@ -35,6 +35,8 @@ class RecordExpense(unittest.TestCase):
         conn = planned()
         r = spend(conn, 50_000, "KOPI KENANGAN", category="makan")
         self.assertEqual((r["status"], r["category"]), ("stored", "makan"))
+        # what was stored, from the code: the bot confirms with this, not with its own reading of the photo
+        self.assertEqual(r["recorded"], f"#{r['id']} KOPI KENANGAN Rp 50.000, 2026-11-05, tunai, kategori makan")
         row = conn.execute("SELECT amount, status, source, merchant FROM transactions").fetchone()
         self.assertEqual((row["amount"], row["status"], row["source"]), (-50_000, "unverified", "receipt"))
 
@@ -54,7 +56,9 @@ class RecordExpense(unittest.TestCase):
         conn = planned()
         conn.execute("INSERT OR IGNORE INTO accounts(alias,bank,kind,last4) VALUES ('mandiri-utama','Mandiri','main','2701')")
         conn.commit()
-        self.assertEqual(spend(conn, 100_000, "Isi saldo Flazz (tol)", account_alias="mandiri-utama")["status"], "stored")
+        flazz = spend(conn, 100_000, "Isi saldo Flazz (tol)", account_alias="mandiri-utama")
+        self.assertEqual(flazz["status"], "stored")
+        self.assertIn("Rp 100.000, 2026-11-05, dari mandiri-utama, kategori ", flazz["recorded"])
         dup = spend(conn, 100_000, "Isi Flazz BCA (tol)", account_alias="mandiri-utama")
         self.assertEqual((dup["status"], dup["existing_merchant"]), ("possible_duplicate", "Isi saldo Flazz (tol)"))
         self.assertEqual(spend(conn, 100_000, "Parkir mall")["status"], "stored")          # no source given: merchant decides

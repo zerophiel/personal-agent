@@ -342,6 +342,9 @@ def on_inbound(event, **kwargs):
 # write is a number the model made up or calculated itself: the answer gets a visible warning under it (never silently).
 _MONEY = re.compile(r"(?i)(rp\.?\s*)?(\d{1,3}(?:\.\d{3})+|\d+(?:,\d{1,3})?)\s*(jt|juta|rb|ribu)?(?![\w])")
 _UNIT = {"jt": 1_000_000, "juta": 1_000_000, "rb": 1_000, "ribu": 1_000}
+# 174,075 or 1,234,567.00: the gateway's description of a photo writes amounts the English way (31 Oct: a receipt's total,
+# then flagged as made up when the bot wrote it as Rp 174.075)
+_COMMA_THOUSANDS = re.compile(r"(?<![\d.,])\d{1,3}(?:,\d{3})+(?![\d,])")
 _seen: dict[str, set[int]] = {}          # session id -> amounts printed by tools or written by the owner in that session
 _SEEN_SESSIONS = 50
 
@@ -371,7 +374,9 @@ def _remember(session_id: str, text) -> None:
         return
     if session_id not in _seen and len(_seen) >= _SEEN_SESSIONS:
         _seen.pop(next(iter(_seen)))
-    _seen.setdefault(session_id, set()).update(v for v, _ in amounts(text if isinstance(text, str) else json.dumps(text, default=str)))
+    s = text if isinstance(text, str) else json.dumps(text, default=str)
+    _seen.setdefault(session_id, set()).update([v for v, _ in amounts(s)]
+                                               + [int(m.group().replace(",", "")) for m in _COMMA_THOUSANDS.finditer(s)])
 
 
 def on_pre_llm(session_id="", user_message=None, conversation_history=None, **kwargs):

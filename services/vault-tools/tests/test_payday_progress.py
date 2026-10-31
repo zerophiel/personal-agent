@@ -174,11 +174,25 @@ class Progress(unittest.TestCase):
                      "- cimb-1: Rp 3.800.000 (tagihan kartu - sisa saldo (bayar penuh)); sudah dibayar di luar rencana Rp 3.800.000: "
                      "tertutup, tidak ada sisa",
                      "- dbs-1: minimum sudah terpenuhi: tidak telat, tidak ada denda. Sisa Rp 1.000.000 dibawa ke tagihan berikutnya",
-                     "- LUNAS: cimb-1, jenius-1"):
+                     "- LUNAS: cimb-1, jenius-1",
+                     # the sum from the code: the closed cimb-1 is not added to what is still open (30 Oct)
+                     "JUMLAH (dihitung kode, jangan menjumlah sendiri): dibawa ke tagihan berikutnya (minimum terpenuhi, "
+                     "berbunga) Rp 1.000.000; 1 pos sudah tertutup"):
             self.assertIn(line, text)
         self.assertNotIn("MENDESAK", text)
         summary = tools.summarize_plan(tools.generate_payday_plan(conn, NOV_1))
         self.assertIn("| belum sekolah-va Rp 2.000.000; uang-harian Rp 3.000.000 | di luar rencana cimb-1 Rp 3.800.000", summary)
+        self.assertIn("! JUMLAH (dihitung kode, jangan menjumlah sendiri): dibawa ke tagihan berikutnya", summary)
+
+    def test_the_total_keeps_what_has_no_money_apart_from_a_rest_carried_with_interest(self):
+        unf = [{"to": "kartu-a", "amount": 500_000, "covered": 0, "left": 500_000, "reason": "tagihan kartu - minimum", "cost": 50_000},
+               {"to": "kartu-a", "amount": 2_000_000, "covered": 0, "left": 2_000_000, "reason": tools.CARD_REST, "cost": 35_000},
+               {"to": "kartu-b", "amount": 872_061, "covered": 0, "left": 872_061, "reason": tools.CARD_REST, "cost": 15_261},
+               {"to": "sekolah", "amount": 1_000_000, "covered": 1_000_000, "left": 0, "reason": "pengeluaran tetap", "cost": 0}]
+        self.assertEqual(tools._unfunded_total({"unfunded": [], "progress": {"unfunded": unf}}),
+                         "JUMLAH (dihitung kode, jangan menjumlah sendiri): belum ada dananya Rp 2.500.000; dibawa ke tagihan "
+                         "berikutnya (minimum terpenuhi, berbunga) Rp 872.061; 1 pos sudah tertutup")
+        self.assertIsNone(tools._unfunded_total({"unfunded": [], "progress": {"unfunded": unf[2:3]}}))   # one item: its own line
 
     def test_what_the_owner_reported_is_listed_so_it_is_not_asked_again(self):
         conn = world()
@@ -224,6 +238,19 @@ class Progress(unittest.TestCase):
         self.assertIn("Tidak ada yang diubah", tools.mark_transfers_done(conn, NOV_1, all_open=True))
         self.assertIn("Tanda selesai dihapus: sekolah-va", tools.mark_transfers_done(conn, NOV_1, ["sekolah-va"], undo=True))
         self.assertIn("⏳ sekolah-va", tools.payday_status(conn, NOV_1))
+
+    def test_a_balance_in_the_payday_days_names_the_transfers_still_open(self):
+        conn = world()
+        pay_as_on_30_oct(conn)
+        self.assertIn("Angka ini hanya benar bila", tools.record_account_balance(conn, NOV_1, "mandiri-utama", 9_000_000))  # no plan stored
+        tools.generate_payday_plan(conn, NOV_1)                          # the plan the payday flow stores
+        out = tools.record_account_balance(conn, NOV_1, "mandiri-utama", 9_000_000)
+        self.assertIn("Transfer gajian yang belum tercatat selesai: sekolah-va Rp 2.000.000; uang-harian Rp 3.000.000. Bila dibayar "
+                      "dari rekening ini, sesudahnya yang bisa dipakai Rp 4.000.000. Laporkan saldo lagi setelah transfer.", out)
+        self.assertIn("Bila dibayar dari rekening ini, saldonya KURANG Rp 1.000.000 untuk itu.",
+                      tools.record_account_balance(conn, NOV_1, "mandiri-utama", 4_000_000))
+        tools.mark_transfers_done(conn, NOV_1, all_open=True)            # all done: the balance is final, no caveat
+        self.assertNotIn("transfer gajian", tools.record_account_balance(conn, NOV_1, "mandiri-utama", 4_000_000).lower())
 
     def test_rincian_and_the_reports_mark_what_is_done(self):
         conn = world()

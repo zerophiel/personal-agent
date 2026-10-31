@@ -967,7 +967,15 @@ def format_autodebit_check(c: dict) -> str:
         return f"CUKUP (lebih {format_idr(diff)})" if diff >= 0 else f"KURANG {format_idr(-diff)}"
     held = f"; ditambah saldo minimum yang ditahan bank {format_idr(c['held'])}" if c["held"] else ""
     if not c["debits"]:
-        return f"Tidak ada autodebet dari {c['alias']} sampai gajian berikutnya ({c['until'].isoformat()}){held}."
+        out = f"Tidak ada autodebet dari {c['alias']} sampai gajian berikutnya ({c['until'].isoformat()})."
+        if not c["held"]:
+            return out
+        # the free balance in the code's words: on 30 Oct the bot took the held part off itself
+        free = c["balance"] - c["held"]
+        return out + (f" Yang bisa dipakai {format_idr(free)}: saldo {format_idr(c['balance'])} dikurangi saldo minimum yang "
+                      f"ditahan bank {format_idr(c['held'])}." if free >= 0 else
+                      f" Saldo {format_idr(c['balance'])} di bawah saldo minimum yang ditahan bank {format_idr(c['held'])}: "
+                      "tidak ada yang bisa dipakai.")
     head = (f"Autodebet dari {c['alias']} sampai gajian berikutnya ({c['until'].isoformat()}): "
             + "; ".join(f"{o.payee_alias} {format_idr(o.amount)} ({o.due.isoformat()})" for o in c["debits"]) + held)
     if c["due_today"]:
@@ -1033,8 +1041,27 @@ def record_account_balance(conn, today: date, alias: str, balance: int) -> str:
         return out + _living_balance(conn, today, cur.lastrowid) + (" " + format_autodebit_check(check) if check["debits"] else "")
     out += format_autodebit_check(check)
     if current_payday(today) <= today:   # the payday days: a balance read before the salary transfers still holds their money
-        out += " Angka ini hanya benar bila semua transfer gajian sudah dilakukan; bila belum, laporkan lagi setelah transfer."
+        todo = _open_transfers(conn, today)
+        if todo is None:
+            out += " Angka ini hanya benar bila semua transfer gajian sudah dilakukan; bila belum, laporkan lagi setelah transfer."
+        elif todo:   # named and counted, so the bot does not take them off itself (salary money sits in more than one account)
+            total, free = sum(v for _, v in todo), check["balance"] - check["need"]
+            out += (" Transfer gajian yang belum tercatat selesai: " + "; ".join(f"{a} {format_idr(v)}" for a, v in todo) + ". "
+                    + (f"Bila dibayar dari rekening ini, sesudahnya yang bisa dipakai {format_idr(free - total)}." if free >= total else
+                       f"Bila dibayar dari rekening ini, saldonya KURANG {format_idr(total - free)} untuk itu.")
+                    + " Laporkan saldo lagi setelah transfer.")
     return out
+
+
+def _open_transfers(conn, today: date) -> list[tuple[str, int]] | None:
+    """The current payday plan's transfers not recorded as done (auto-debits apart: autodebit_check counts them); None
+    without a plan for the current payday."""
+    row = conn.execute("SELECT snapshot_json FROM plans ORDER BY id DESC LIMIT 1").fetchone()
+    snap = json.loads(row["snapshot_json"]) if row else None
+    if snap is None or snap["payday"] != current_payday(today).isoformat():
+        return None
+    return [(it["to"], it["planned"] - it["done"]) for it in payday_progress(conn, snap)["items"]
+            if it["method"] != "autodebit" and it["planned"] > it["done"]]
 
 
 def plan_to_dict(plan: Plan) -> dict:
@@ -1287,25 +1314,49 @@ def payday_progress(conn, snap: dict) -> dict:
 CARD_REST = "tagihan kartu - sisa saldo (bayar penuh)"
 
 
-def _unfunded_lines(snap: dict) -> list[str]:
+def _unfunded(snap: dict) -> list[dict]:
     prog = snap.get("progress") or {}
-    unf = prog.get("unfunded") or [{"to": u["to_alias"], "amount": u["amount"], "covered": 0, "left": u["amount"],
-                                    "reason": u["reason"], "cost": u["est_delay_cost"]} for u in snap["unfunded"]]
+    return prog.get("unfunded") or [{"to": u["to_alias"], "amount": u["amount"], "covered": 0, "left": u["amount"],
+                                     "reason": u["reason"], "cost": u["est_delay_cost"]} for u in snap["unfunded"]]
+
+
+def _carried(u: dict, unf: list[dict]) -> bool:
+    """A card's rest whose minimum is met: no late fee, it goes to the next bill with interest."""
+    return u["reason"] == CARD_REST and not any(
+        x["to"] == u["to"] and x["reason"] == "tagihan kartu - minimum" and x["left"] > 0 for x in unf)
+
+
+def _unfunded_lines(snap: dict) -> list[str]:
+    unf = _unfunded(snap)
     out = []
     for u in unf:
         line = f"{u['to']}: {format_idr(u['amount'])} ({u['reason']})"
         if u["covered"]:
             line += f"; sudah dibayar di luar rencana {format_idr(u['covered'])}"
-        min_short = any(x["to"] == u["to"] and x["reason"] == "tagihan kartu - minimum" and x["left"] > 0 for x in unf)
         if u["left"] <= 0:
             line += ": tertutup, tidak ada sisa"
-        elif u["reason"] == CARD_REST and not min_short:
+        elif _carried(u, unf):
             line += (f": minimum terpenuhi (tidak telat, tidak ada denda); sisa {format_idr(u['left'])} dibawa ke tagihan "
                      f"berikutnya dan berbunga ±{format_idr(u['cost'])}/bulan")
         else:
             line += f"; belum ada dananya {format_idr(u['left'])}, estimasi biaya {format_idr(u['cost'])}"
         out.append(line)
     return out
+
+
+def _unfunded_total(snap: dict) -> str | None:
+    """The sum of two or more items, so the bot never adds them up: on 30 Oct it summed a carried card rest and one already
+    paid outside the plan into one wrong "belum terdanai" figure."""
+    unf = _unfunded(snap)
+    if len(unf) < 2:
+        return None
+    short = sum(u["left"] for u in unf if u["left"] > 0 and not _carried(u, unf))
+    carried = sum(u["left"] for u in unf if u["left"] > 0 and _carried(u, unf))
+    closed = sum(1 for u in unf if u["left"] <= 0)
+    parts = ([f"belum ada dananya {format_idr(short)}"] if short else []) \
+        + ([f"dibawa ke tagihan berikutnya (minimum terpenuhi, berbunga) {format_idr(carried)}"] if carried else []) \
+        + ([f"{closed} pos sudah tertutup"] if closed else [])
+    return "JUMLAH (dihitung kode, jangan menjumlah sendiri): " + "; ".join(parts)
 
 
 def _progress_name(it: dict) -> str:
@@ -1325,6 +1376,7 @@ def summarize_plan(snap: dict) -> str:
                "autodebit": f" autodebet, saldo harus cukup sebelum {t.get('due')}"}.get(t.get("method"), "")
         lines.append(f"- {t['date']} {t['to_alias']}: {format_idr(t['amount'])} ({t['reason']}){how}")
     lines += [f"! BELUM TERDANAI {x}" for x in _unfunded_lines(snap)]
+    lines += [f"! {t}" for t in [_unfunded_total(snap)] if t]
     lines += [f"* {r}" for r in snap.get("reminders", [])]
     if snap.get("reserve"):
         lines.append(f"Cadangan hidup harian: {format_idr(snap['reserve'])} ({snap.get('reserve_source')})")
@@ -1484,6 +1536,7 @@ def payday_status(conn, today: date) -> str:
     if unf:
         L.append("BELUM TERDANAI DARI GAJI INI:")
         L += [f"- {x}" for x in unf]
+        L += [t for t in [_unfunded_total(snap)] if t]
     now = prog["cards_now"]
     L.append("STATUS KARTU SEKARANG (kalimat ini yang dipakai; minimum terpenuhi = tidak ada jatuh tempo lagi):")
     paid_off = sorted(a for a, c in now.items() if c["owed"] <= 0)

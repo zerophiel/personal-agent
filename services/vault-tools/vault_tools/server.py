@@ -327,7 +327,8 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
         txn_date YYYY-MM-DD. Sumber bayar WAJIB, isi SATU: account_alias bila dari rekening, card_alias bila kartu kredit,
         tunai=true bila uang tunai. Sumber tidak jelas: TANYAKAN ke pemilik, jangan menebak tunai (belanja tunai tidak
         pernah digabung dengan mutasi bank, jadi tebakan yang salah membuatnya dihitung dua kali).
-        Hasil memuat `alerts`: SAMPAIKAN peringatan itu ke pemilik apa adanya. Jika status possible_duplicate,
+        Hasil memuat `recorded` (yang tersimpan: id, merchant, jumlah, tanggal, sumber, kategori): konfirmasi ke pemilik
+        dengan kalimat itu, bukan dengan bacaanmu sendiri. Hasil memuat `alerts`: SAMPAIKAN peringatan itu ke pemilik apa adanya. Jika status possible_duplicate,
         tanyakan dulu ke pemilik. Belanja dengan kartu WAJIB mengisi card_alias: ia dihitung ke anggaran kartu
         ('kartu:<kategori>'), sedangkan belanja dari rekening dihitung ke anggaran kas. Kategori: pakai 'wajib:<nama>' untuk kewajiban (sekolah, les, cicilan, bayar kartu),
         selain itu kategori bebas (makan, transport, belanja, hiburan, dst)."""

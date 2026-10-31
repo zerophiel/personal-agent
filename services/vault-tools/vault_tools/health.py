@@ -96,7 +96,10 @@ def record_expense(conn: sqlite3.Connection, today: date, amount: int, merchant:
     # sent after its statement was stored: the row is already there, so it merges now instead of counting twice
     merged = merge_receipts(conn, receipt_id=cur.lastrowid)
     conn.commit()
+    # what was stored, in the code's words: the bot's confirmation repeats this, not its own reading of the photo
+    source = f"dari {account_alias}" if account_alias else f"dari kartu {card_alias}" if card_alias else "tunai"
     out = {"status": "stored", "id": cur.lastrowid, "category": cat,
+           "recorded": f"#{cur.lastrowid} {merchant} {format_idr(amount)}, {txn_date}, {source}, kategori {cat or '-'}",
            "alerts": alerts_for(conn, today, ("kartu:" + cat) if cat and card_alias else cat, d)}
     if merged:                  # in alerts, which the bot relays as they are: the owner sees the row and can say it is not it
         out["merged_into"] = merged[0][1]

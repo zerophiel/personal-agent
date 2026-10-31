@@ -272,6 +272,12 @@ class NumberGuard(unittest.TestCase):
         self.assertTrue(out.startswith(ok))
         self.assertIn("⚠️ Cek angka: Rp 15.465.953", out)
 
+    def test_amounts_in_a_photo_description_pass(self):
+        # the gateway describes a photo with amounts written the English way (31 Oct: a receipt total read as 174,075)
+        cg.on_pre_llm(session_id="p", user_message="[image] Receipt total: 174,075; cash 200,000.00", conversation_history=[])
+        self.assertIsNone(cg.on_llm_output(response_text="Struk Rp 174.075, dibayar tunai Rp 200.000.", session_id="p"))
+        self.assertIn("Cek angka: Rp 175.075", cg.on_llm_output(response_text="Struk Rp 175.075.", session_id="p"))
+
     def test_a_new_session_knows_nothing_until_the_tools_speak(self):
         self.assertIn("Cek angka", cg.on_llm_output(response_text="Tagihan Rp 8.993.569.", session_id="fresh"))
         cg.on_pre_llm(session_id="fresh", conversation_history=[{"role": "tool", "content": "sisa Rp 8.993.569"}])
