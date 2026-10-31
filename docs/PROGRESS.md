@@ -285,6 +285,39 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   at 01:24:08 and Telegram connected at 01:24:20. Live read-only check: 7.051.352 left until the 30 Nov payday (records
   6.921.930, +129.422), 624.075 of 7.675.427 used (8%), ok, no alert; VERIFIED. The owner sends `/new` once.
 
+## Numbers the bot worked out itself now come from the code (2026-11-01 recalibration, owner: "check ulang bot apakah sudah sesuai, apakah ada yg salah hitung")
+- The code's figures reconcile: the 63 statements re-read `cocok`; `periksa_data` 0 problems and 3 INFO (google-one
+  309.000 recorded vs 2.691.822 charged, apple-one 319.000 vs 810.000, coway 1.210.000 vs 2.190.000 in cycle 2026-10;
+  open question 4); plan #62 by hand (DBS rest 872.061 carried at 15.261 a month, CIMB 85.888 + 1.631.853 = 1.717.741
+  closed outside the plan, pot hutang-teman 799.954 short, only les-mandarin-manuel 800.000 still open); the month's
+  624.075 is rows #2441-#2445 less the 17.000 spent before the leftover reading.
+- Each of the four replies the number guard flagged ("⚠️ Cek angka") had a number the model made or restated itself:
+  - 30 Oct 15:27, "Rp 2.504.914 belum terdanai di dua kartu": its own sum of a card rest carried with interest (DBS
+    872.061) and one already closed outside the plan (CIMB 1.631.853), and 1.000 off (the sum is 2.503.914).
+    `status_gajian` and the plan summary now end the unfunded list with a JUMLAH line (two or more items): what has no
+    money, what is carried with interest, how many are closed.
+  - 30 Oct 16:08, Rp 193.913: the model's own 293.913 - 100.000 (the Mandiri balance less what the bank holds).
+    `saldo_rekening` now says "Yang bisa dipakai", and the broken "Tidak ada autodebet ...; ditambah saldo minimum"
+    sentence is gone. In the payday days it names the salary transfers not marked done and what is left (or KURANG) if
+    they are paid from that account, both figures when an auto-debit is due that day; transfers paid into the account
+    itself (a payee with its bank and last digits: dana-darurat is jago-darurat) are left out; without a stored plan for
+    the payday, the old general caveat.
+  - 31 Oct 20:20 (twice), Rp 174.075, the YONNY receipt: `record_expense` returned no amount, so the bot confirmed with
+    its own reading of the photo. It now returns `recorded` ("#id merchant Rp amount, date, source, kategori ...") and
+    SOUL says to confirm with that. The guard also missed the amount in the gateway's photo description, which writes
+    amounts the English way (174,075): those are now remembered as seen.
+- SOUL: never add up or subtract; the JUMLAH line and `saldo_rekening` carry the figures; a figure no tool gave is said
+  to be missing, not worked out.
+- Commits a473d4d, a7e0947, the deploy scripts in `ops/datafix/2026-11-01-recal/`. 417 vault-tools tests, 506 across all
+  suites. Dry run on a copy of the live ledger: 62 plans before and after.
+- Deployed 2026-11-01 01:51-01:53 WIB under the owner's delegation, the steps of `deploy.sh` one by one: bot idle; backup
+  `ledger.db.bak-pre-recal` (integrity ok, schema 13, 1.919 transactions, 62 plans, 5 balance reports); rsync; vault-tools
+  rebuilt (healthy); vault restarted when idle; SOUL.md and the cardguard plugin in the container hash the same as the
+  repo; Telegram connected (polling) at 01:53:28 and Hermes listed the tools again. Live read-only check on an in-memory
+  copy: VERIFIED (JUMLAH with DBS 872.061 carried and 1 item closed; Mandiri 293.913 gives 193.913 usable and KURANG
+  606.087 if les Mandarin 800.000 is paid from it; `recorded` from the stored row). The daily money is unchanged:
+  7.051.352 left, 624.075 of 7.675.427 (8%).
+
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
 2. Closing the pot gap without the children's needs: games (owner's own), apps not marked `wajib`, or talking to the friend.
@@ -309,11 +342,11 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 15. Transport over its October budget (1.420.000 of 1.000.000 with the parking): raise the budget or keep it as a warning.
 
 ## Next steps
-- Owner: send `/new` once after the 1 Nov 01:24 deploy (the pocket-balance section above; it also covers the 00:37 one).
-- The number guard (cardguard `on_llm_output`) added "⚠️ Cek angka" to two replies on 31 Oct 20:20 (the YONNY receipt
-  photo after `ringkasan_data`, then after `record_expense` #2444; not on ANKER at 22:26) and on 30 Oct 15:27 and 16:08.
-  At the next calibration, find what it flagged (an amount read from a photo is in no tool result) and whether the bot
-  did its own arithmetic.
+- Owner: send `/new` once after the 1 Nov 01:53 deploy (the recalibration section above; it also covers the 00:37 and
+  01:24 ones).
+- (done 2026-11-01, the recalibration section above) The number guard's four flags on 30-31 Oct were the bot's own
+  arithmetic or its own reading of a photo. At each calibration, read the replies it flagged since the last one ("Cek
+  angka" in Hermes `state.db`): each is a number no tool gave, and the fix is a tool that gives it.
 - Vault restarts often log "Previous gateway life exited UNCLEANLY" (8 times, latest the 1 Nov 00:36 restart; 2
   `drain_timeout`): compose sets no `stop_grace_period`, so Docker kills Hermes after 10 s. For deploy 2, with the owner:
   a longer grace (for example 60 s) on the vault service.

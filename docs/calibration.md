@@ -16,12 +16,16 @@ the model or the data drifted.
   claude-sonnet-5-5, so compare with the USD 45/month vault limit by hand. Calibration one-shots appear as source `oneshot`.
 - `ops/calibration/bot_quality.py`: tool errors and replies that apologise or correct themselves. Read each flagged reply in
   context. Every real mistake gets a root cause and a fix in code (preferred) or SOUL, with a regression test.
+- Replies the number guard flagged since the last calibration ("⚠️ Cek angka", appended by the cardguard plugin): each
+  holds a number no tool result or owner message of that session gave, usually the model's own sum, difference or reading
+  of a photo. The fix is a tool result that carries that figure (2026-11-01: the JUMLAH line, "Yang bisa dipakai",
+  `recorded`).
 
 ## 3. Data (read-only)
 - `/periksa` in Telegram or `periksa_data`: statements that do not reconcile, missing statements, unpaid past-due bills,
   subscriptions recorded vs charged, stopped subscriptions still charged, instalments gone from the statement, old pot balance.
-- `ops/calibration/recurring_charges.py`: per-month table of recurring merchants; confirm open items with the owner
-  (he decides what is recurring, ended, one-off, or `wajib`).
+- `ops/calibration/recurring_charges.py`: per-month table of recurring merchants; confirm open items with the owner, who
+  decides what is recurring, ended, one-off, or `wajib`.
 
 ## 4. Change and verify
 - Worktree only; tests: `cd services/vault-tools && python -W ignore -I -m unittest discover -s tests` (plus
@@ -39,9 +43,10 @@ the model or the data drifted.
 
 ## 6. Test economically (each one-shot costs about USD 0.5-1)
 - At most two: `sudo docker exec personal-agent-vault-1 hermes chat --oneshot -q "UJI KALIBRASI (jangan mencatat atau mengubah apa pun). ..."`.
-  Never let a test call a writing tool on real data (e.g. `sisa_uang_harian` overwrites this payday's living money).
+  Never let a test call a writing tool on real data (e.g. `saldo_rekening` on `jago-harian` re-anchors the month's daily
+  money to the balance given).
 - Check that every number in the answer is in a tool result of that turn.
 
 ## 7. Report
-Owner report in Bahasa Indonesia (what was wrong, what changed, numbers from code, decisions only he can make);
+Owner report in Bahasa Indonesia (what was wrong, what changed, numbers from code, decisions only the owner can make);
 update `docs/PROGRESS.md`; commit and push the branch.
