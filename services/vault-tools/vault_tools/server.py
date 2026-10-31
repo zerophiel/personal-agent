@@ -152,7 +152,9 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
         REKENING MILIK PEMILIK di ringkasan_data; mis. Mandiri menahan Rp 100.000). jumlah_lain = saldo rekening harian (Jago,
         uang-harian) pada saat yang sama, bila ada; kode yang menjumlahkan, jangan menjumlahkan sendiri. Angka di atas uang
         harian sebulan ditolak (biasanya gaji ikut terhitung). Rencana gajian ini lalu hanya mengambil kekurangannya dari gaji:
-        belanja kartu yang dibayar dari uang harian tidak memotong pot. Berlaku untuk gajian yang sedang berjalan saja."""
+        belanja kartu yang dibayar dari uang harian tidak memotong pot. Berlaku untuk gajian yang sedang berjalan saja.
+        BUKAN saldo sekarang: setelah transfer uang harian gajian ini tercatat selesai, alat ini menolak; saldo rekening
+        harian sekarang dicatat dengan saldo_rekening(rekening='jago-harian')."""
         return tools.set_leftover_living_cash(conn, jumlah, today(), jumlah_lain)
 
     @mcp.tool()
@@ -161,7 +163,9 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
         """Catat SALDO REKENING biasa (bukan pot) yang TAMPIL di aplikasi bank sekarang, apa adanya (jangan dikurangi saldo
         yang ditahan bank: kode yang menghitung). Kode menjawab CUKUP/KURANG untuk autodebet dari rekening itu sampai gajian
         berikutnya; sampaikan apa adanya. Saat gajian: tanyakan SETELAH pemilik selesai transfer. Ini bukan sisa uang harian
-        (itu sisa_uang_harian, sebelum gaji masuk)."""
+        (itu sisa_uang_harian, sebelum gaji masuk). Untuk rekening harian (jago-harian, mis. "saldo poket harian sekarang"):
+        uang harian bulan ini dikoreksi ke saldo itu (uang masuk atau keluar yang tidak tercatat) dan kode menjawab sisanya
+        sampai gajian; sampaikan apa adanya, tanpa angka per hari."""
         return tools.record_account_balance(conn, today(), rekening, saldo)
 
     @mcp.tool()
@@ -221,7 +225,7 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
     @locked
     def set_threshold(key: str, value: int) -> str:
         """Set ambang/angka tetap, mis. net_salary, cash_buffer, dsr_max_bp."""
-        if key in ("reread_open_until", "ingest_events_cursor", "emergency_saved") or key.startswith(("living_reserve_override", "living_leftover")):
+        if key in ("reread_open_until", "ingest_events_cursor", "emergency_saved") or key.startswith(("living_reserve_override", "living_leftover", "living_balance")):
             raise ValueError("kunci ini diatur oleh sistem, bukan lewat chat")
         return tools.set_threshold(conn, key, value)
 

@@ -12,6 +12,7 @@ from vault_tools import mutations as mu  # noqa: E402
 from vault_tools import reports  # noqa: E402
 from vault_tools import tools  # noqa: E402
 from vault_tools.ledger import connect  # noqa: E402
+from vault_tools.payee_vault import PayeeVault  # noqa: E402
 
 TODAY = date(2026, 11, 10)          # window 2026-10-30 .. 2026-11-30 (31 days); today is day 12 = 38% elapsed
 
@@ -257,11 +258,14 @@ class LateRecordsAndResentScreenshots(_Banks, unittest.TestCase):
 
 class Pace(unittest.TestCase):
     def test_status_thresholds_against_the_daily_allowance(self):
-        for spent, status in ((3_000_000, "ok"), (4_500_000, "ok"), (5_500_000, "watch"), (8_000_000, "watch"), (10_000_001, "over")):
+        # no comparison with the days gone by: the daily money also pays the month's electricity, phone and water, so 55%
+        # used in the first 38% of the month is normal (it was a warning until 2026-11-01)
+        for spent, status in ((3_000_000, "ok"), (5_500_000, "ok"), (7_999_999, "ok"), (8_000_000, "watch"), (10_000_000, "watch"),
+                              (10_000_001, "over")):
             conn = planned()
             spend(conn, spent)
             p = hl.spending_pace(conn, TODAY)
-            self.assertEqual((p["allowance"], p["elapsed_pct"], p["status"]), (10_000_000, 38, status), spent)
+            self.assertEqual((p["allowance"], p["status"]), (10_000_000, status), spent)
 
     def test_obligations_pot_and_internal_moves_are_not_daily_spending(self):
         conn = planned()
@@ -279,10 +283,12 @@ class Pace(unittest.TestCase):
 
     def test_alert_comes_back_right_after_the_purchase(self):
         conn = planned()
-        r = spend(conn, 6_000_000, "TV", category="elektronik")
-        self.assertTrue(any("Waspada" in a and "60%" in a for a in r["alerts"]), r["alerts"])
-        r = spend(conn, 5_000_000, "LAPTOP", category="elektronik", day="2026-11-06")
-        self.assertTrue(any("MELEBIHI JATAH" in a for a in r["alerts"]), r["alerts"])
+        self.assertEqual(spend(conn, 6_000_000, "TV", category="elektronik")["alerts"], [])
+        r = spend(conn, 2_000_000, "KULKAS", category="elektronik", day="2026-11-06")
+        self.assertEqual(r["alerts"], ["Waspada: 80% uang harian bulan ini terpakai (Rp 8.000.000 dari Rp 10.000.000). "
+                                       "Sisa Rp 2.000.000 sampai gajian 2026-11-30."])          # no per-day figure, no time clause
+        r = spend(conn, 5_000_000, "LAPTOP", category="elektronik", day="2026-11-07")
+        self.assertTrue(any("MELEBIHI UANG HARIAN" in a for a in r["alerts"]), r["alerts"])
 
 
 class LivingMoneyPace(unittest.TestCase):
@@ -290,10 +296,12 @@ class LivingMoneyPace(unittest.TestCase):
     2.827.889 top-up from the salary. The owner's month was that plus the 4.718.116 leftover already held: 7.546.005."""
     PAYDAY, DAY2 = date(2026, 10, 30), date(2026, 10, 31)
 
-    def world(self, card=False, early=False):
+    def world(self, card=False, early=False, payee=False):
         conn = connect(":memory:")
         conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('jago-harian','Jago','main')")
         conn.commit()
+        if payee:                        # the daily account registered with /rekening: the plan then transfers the top-up there
+            PayeeVault(conn, bytes(range(32))).store("uang-harian", "account", "Jago", "9" * 10)
         tools.upsert_card(conn, "cimb-1", "CIMB", "2222", 5, 5, 10_000_000)
         tools.set_threshold(conn, "net_salary", 2_827_889)                   # no bills: the whole salary is the top-up
         tools.set_threshold(conn, "living_reserve", 7_546_005)
@@ -316,9 +324,9 @@ class LivingMoneyPace(unittest.TestCase):
         self.assertFalse(any("Waspada" in a or "MELEBIHI" in a for a in r["alerts"]), r["alerts"])   # was "22% terpakai"
         p = hl.spending_pace(conn, self.DAY2)
         self.assertEqual((p["allowance"], p["from_salary"], p["leftover"]), (7_546_005, 2_827_889, 4_718_116))
-        self.assertEqual((p["spent"], p["spent_before_leftover"], p["pct_used"], p["elapsed_pct"], p["status"]),
-                         (624_075, 17_000, 8, 6, "ok"))                     # the coffee is already out of the leftover
-        self.assertEqual((p["remaining"], p["days_left"], p["safe_per_day"]), (6_921_930, 29, 238_687))
+        self.assertEqual((p["spent"], p["spent_before_leftover"], p["pct_used"], p["status"]),
+                         (624_075, 17_000, 8, "ok"))                        # the coffee is already out of the leftover
+        self.assertEqual((p["remaining"], p["correction"], p["reading"]), (6_921_930, 0, None))
 
     def test_the_same_figure_given_again_keeps_the_first_reading(self):
         conn = self.world()
@@ -351,11 +359,111 @@ class LivingMoneyPace(unittest.TestCase):
         conn = self.world()
         text = tools.summarize_plan(tools.generate_payday_plan(conn, self.DAY2))
         self.assertIn("uang harian bulan ini Rp 7.546.005 = Rp 2.827.889 dari gaji + sisa Rp 4.718.116", text)
-        self.assertIn("jatah harian Rp 243.419", text)                    # 7.546.005 // 31, not 2.827.889 // 31 = 91.222
-        self.assertIn("<b>Rp 7.546.005</b> (sekitar <b>Rp 243.419</b> per hari)", reports._rencana(conn, self.DAY2))
+        plan = reports._rencana(conn, self.DAY2)
+        self.assertIn("<b>Rp 7.546.005</b>\n    Rp 2.827.889 dari gaji + Rp 4.718.116 sisa yang sudah kamu pegang", plan)
         budget = reports._anggaran(conn, self.DAY2)
         self.assertIn("Terpakai <b>Rp 375.075</b> dari Rp 7.546.005 (Rp 2.827.889 dari gaji + sisa Rp 4.718.116)", budget)
-        self.assertIn("Sisa <b>Rp 7.170.930</b>, sekitar Rp 247.273/hari", budget)
+        self.assertIn("Sisa <b>Rp 7.170.930</b>", budget)
+        for out in (text, plan, budget):  # the daily money also pays electricity, phone and water: a per-day figure misleads
+            self.assertNotRegex(out, r"(?i)per hari|/hari|jatah harian")
+
+    # The owner's reading of the daily account (2026-11-01: 7.051.352 where the records said 6.921.930, after the wife's
+    # transfers bigger than the errands they paid for) corrects the month; what is recorded later counts once.
+    NOV1 = date(2026, 11, 1)
+
+    def left(self, conn, day=None):
+        return hl.spending_pace(conn, day or self.NOV1)["remaining"]
+
+    def test_the_pocket_balance_corrects_the_month(self):
+        conn = self.world()
+        hl.record_expense(conn, self.DAY2, 249_000, "ANKER", "2026-10-31", "belanja", "jago-harian")
+        msg = tools.record_account_balance(conn, self.NOV1, "jago-harian", 7_051_352)
+        p = hl.spending_pace(conn, self.NOV1)
+        self.assertEqual((p["remaining"], p["correction"], p["allowance"], p["spent"], p["pct_used"], p["status"]),
+                         (7_051_352, 129_422, 7_675_427, 624_075, 8, "ok"))
+        self.assertIn("Uang harian sampai gajian 2026-11-30 sekarang mengikuti saldo ini: sisa Rp 7.051.352 (menurut catatan "
+                      "sebelum laporan ini Rp 6.921.930; selisih +Rp 129.422: uang masuk yang tidak tercatat", msg)
+        self.assertIn("Terpakai Rp 624.075 dari Rp 7.675.427 (8%).", msg)
+        self.assertNotRegex(msg, r"(?i)autodebet|per hari|/hari|hanya benar bila")   # no auto-debit from it, no payday caveat
+        budget = reports._anggaran(conn, self.NOV1)
+        self.assertIn("Terpakai <b>Rp 624.075</b> dari Rp 7.675.427 (Rp 7.546.005 rencana + Rp 129.422 selisih saldo)\n"
+                      "Sisa <b>Rp 7.051.352</b>\n<i>mengikuti saldo jago-harian Rp 7.051.352 (1 Nov ", budget)
+        self.assertIn("selisih dengan catatan +Rp 129.422</i>", budget)
+        self.assertEqual(tools.get_threshold(conn, "living_balance_mark"),
+                         conn.execute("SELECT MAX(id) FROM transactions").fetchone()[0])
+
+    def test_card_purchases_are_not_out_of_the_account_yet(self):
+        conn = self.world(card=True)                                 # GRAB 90.000 on a card before the reading
+        msg = tools.record_account_balance(conn, self.NOV1, "jago-harian", 7_000_000)
+        self.assertEqual(self.left(conn), 6_910_000)
+        self.assertIn("Belanja kartu sejak gajian Rp 90.000 belum keluar dari rekening ini", msg)
+
+    def test_what_is_recorded_after_the_reading_counts_once(self):
+        conn = self.world()
+        tools.record_account_balance(conn, self.NOV1, "jago-harian", 7_000_000)
+        hl.record_expense(conn, self.NOV1, 100_000, "BENSIN", "2026-11-01", "transport", "jago-harian")   # after the reading
+        self.assertEqual(self.left(conn), 6_900_000)
+        hl.record_expense(conn, self.NOV1, 30_000, "KOPI", "2026-10-31", "makan", "jago-harian")   # late receipt: in the balance
+        self.assertEqual(self.left(conn), 6_900_000)
+        hl.record_expense(conn, self.NOV1, 90_000, "GRAB", "2026-10-31", "transport", card_alias="cimb-1")   # card: not out yet
+        self.assertEqual(self.left(conn), 6_810_000)
+        conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('mandiri-utama','Mandiri','main')")
+        hl.record_expense(conn, self.NOV1, 50_000, "PARKIR", "2026-10-31", "transport", "mandiri-utama")   # other account, earlier:
+        self.assertEqual(self.left(conn), 6_810_000)                    # daily money held there (the 30 Oct parking), not the pocket's
+        hl.record_expense(conn, self.NOV1, 2_000_000, "SEKOLAH", "2026-11-01", "wajib:sekolah", "jago-harian")  # not daily money
+        self.assertEqual(self.left(conn), 6_810_000)
+        nov2 = date(2026, 11, 2)
+        hl.record_expense(conn, nov2, 40_000, "TOL", "2026-11-02", "transport", "mandiri-utama")   # after the reading: any account
+        self.assertEqual(self.left(conn, nov2), 6_770_000)
+
+    def test_bank_rows_that_come_in_later(self):
+        conn = self.world()
+        conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('jago-utama','Jago','main')")   # Jago files every pocket here
+        acct = conn.execute("SELECT id FROM accounts WHERE alias='jago-utama'").fetchone()[0]
+        kopi = hl.record_expense(conn, self.NOV1, 30_000, "KOPI", "2026-11-01", "makan", "jago-harian")["id"]   # in the balance
+        tools.record_account_balance(conn, self.NOV1, "jago-harian", 7_000_000)
+
+        def row(day, amount):
+            return conn.execute("INSERT INTO transactions(account_id,txn_date,merchant,amount,category,status,source) "
+                                "VALUES (?,?,'POS',?,'makan','verified','mutation')", (acct, day, -amount)).lastrowid
+        conn.execute("UPDATE transactions SET merged_into=? WHERE id=?", (row("2026-11-01", 30_000), kopi))   # took the receipt in
+        row("2026-10-31", 45_000)                                  # spent before the reading day, never recorded: in the balance
+        self.assertEqual(self.left(conn), 7_000_000)
+        row("2026-11-01", 20_000)                                  # that day, recorded after the reading: counted
+        self.assertEqual(self.left(conn), 6_980_000)
+
+    def test_a_new_reading_replaces_the_last(self):
+        conn = self.world()
+        tools.record_account_balance(conn, self.NOV1, "jago-harian", 7_000_000)
+        hl.record_expense(conn, self.NOV1, 100_000, "BENSIN", "2026-11-01", "transport", "jago-harian")
+        msg = tools.record_account_balance(conn, date(2026, 11, 2), "jago-harian", 6_850_000)
+        self.assertIn("sisa Rp 6.850.000 (menurut catatan sebelum laporan ini Rp 6.900.000; selisih -Rp 50.000: keluar dari "
+                      "rekening ini tanpa tercatat, dihitung sebagai terpakai", msg)
+        p = hl.spending_pace(conn, date(2026, 11, 2))
+        self.assertEqual((p["remaining"], p["allowance"], p["spent"], p["correction"]), (6_850_000, 7_546_005, 696_005, -220_930))
+
+    def test_other_accounts_and_last_months_reading_do_not_anchor(self):
+        conn = self.world()
+        conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('mandiri-utama','Mandiri','main')")
+        self.assertIn("Tidak ada autodebet dari mandiri-utama", tools.record_account_balance(conn, self.NOV1, "mandiri-utama", 900_000))
+        self.assertIsNone(hl.spending_pace(conn, self.NOV1)["reading"])
+        tools.record_account_balance(conn, self.NOV1, "jago-harian", 7_000_000)
+        tools.generate_payday_plan(conn, date(2026, 11, 30), payday=date(2026, 11, 30))
+        p = hl.spending_pace(conn, date(2026, 12, 1))
+        self.assertEqual((p["payday"], p["reading"], p["correction"]), ("2026-11-30", None, 0))
+
+    def test_a_reading_before_the_top_up_waits_and_the_leftover_is_closed_after_it(self):
+        conn = self.world(payee=True)
+        msg = tools.record_account_balance(conn, self.NOV1, "jago-harian", 4_500_000)
+        self.assertIn("Transfer uang harian dari gaji 2026-10-30 (Rp 2.827.889) belum tercatat selesai", msg)
+        self.assertIsNone(hl.spending_pace(conn, self.NOV1)["reading"])
+        tools.mark_transfers_done(conn, self.NOV1, items=["uang-harian"])
+        tools.record_account_balance(conn, self.NOV1, "jago-harian", 7_051_352)
+        self.assertEqual(self.left(conn), 7_051_352)
+        # the trap: the balance now holds the top-up too; taken as the leftover it would make the month 2.827.889 + 7.051.352
+        with self.assertRaisesRegex(ValueError, r"sudah tercatat selesai.*saldo_rekening\(rekening='jago-harian'"):
+            tools.set_leftover_living_cash(conn, 7_051_352, self.NOV1)
+        self.assertEqual(tools.get_threshold(conn, "living_leftover"), 4_718_116)
 
 
 class Budgets(unittest.TestCase):

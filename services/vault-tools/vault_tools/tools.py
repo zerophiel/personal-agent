@@ -13,8 +13,8 @@ import holidays as _holidays
 
 from . import names
 from .money import check_idr, format_idr
-from .health import cash_spent
-from .payday import Obligation, Plan, build_plan, last_working_day, living_money, living_per_day, next_payday
+from .health import LIVING_ACCOUNT, cash_spent, spending_pace
+from .payday import Obligation, Plan, build_plan, last_working_day, living_money, next_payday
 
 
 def _cuti_bersama() -> frozenset[date]:
@@ -371,6 +371,12 @@ def set_leftover_living_cash(conn, amount: int, today: date, other: int = 0) -> 
                          "minta saldo SEBELUM gaji masuk. Bila memang ada lebih, catat paling banyak "
                          f"{format_idr(normal)}; kelebihannya bukan uang harian")
     payday = current_payday(today)
+    if conn.execute("SELECT 1 FROM plan_progress WHERE payday=? AND item=?", (payday.isoformat(), LIVING_PAYEE)).fetchone():
+        # after the top-up the account holds leftover and salary together: a balance read now taken as the leftover would
+        # count the top-up twice (2.8M + 7.0M instead of 7.5M); the current balance corrects the month instead
+        raise ValueError(f"transfer uang harian gajian {payday.isoformat()} sudah tercatat selesai, jadi sisa sebelum gaji tidak "
+                         f"diubah lagi. Untuk saldo rekening harian SEKARANG pakai saldo_rekening(rekening='{LIVING_ACCOUNT}', "
+                         "saldo=...): uang harian bulan ini dikoreksi ke saldo itu")
     key = int(payday.strftime("%Y%m%d"))
     # Cash spent from the payday until the first reading on or after it is already out of the leftover: the spending pace
     # must not count it again. The bot does not ask twice, so a later figure for the same payday corrects that reading and
@@ -970,18 +976,52 @@ def _reported(r) -> str:
     return f"{format_idr(r['balance'])}, dilaporkan {r['as_of']} pukul {r['at'][11:16]} WIB"
 
 
+def _living_balance(conn, today: date, report_id: int) -> str:
+    """A balance of the daily account becomes the month's anchor (health.living_anchor): the report, and the last
+    transaction recorded at that moment, so what is recorded later is told apart from what the balance already shows."""
+    row = conn.execute("SELECT snapshot_json FROM plans ORDER BY id DESC LIMIT 1").fetchone()
+    snap = json.loads(row["snapshot_json"]) if row else None
+    if snap is None or not snap["payday"] <= today.isoformat() < snap["next_payday"]:
+        return "Belum ada rencana gajian yang berjalan, jadi uang harian belum dikoreksi dengan saldo ini."
+    lt = snap.get("living_transfer") or {}
+    if lt.get("amount") and not conn.execute("SELECT 1 FROM plan_progress WHERE payday=? AND item=?",
+                                             (snap["payday"], lt["to_alias"])).fetchone():
+        return (f"Transfer uang harian dari gaji {snap['payday']} ({format_idr(lt['amount'])}) belum tercatat selesai, jadi saldo ini "
+                "belum dipakai untuk mengoreksi uang harian. Setelah transfer: transfer_selesai, lalu laporkan saldo lagi.")
+    before = spending_pace(conn, today)          # what was counted just before this reading (an earlier one included)
+    mark = conn.execute("SELECT COALESCE(MAX(id), 0) FROM transactions").fetchone()[0]
+    set_threshold(conn, "living_balance_report", report_id)
+    set_threshold(conn, "living_balance_mark", mark)
+    pace = spending_pace(conn, today)
+    diff = pace["remaining"] - before["remaining"]
+    return (f"Uang harian sampai gajian {pace['next_payday']} sekarang mengikuti saldo ini: sisa {format_idr(pace['remaining'])} "
+            f"(menurut catatan sebelum laporan ini {format_idr(before['remaining'])}; "
+            + (f"selisih +{format_idr(diff)}: uang masuk yang tidak tercatat, mis. transfer yang lebih dari belanjanya" if diff > 0 else
+               f"selisih -{format_idr(-diff)}: keluar dari rekening ini tanpa tercatat, dihitung sebagai terpakai; belanja yang "
+               "teringat dicatat dengan tanggal sebenarnya (yang sebelum hari ini tidak terhitung dua kali)" if diff < 0
+               else "sama") + ")."
+            + (f" Belanja kartu sejak gajian {format_idr(pace['reading']['card'])} belum keluar dari rekening ini, jadi sudah "
+               "dikurangkan." if pace["reading"]["card"] else "")
+            + f" Terpakai {format_idr(pace['spent'])} dari {format_idr(pace['allowance'])} ({pace['pct_used']}%).")
+
+
 def record_account_balance(conn, today: date, alias: str, balance: int) -> str:
-    """Store a balance the owner read in the bank app (gross, as shown) and say whether the auto-debits still to come fit."""
+    """Store a balance the owner read in the bank app (gross, as shown) and say whether the auto-debits still to come fit.
+    A balance of the daily account also corrects the month's daily money (_living_balance)."""
     check_idr(balance)
     if balance < 0:
         raise ValueError("saldo tidak boleh negatif")
     acct = conn.execute("SELECT id FROM accounts WHERE alias=?", (alias,)).fetchone()
     if acct is None:
         raise ValueError(f"rekening {alias} belum terdaftar (lihat ringkasan_data)")
-    conn.execute("INSERT INTO balance_reports(account_id, as_of, at, balance) VALUES (?,?,?,?)",
-                 (acct["id"], today.isoformat(), datetime.now(WIB).isoformat(timespec="minutes"), balance))
+    cur = conn.execute("INSERT INTO balance_reports(account_id, as_of, at, balance) VALUES (?,?,?,?)",
+                       (acct["id"], today.isoformat(), datetime.now(WIB).isoformat(timespec="minutes"), balance))
     conn.commit()
-    out = f"Saldo {alias} {_reported(latest_balance(conn, alias))}. " + format_autodebit_check(autodebit_check(conn, alias, balance, today))
+    out = f"Saldo {alias} {_reported(latest_balance(conn, alias))}. "
+    check = autodebit_check(conn, alias, balance, today)
+    if alias == LIVING_ACCOUNT:
+        return out + _living_balance(conn, today, cur.lastrowid) + (" " + format_autodebit_check(check) if check["debits"] else "")
+    out += format_autodebit_check(check)
     if current_payday(today) <= today:   # the payday days: a balance read before the salary transfers still holds their money
         out += " Angka ini hanya benar bila semua transfer gajian sudah dilakukan; bila belum, laporkan lagi setelah transfer."
     return out
@@ -1285,8 +1325,7 @@ def summarize_plan(snap: dict) -> str:
     held = snap.get("living_leftover") or 0
     lines.append(f"Kas ditahan: {format_idr(snap['cash_to_hold'])}"
                  + (f"; uang harian bulan ini {format_idr(living_money(snap))} = {format_idr(snap['cash_to_hold'])} dari gaji + "
-                    f"sisa {format_idr(held)} yang sudah dipegang" if held else "")
-                 + f"; jatah harian {format_idr(living_per_day(snap))}")
+                    f"sisa {format_idr(held)} yang sudah dipegang" if held else ""))
     prog = snap.get("progress") or {}
     items = prog.get("items") or []
     if any(it["done"] for it in items) or prog.get("beyond"):

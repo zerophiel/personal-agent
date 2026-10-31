@@ -179,8 +179,3 @@ def living_money(snap: dict) -> int:
     the owner still held. Never the salary part alone: on 2026-10-31 the pace warning read 22% used of the 2.827.889
     top-up while the owner had 2.827.889 + 4.718.116 = 7.546.005 for the month."""
     return snap["cash_to_hold"] + (snap.get("living_leftover") or 0)
-
-
-def living_per_day(snap: dict) -> int:
-    days = (date.fromisoformat(snap["next_payday"]) - date.fromisoformat(snap["payday"])).days
-    return living_money(snap) // days if days > 0 else 0

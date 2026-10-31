@@ -27,8 +27,9 @@ from .payday import living_money
 OBLIGATION_PREFIXES = ("wajib:", "sinking:", "sekali:", "berhenti:", "perantara:")   # berhenti: = a recurring cost that has ended
 DEFAULT_MIN_SAVINGS_BP = 1000      # save at least 10% of income unless the owner sets another figure
 DEFAULT_DSR_MAX_BP = 3000          # monthly debt payments <= 30% of net income
-WATCH_PCT, OVER_PCT, PACE_SLACK = 80, 100, 15
+WATCH_PCT, OVER_PCT = 80, 100
 MATCH_DAYS = 2
+LIVING_ACCOUNT = "jago-harian"      # the account the owner spends day-to-day from (its number is the payee 'uang-harian')
 
 
 def is_discretionary(category: str | None) -> bool:
@@ -503,10 +504,49 @@ def cash_spent(conn, start: date, end: date) -> int:
     return sum(v for c, v in _spent_by_category(conn, start, end).items() if is_discretionary(c) and not c.startswith("kartu:"))
 
 
+def living_anchor(conn, payday: date, nxt: date) -> dict | None:
+    """The owner's latest reading of the daily account's balance in this payday window, with the last transaction id that
+    was recorded at that moment (record_account_balance keeps both)."""
+    rid, mark = _th(conn, "living_balance_report"), _th(conn, "living_balance_mark")
+    if rid is None or mark is None:
+        return None
+    r = conn.execute("SELECT r.*, a.alias FROM balance_reports r JOIN accounts a ON a.id = r.account_id WHERE r.id=?",
+                     (rid,)).fetchone()
+    if r is None or r["alias"] != LIVING_ACCOUNT or not payday.isoformat() <= r["as_of"] < nxt.isoformat():
+        return None
+    return {"as_of": r["as_of"], "at": r["at"], "balance": r["balance"], "mark": mark}
+
+
+def _by_balance(conn, a: dict, payday: date, today: date) -> tuple[int, int]:
+    """(daily money left, card purchases in it) by the reading `a`. The balance is the truth for the days before the
+    reading: what left any account then is in it, or was daily money held elsewhere (the owner paid the 30 Oct parking from
+    the Mandiri leftover), whenever it is recorded; a bank account's rows can come in weeks later, and Jago files every
+    pocket under one account. What comes off: card purchases since the payday (daily money, not out of the account yet)
+    and what was spent after the reading, dated later or dated that day and recorded after it (not a bank row that took in
+    a receipt recorded before the reading)."""
+    card = after = 0
+    for r in conn.execute(
+            "SELECT t.id, t.amount, t.category, t.card_id, t.txn_date,"
+            " EXISTS (SELECT 1 FROM transactions m WHERE m.merged_into = t.id AND m.id <= ?) AS seen"
+            " FROM transactions t WHERE t.amount < 0 AND t.merged_into IS NULL AND t.txn_date BETWEEN ? AND ?",
+            (a["mark"], payday.isoformat(), today.isoformat())):
+        if not is_discretionary(r["category"]):
+            continue
+        if r["card_id"] is not None:
+            card += -r["amount"]
+        elif r["txn_date"] > a["as_of"] or (r["txn_date"] == a["as_of"] and r["id"] > a["mark"] and not r["seen"]):
+            after += -r["amount"]
+    return a["balance"] - card - after, card
+
+
 def spending_pace(conn, today: date) -> dict | None:
     """Day-to-day spending since the last payday against the month's daily money: the plan's top-up from the salary plus
     the leftover the owner still held (payday.living_money). Cash spent from the payday on but before the owner reported
-    that leftover is already out of it (set_leftover_living_cash keeps the figure), so it is not counted twice."""
+    that leftover is already out of it (set_leftover_living_cash keeps the figure), so it is not counted twice.
+    Once the owner reads the daily account's balance (living_anchor), what is left follows that balance: money that came in
+    unrecorded (a transfer bigger than the errand it paid for) adds to the month, unrecorded spending counts as spent.
+    No per-day figure and no comparison with the days gone by: the daily money also pays monthly bills (electricity,
+    phone, water), so it is not spent evenly."""
     row = conn.execute("SELECT snapshot_json FROM plans ORDER BY id DESC LIMIT 1").fetchone()
     if row is None:
         return None
@@ -518,15 +558,17 @@ def spending_pace(conn, today: date) -> dict | None:
     before = (_th(conn, "living_leftover_spent", 0) or 0
               if held and _th(conn, "living_leftover_payday") == int(payday.strftime("%Y%m%d")) else 0)
     spent = max(0, sum(v for c, v in _spent_by_category(conn, payday, today).items() if is_discretionary(c)) - before)
-    window, elapsed = (nxt - payday).days, (today - payday).days + 1
-    elapsed_pct = elapsed * 100 // window
+    a, correction, reading = living_anchor(conn, payday, nxt), 0, None
+    if a:
+        left, card = _by_balance(conn, a, payday, today)
+        correction = left - (allowance - spent)
+        allowance, spent = allowance + max(0, correction), spent + max(0, -correction)
+        reading = {"alias": LIVING_ACCOUNT, "balance": a["balance"], "as_of": a["as_of"], "at": a["at"][11:16], "card": card}
     pct = spent * 100 // allowance if allowance > 0 else (OVER_PCT if spent else 0)
-    status = ("over" if spent > allowance else
-              "watch" if pct >= WATCH_PCT or pct > elapsed_pct + PACE_SLACK else "ok")
+    status = "over" if spent > allowance else "watch" if pct >= WATCH_PCT else "ok"
     return {"payday": payday.isoformat(), "next_payday": nxt.isoformat(), "allowance": allowance,
             "from_salary": snap["cash_to_hold"], "leftover": held, "spent_before_leftover": before, "spent": spent,
-            "remaining": allowance - spent, "pct_used": pct, "elapsed_pct": elapsed_pct, "status": status,
-            "days_left": window - elapsed, "safe_per_day": (allowance - spent) // max(1, window - elapsed) if allowance > spent else 0}
+            "remaining": allowance - spent, "pct_used": pct, "status": status, "correction": correction, "reading": reading}
 
 
 def alerts_for(conn, today: date, category: str | None, txn_date: date | None = None) -> list[str]:
@@ -534,12 +576,11 @@ def alerts_for(conn, today: date, category: str | None, txn_date: date | None = 
     out = []
     pace = spending_pace(conn, today)
     if pace and pace["status"] == "over":
-        out.append(f"PENGELUARAN HARIAN MELEBIHI JATAH: terpakai {format_idr(pace['spent'])} dari {format_idr(pace['allowance'])} "
-                   f"sebelum gajian {pace['next_payday']}.")
+        out.append(f"PENGELUARAN MELEBIHI UANG HARIAN BULAN INI: terpakai {format_idr(pace['spent'])} dari "
+                   f"{format_idr(pace['allowance'])} sebelum gajian {pace['next_payday']}.")
     elif pace and pace["status"] == "watch":
-        out.append(f"Waspada: {pace['pct_used']}% jatah harian terpakai ({format_idr(pace['spent'])} dari "
-                   f"{format_idr(pace['allowance'])}) padahal baru {pace['elapsed_pct']}% waktu berlalu. "
-                   f"Sisa {format_idr(pace['remaining'])} untuk {pace['days_left']} hari (sekitar {format_idr(pace['safe_per_day'])}/hari).")
+        out.append(f"Waspada: {pace['pct_used']}% uang harian bulan ini terpakai ({format_idr(pace['spent'])} dari "
+                   f"{format_idr(pace['allowance'])}). Sisa {format_idr(pace['remaining'])} sampai gajian {pace['next_payday']}.")
     if category:
         d = txn_date or today
         for b in budget_status(conn, f"{d.year}-{d.month:02d}"):
@@ -647,8 +688,8 @@ def health_check(conn, today: date, month: str | None = None) -> dict:
     pace = spending_pace(conn, today)
     if pace and pace["status"] != "ok":
         findings.append(("bad" if pace["status"] == "over" else "warn",
-                         f"Pengeluaran harian: {format_idr(pace['spent'])} dari jatah {format_idr(pace['allowance'])} "
-                         f"({pace['pct_used']}%, waktu berlalu {pace['elapsed_pct']}%)."))
+                         f"Pengeluaran harian: {format_idr(pace['spent'])} dari uang harian bulan ini "
+                         f"{format_idr(pace['allowance'])} ({pace['pct_used']}%)."))
     for b in budget_status(conn, month):
         if b["status"] != "ok":
             findings.append(("bad" if b["status"] == "over" else "warn",
