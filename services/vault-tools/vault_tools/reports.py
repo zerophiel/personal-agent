@@ -169,7 +169,7 @@ def _rencana(conn, today: date) -> str:
     held = snap.get("living_leftover") or 0
     if held:
         foot = (f"💵 {b('Uang tunai harian')}: {b(format_idr(living_money(snap)))} (sekitar {b(format_idr(living_per_day(snap)))} "
-                f"per hari)\n    {e(format_idr(snap['cash_to_hold']))} dari gaji + {e(format_idr(held))} sisa yang sudah Anda pegang")
+                f"per hari)\n    {e(format_idr(snap['cash_to_hold']))} dari gaji + {e(format_idr(held))} sisa yang sudah kamu pegang")
     else:
         foot = f"💵 Kas ditahan {b(format_idr(snap['cash_to_hold']))} · jatah harian {b(format_idr(living_per_day(snap)))}"
     out.append(foot)
