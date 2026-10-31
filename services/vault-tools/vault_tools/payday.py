@@ -172,3 +172,15 @@ def build_plan(payday: date, salary: int, obligations: Iterable[Obligation],
         warnings.append("Sisa kas di bawah buffer yang Anda tetapkan.")
     return Plan(payday, nxt, salary, tuple(transfers), tuple(unfunded), remaining,
                 remaining // days if days else 0, tuple(warnings), reserve)
+
+
+def living_money(snap: dict) -> int:
+    """A stored plan's whole month of daily money: what it keeps from the salary (the top-up) plus last cycle's leftover
+    the owner still held. Never the salary part alone: on 2026-10-31 the pace warning read 22% used of the 2.827.889
+    top-up while the owner had 2.827.889 + 4.718.116 = 7.546.005 for the month."""
+    return snap["cash_to_hold"] + (snap.get("living_leftover") or 0)
+
+
+def living_per_day(snap: dict) -> int:
+    days = (date.fromisoformat(snap["next_payday"]) - date.fromisoformat(snap["payday"])).days
+    return living_money(snap) // days if days > 0 else 0

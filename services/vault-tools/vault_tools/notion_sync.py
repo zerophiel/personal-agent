@@ -16,6 +16,7 @@ from datetime import date
 from . import card_installments, roadmap, subscriptions, tools
 from .ledger import connect
 from .money import format_idr
+from .payday import living_money
 
 API = "https://api.notion.com/v1"
 VERSION = "2022-06-28"
@@ -115,8 +116,10 @@ def _stamp(today: date) -> dict:
 def render_plan(conn, today: date) -> tuple[str, list[dict]]:
     snap = tools.generate_payday_plan(conn, today)
     blocks = [_stamp(today), para(f"Gaji {format_idr(snap['salary'])}. Cadangan kas harian {format_idr(snap['reserve'])} ({snap.get('reserve_source')}).")]
-    if snap.get("reserve_source", "").startswith("sementara"):
-        blocks.append(para("Catatan: cadangan sementara hanya bagian yang diambil dari gaji; uang tunai harian sebenarnya termasuk saldo yang sudah dipegang."))
+    if snap.get("living_leftover"):
+        blocks.append(para(f"Catatan: cadangan sementara hanya bagian yang diambil dari gaji; uang harian bulan ini "
+                           f"{format_idr(living_money(snap))} = {format_idr(snap['cash_to_hold'])} dari gaji + sisa "
+                           f"{format_idr(snap['living_leftover'])} yang sudah dipegang."))
     rows = [[t["date"], t["to_alias"], format_idr(t["amount"]),
              t["reason"] + {"autodebit": f"; autodebet, saldo cukup sebelum {t.get('due')}", "app_menu": "; lewat menu aplikasi"}.get(t.get("method"), "")]
             for t in snap["transfers"]]

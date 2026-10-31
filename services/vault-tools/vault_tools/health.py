@@ -22,6 +22,7 @@ from datetime import date, datetime, timedelta, timezone
 from . import changelog
 from .money import check_idr, format_idr
 from .mutations import INTERNAL, cashflow, clean_text, normalize
+from .payday import living_money
 
 OBLIGATION_PREFIXES = ("wajib:", "sinking:", "sekali:", "berhenti:", "perantara:")   # berhenti: = a recurring cost that has ended
 DEFAULT_MIN_SAVINGS_BP = 1000      # save at least 10% of income unless the owner sets another figure
@@ -497,8 +498,15 @@ def budget_status(conn, month: str) -> list[dict]:
     return out
 
 
+def cash_spent(conn, start: date, end: date) -> int:
+    """Day-to-day spending paid from the owner's accounts, not by card, dated start..end (as the spending pace counts it)."""
+    return sum(v for c, v in _spent_by_category(conn, start, end).items() if is_discretionary(c) and not c.startswith("kartu:"))
+
+
 def spending_pace(conn, today: date) -> dict | None:
-    """Day-to-day spending since the last payday against the cash the plan left for daily life."""
+    """Day-to-day spending since the last payday against the month's daily money: the plan's top-up from the salary plus
+    the leftover the owner still held (payday.living_money). Cash spent from the payday on but before the owner reported
+    that leftover is already out of it (set_leftover_living_cash keeps the figure), so it is not counted twice."""
     row = conn.execute("SELECT snapshot_json FROM plans ORDER BY id DESC LIMIT 1").fetchone()
     if row is None:
         return None
@@ -506,14 +514,17 @@ def spending_pace(conn, today: date) -> dict | None:
     payday, nxt = date.fromisoformat(snap["payday"]), date.fromisoformat(snap["next_payday"])
     if not payday <= today < nxt:
         return None                                   # the plan is for another window
-    allowance = snap["cash_to_hold"]
-    spent = sum(v for c, v in _spent_by_category(conn, payday, today).items() if is_discretionary(c))
+    allowance, held = living_money(snap), snap.get("living_leftover") or 0
+    before = (_th(conn, "living_leftover_spent", 0) or 0
+              if held and _th(conn, "living_leftover_payday") == int(payday.strftime("%Y%m%d")) else 0)
+    spent = max(0, sum(v for c, v in _spent_by_category(conn, payday, today).items() if is_discretionary(c)) - before)
     window, elapsed = (nxt - payday).days, (today - payday).days + 1
     elapsed_pct = elapsed * 100 // window
     pct = spent * 100 // allowance if allowance > 0 else (OVER_PCT if spent else 0)
     status = ("over" if spent > allowance else
               "watch" if pct >= WATCH_PCT or pct > elapsed_pct + PACE_SLACK else "ok")
-    return {"payday": payday.isoformat(), "next_payday": nxt.isoformat(), "allowance": allowance, "spent": spent,
+    return {"payday": payday.isoformat(), "next_payday": nxt.isoformat(), "allowance": allowance,
+            "from_salary": snap["cash_to_hold"], "leftover": held, "spent_before_leftover": before, "spent": spent,
             "remaining": allowance - spent, "pct_used": pct, "elapsed_pct": elapsed_pct, "status": status,
             "days_left": window - elapsed, "safe_per_day": (allowance - spent) // max(1, window - elapsed) if allowance > spent else 0}
 
@@ -526,7 +537,8 @@ def alerts_for(conn, today: date, category: str | None, txn_date: date | None = 
         out.append(f"PENGELUARAN HARIAN MELEBIHI JATAH: terpakai {format_idr(pace['spent'])} dari {format_idr(pace['allowance'])} "
                    f"sebelum gajian {pace['next_payday']}.")
     elif pace and pace["status"] == "watch":
-        out.append(f"Waspada: {pace['pct_used']}% jatah harian terpakai padahal baru {pace['elapsed_pct']}% waktu berlalu. "
+        out.append(f"Waspada: {pace['pct_used']}% jatah harian terpakai ({format_idr(pace['spent'])} dari "
+                   f"{format_idr(pace['allowance'])}) padahal baru {pace['elapsed_pct']}% waktu berlalu. "
                    f"Sisa {format_idr(pace['remaining'])} untuk {pace['days_left']} hari (sekitar {format_idr(pace['safe_per_day'])}/hari).")
     if category:
         d = txn_date or today

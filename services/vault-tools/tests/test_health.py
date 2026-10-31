@@ -9,6 +9,7 @@ from datetime import date
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from vault_tools import health as hl  # noqa: E402
 from vault_tools import mutations as mu  # noqa: E402
+from vault_tools import reports  # noqa: E402
 from vault_tools import tools  # noqa: E402
 from vault_tools.ledger import connect  # noqa: E402
 
@@ -282,6 +283,62 @@ class Pace(unittest.TestCase):
         self.assertTrue(any("Waspada" in a and "60%" in a for a in r["alerts"]), r["alerts"])
         r = spend(conn, 5_000_000, "LAPTOP", category="elektronik", day="2026-11-06")
         self.assertTrue(any("MELEBIHI JATAH" in a for a in r["alerts"]), r["alerts"])
+
+
+class LivingMoneyPace(unittest.TestCase):
+    """Regression 2026-10-31: right after a purchase the pace said 22% of the daily money was used, counting only the
+    2.827.889 top-up from the salary. The owner's month was that plus the 4.718.116 leftover already held: 7.546.005."""
+    PAYDAY, DAY2 = date(2026, 10, 30), date(2026, 10, 31)
+
+    def world(self, card=False):
+        conn = connect(":memory:")
+        conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('jago-harian','Jago','main')")
+        conn.commit()
+        tools.upsert_card(conn, "cimb-1", "CIMB", "2222", 5, 5, 10_000_000)
+        tools.set_threshold(conn, "net_salary", 2_827_889)                   # no bills: the whole salary is the top-up
+        tools.set_threshold(conn, "living_reserve", 7_546_005)
+        hl.record_expense(conn, self.PAYDAY, 17_000, "WARKOP DANI", "2026-10-30", "makan", "jago-harian")  # before the reading
+        if card:
+            hl.record_expense(conn, self.PAYDAY, 90_000, "GRAB", "2026-10-30", "transport", card_alias="cimb-1")
+        self.msg = tools.set_leftover_living_cash(conn, 4_718_116, self.PAYDAY)
+        tools.generate_payday_plan(conn, self.PAYDAY, payday=self.PAYDAY)
+        for amount, merchant, day in ((150_000, "PARKIR", "2026-10-30"), (51_000, "WARTEG", "2026-10-30"),
+                                      (174_075, "YONNY", "2026-10-31")):
+            hl.record_expense(conn, self.DAY2, amount, merchant, day, "makan", "jago-harian")
+        return conn
+
+    def test_the_top_up_plus_the_leftover_is_the_allowance(self):
+        conn = self.world()
+        self.assertIn("(Rp 17.000) sudah keluar dari sisa ini", self.msg)
+        r = hl.record_expense(conn, self.DAY2, 249_000, "ANKER", "2026-10-31", "belanja", "jago-harian")
+        self.assertFalse(any("Waspada" in a or "MELEBIHI" in a for a in r["alerts"]), r["alerts"])   # was "22% terpakai"
+        p = hl.spending_pace(conn, self.DAY2)
+        self.assertEqual((p["allowance"], p["from_salary"], p["leftover"]), (7_546_005, 2_827_889, 4_718_116))
+        self.assertEqual((p["spent"], p["spent_before_leftover"], p["pct_used"], p["elapsed_pct"], p["status"]),
+                         (624_075, 17_000, 8, 6, "ok"))                     # the coffee is already out of the leftover
+        self.assertEqual((p["remaining"], p["days_left"], p["safe_per_day"]), (6_921_930, 29, 238_687))
+
+    def test_the_same_figure_given_again_keeps_the_first_reading(self):
+        conn = self.world()
+        tools.set_leftover_living_cash(conn, 4_718_116, self.DAY2)        # asked again a day later: nothing new in it
+        p = hl.spending_pace(conn, self.DAY2)
+        self.assertEqual((p["spent_before_leftover"], p["spent"]), (17_000, 375_075))
+        self.assertIn("SISA UANG HARIAN TERCATAT: Rp 4.718.116 untuk gajian 2026-10-30 (dicatat 2026-10-30); belanja tunai "
+                      "sejak gajian sebelum laporan itu Rp 17.000 sudah keluar", tools.data_overview(conn, self.DAY2))
+
+    def test_a_card_purchase_was_never_in_the_leftover(self):
+        p = hl.spending_pace(self.world(card=True), self.DAY2)
+        self.assertEqual((p["spent_before_leftover"], p["spent"]), (17_000, 465_075))
+
+    def test_the_plan_and_the_reports_show_the_whole_month(self):
+        conn = self.world()
+        text = tools.summarize_plan(tools.generate_payday_plan(conn, self.DAY2))
+        self.assertIn("uang harian bulan ini Rp 7.546.005 = Rp 2.827.889 dari gaji + sisa Rp 4.718.116", text)
+        self.assertIn("jatah harian Rp 243.419", text)                    # 7.546.005 // 31, not 2.827.889 // 31 = 91.222
+        self.assertIn("<b>Rp 7.546.005</b> (sekitar <b>Rp 243.419</b> per hari)", reports._rencana(conn, self.DAY2))
+        budget = reports._anggaran(conn, self.DAY2)
+        self.assertIn("Terpakai <b>Rp 375.075</b> dari Rp 7.546.005 (Rp 2.827.889 dari gaji + sisa Rp 4.718.116)", budget)
+        self.assertIn("Sisa <b>Rp 7.170.930</b>, sekitar Rp 247.273/hari", budget)
 
 
 class Budgets(unittest.TestCase):

@@ -13,7 +13,8 @@ import holidays as _holidays
 
 from . import names
 from .money import check_idr, format_idr
-from .payday import Obligation, Plan, build_plan, last_working_day, next_payday
+from .health import cash_spent
+from .payday import Obligation, Plan, build_plan, last_working_day, living_money, living_per_day, next_payday
 
 
 def _cuti_bersama() -> frozenset[date]:
@@ -235,7 +236,9 @@ def data_overview(conn, today: date) -> str:
              f"dilindungi): {format_idr(th['living_reserve']) if 'living_reserve' in th else 'belum diset'}")
     if "living_leftover" in th and "living_leftover_payday" in th:
         L.append(f"SISA UANG HARIAN TERCATAT: {format_idr(th['living_leftover'])} untuk gajian {_ymd(th['living_leftover_payday'])}"
-                 + (f" (dicatat {_ymd(th['living_leftover_at'])})" if th.get("living_leftover_at") else ""))
+                 + (f" (dicatat {_ymd(th['living_leftover_at'])})" if th.get("living_leftover_at") else "")
+                 + (f"; belanja tunai sejak gajian sebelum laporan itu {format_idr(th['living_leftover_spent'])} sudah keluar "
+                    "dari sisa ini (tidak dihitung lagi di jatah harian)" if th.get("living_leftover_spent") else ""))
     L.append("ANGGARAN: " + ("; ".join(f"{k[7:]} {format_idr(v)}" for k, v in sorted(th.items()) if k.startswith("budget:")) or "belum ada"))
     return "\n".join(L)
 
@@ -368,14 +371,23 @@ def set_leftover_living_cash(conn, amount: int, today: date, other: int = 0) -> 
                          "minta saldo SEBELUM gaji masuk. Bila memang ada lebih, catat paling banyak "
                          f"{format_idr(normal)}; kelebihannya bukan uang harian")
     payday = current_payday(today)
-    set_threshold(conn, "living_leftover", total)
-    set_threshold(conn, "living_leftover_payday", int(payday.strftime("%Y%m%d")))
-    set_threshold(conn, "living_leftover_at", int(today.strftime("%Y%m%d")))
+    key = int(payday.strftime("%Y%m%d"))
+    # The same figure given again is the same reading: purchases since then are not in it, so the first count stands
+    if not (get_threshold(conn, "living_leftover_payday") == key and get_threshold(conn, "living_leftover") == total
+            and get_threshold(conn, "living_leftover_spent") is not None):
+        set_threshold(conn, "living_leftover", total)
+        set_threshold(conn, "living_leftover_payday", key)
+        set_threshold(conn, "living_leftover_at", int(today.strftime("%Y%m%d")))
+        # cash spent from the payday until this reading is already out of it: the spending pace must not count it again
+        set_threshold(conn, "living_leftover_spent", cash_spent(conn, payday, today))
     conn.execute("DELETE FROM thresholds WHERE key IN ('living_reserve_override', 'living_reserve_override_until')")
     conn.commit()
     parts = f" ({format_idr(amount)} + {format_idr(other)})" if other else ""
+    spent = get_threshold(conn, "living_leftover_spent") or 0
     return (f"Sisa uang harian {format_idr(total)}{parts} dicatat untuk gajian {payday.isoformat()}: uang harian yang diambil dari "
-            f"gaji ini {format_idr(normal - total)}, jadi total uang harian tetap {format_idr(normal)}.")
+            f"gaji ini {format_idr(normal - total)}, jadi total uang harian tetap {format_idr(normal)}."
+            + (f" Belanja tunai sejak gajian yang sudah tercatat sebelum laporan ini ({format_idr(spent)}) sudah keluar dari sisa "
+               "ini, jadi tidak dihitung lagi di jatah harian." if spent else ""))
 
 
 def list_uploads(upload_dir: str, limit: int = 10) -> list[str]:
@@ -1267,7 +1279,11 @@ def summarize_plan(snap: dict) -> str:
     lt = snap.get("living_transfer")
     if lt and lt["amount"]:
         lines.append(f"- {lt['date']} {lt['to_alias']}: {format_idr(lt['amount'])} (uang harian ke rekening harian)")
-    lines.append(f"Kas ditahan: {format_idr(snap['cash_to_hold'])}; jatah harian {format_idr(snap['daily_allowance'])}")
+    held = snap.get("living_leftover") or 0
+    lines.append(f"Kas ditahan: {format_idr(snap['cash_to_hold'])}"
+                 + (f"; uang harian bulan ini {format_idr(living_money(snap))} = {format_idr(snap['cash_to_hold'])} dari gaji + "
+                    f"sisa {format_idr(held)} yang sudah dipegang" if held else "")
+                 + f"; jatah harian {format_idr(living_per_day(snap))}")
     prog = snap.get("progress") or {}
     items = prog.get("items") or []
     if any(it["done"] for it in items) or prog.get("beyond"):

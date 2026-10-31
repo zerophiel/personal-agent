@@ -17,7 +17,7 @@ Window = [payday, next payday). Obligations due on/after next payday belong to t
 Allocation is sequential: each item gets `min(amount, remaining)`. Once one item is short, every later item gets 0. Nothing is dropped silently: each shortfall is listed with an estimated cost of delay (`amount * late_cost_bp / 10000`, rounded half up).
 
 ## Output
-Transfers `[date, from account, payee alias, amount, reason]` (transfer date = payday if overdue, else max(payday, due - 3 days)), `cash_to_hold` (salary minus funded), `daily_allowance = cash_to_hold // days_in_window`, warnings. Full destination numbers are never in the plan; they are served by `/rincian` outside the model.
+Transfers `[date, from account, payee alias, amount, reason]` (transfer date = payday if overdue, else max(payday, due - 3 days)), `cash_to_hold` (salary minus funded), `daily_allowance = cash_to_hold // days_in_window` (the salary part only), warnings. The owner's daily money for the window is `living_money = cash_to_hold + living_leftover` (the top-up from the salary plus last cycle's leftover the owner still held): "jatah harian" (`living_per_day`, `living_money // days_in_window`) and the spending pace use it, never the salary part alone. Cash spent from the payday until the owner reported that leftover is already out of it: `set_leftover_living_cash` keeps that figure (`living_leftover_spent`) and the pace does not count it again. Full destination numbers are never in the plan; they are served by `/rincian` outside the model.
 
 ## Worked example (dummy numbers)
 Payday 2026-10-30 (31 Oct is Saturday), next payday 2026-11-30, 31 days. Salary Rp 10.000.000.

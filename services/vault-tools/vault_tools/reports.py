@@ -9,6 +9,7 @@ from datetime import date
 
 from . import card_installments, card_lines, health, roadmap, subscriptions, tools
 from .money import format_idr
+from .payday import living_money, living_per_day
 
 NAMES = ("bantuan", "rencana", "tagihan", "belanja", "cicilan", "anggaran", "peta", "kondisi", "data", "periksa", "usulan")
 
@@ -165,13 +166,12 @@ def _rencana(conn, today: date) -> str:
     choices = [a for a in snap.get("advice", []) if a.startswith(("Opsi", "Jika tidak"))]
     if choices:
         out.append(f"💡 {b('Pilihan')}\n" + "\n".join(f"• {e(pretty(a, conn, banks))}" for a in choices))
-    normal = tools.get_threshold(conn, "living_reserve")
-    if str(snap.get("reserve_source", "")).startswith("sementara") and normal and snap["daily_allowance"]:
-        days = max(1, round(snap["cash_to_hold"] / snap["daily_allowance"]))
-        foot = (f"💵 {b('Uang tunai harian')}: {b(format_idr(normal))} (sekitar {b(format_idr(normal // days))} per hari)\n"
-                f"    {e(format_idr(snap['cash_to_hold']))} dari gaji + saldo yang sudah Anda pegang")
+    held = snap.get("living_leftover") or 0
+    if held:
+        foot = (f"💵 {b('Uang tunai harian')}: {b(format_idr(living_money(snap)))} (sekitar {b(format_idr(living_per_day(snap)))} "
+                f"per hari)\n    {e(format_idr(snap['cash_to_hold']))} dari gaji + {e(format_idr(held))} sisa yang sudah Anda pegang")
     else:
-        foot = f"💵 Kas ditahan {b(format_idr(snap['cash_to_hold']))} · jatah harian {b(format_idr(snap['daily_allowance']))}"
+        foot = f"💵 Kas ditahan {b(format_idr(snap['cash_to_hold']))} · jatah harian {b(format_idr(living_per_day(snap)))}"
     out.append(foot)
     return "\n\n".join(out)
 
@@ -228,7 +228,11 @@ def _anggaran(conn, today: date) -> str:
     out.append("\n\n".join(lines) if lines else "Belum ada anggaran.")
     pace = health.spending_pace(conn, today)
     if pace:
-        out.append(f"🗓️ {b('Jatah harian')} sampai gajian {e(tgl(pace['next_payday']))}\nTerpakai {b(format_idr(pace['spent']))} dari {e(format_idr(pace['allowance']))}")
+        split = f" ({format_idr(pace['from_salary'])} dari gaji + sisa {format_idr(pace['leftover'])})" if pace["leftover"] else ""
+        left = (f"Sisa {b(format_idr(pace['remaining']))}, sekitar {e(format_idr(pace['safe_per_day']))}/hari"
+                if pace["remaining"] >= 0 else f"Lewat {b(format_idr(-pace['remaining']))}")
+        out.append(f"🗓️ {b('Jatah harian')} sampai gajian {e(tgl(pace['next_payday']))}\nTerpakai {b(format_idr(pace['spent']))} dari "
+                   f"{e(format_idr(pace['allowance']) + split)}\n{left}")
     return "\n\n".join(out)
 
 
