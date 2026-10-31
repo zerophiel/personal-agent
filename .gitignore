@@ -2,5 +2,13 @@ secrets/*.dec*
 *.key
 *.pem
 __pycache__/
-.claude/
+.claude/*
+!.claude/settings.json
 .env
+# graphify-out/: only the shared map is committed; caches, dated backups, HTML and machine-local paths stay local
+graphify-out/*
+!graphify-out/graph.json
+!graphify-out/GRAPH_REPORT.md
+!graphify-out/manifest.json
+!graphify-out/cost.json
+!graphify-out/.graphify_labels.json

@@ -1,0 +1,19 @@
+{
+  "runs": [
+    {
+      "date": "2026-10-31T11:40:00+07:00",
+      "input_tokens": 925457,
+      "output_tokens": 0,
+      "files": 21,
+      "note": "phase 1: 5 extraction subagents over the 21 docs (deep mode); Claude Code reports only each subagent's total tokens, so the totals are recorded as input"
+    },
+    {
+      "date": "2026-10-31T05:30:20.164338+00:00",
+      "input_tokens": 211415,
+      "output_tokens": 0,
+      "files": 120
+    }
+  ],
+  "total_input_tokens": 1136872,
+  "total_output_tokens": 0
+}

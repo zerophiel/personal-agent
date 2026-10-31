@@ -5,7 +5,7 @@ REMOTE_DIR ?= /opt/personal-agent
 SSH := ssh $(VPS_USER)@$(VPS_HOST)
 COMPOSE := sudo docker compose -f compose/docker-compose.yml --env-file config/stack.env
 
-.PHONY: help preflight deploy status logs secret-set secret-gen pdf-passwords prune prune-dry backup restore test
+.PHONY: help preflight deploy status logs secret-set secret-gen pdf-passwords prune prune-dry backup restore test runtime-map graph
 
 help:
 	@grep -E '^[a-z-]+:' Makefile | cut -d: -f1 | tr '\n' ' '; echo
@@ -14,9 +14,9 @@ help:
 preflight:
 	$(SSH) 'bash -s' < scripts/preflight.sh
 
-# Sync repo to VPS and apply compose + host timers. Plaintext secrets are never synced.
+# Sync repo to VPS and apply compose + host timers. Plaintext secrets and the local project map are never synced.
 deploy:
-	rsync -az --delete --exclude .git --exclude .claude --exclude 'secrets/*.dec*' ./ $(VPS_USER)@$(VPS_HOST):$(REMOTE_DIR)/
+	rsync -az --delete --exclude .git --exclude .claude --exclude 'secrets/*.dec*' --exclude graphify-out --exclude CLAUDE.md ./ $(VPS_USER)@$(VPS_HOST):$(REMOTE_DIR)/
 	$(SSH) 'cd $(REMOTE_DIR) && sudo bash scripts/install-timers.sh && $(COMPOSE) up -d --build'
 
 status:
@@ -59,3 +59,11 @@ test:
 	cd services/control && python3 -I -m unittest discover -s tests -v
 	cd services/ingest-gmail && python3 -I -m unittest discover -s tests -v
 	cd services/vault-tools && $${VAULT_PY:-python3} -I -m unittest discover -s tests -v   # VAULT_PY=venv python to include server tests
+
+# Read-only snapshot of the live bot into docs/runtime/ (names, counts, dates; no secrets, balances or message text)
+runtime-map:
+	python3 -I ops/runtime-map/collect.py
+
+# Refresh the code side of graphify-out/ (AST only, no LLM cost); after doc edits run /graphify . --update in Claude Code
+graph:
+	GRAPHIFY_NO_AUTO_REFRESH=1 graphify update .

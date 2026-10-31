@@ -1,0 +1,9 @@
+# Kept out of the project graph (graphify reads .gitignore too).
+# Every DEFAULT_CONFIG key of the engine: grep it; as graph nodes it is noise.
+docs/runtime/hermes-defaults.md
+# graphify's own output, Claude Code settings and worktrees, and the map instructions themselves
+graphify-out/
+.claude/
+CLAUDE.md
+# encrypted secrets
+secrets/
