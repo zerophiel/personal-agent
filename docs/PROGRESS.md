@@ -255,6 +255,36 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   the time), ok, no alert; 6.921.930 left until the 30 Nov payday; 62 plans. Runtime map 00:37: the 157 deployed files
   are identical to the repo. The owner sends `/new` once (the session still holds the 22% warning).
 
+## The daily account's balance corrects the month; no per-day figure (2026-11-01, owner: "saldo poket harian 7051352 buat bot bisa rekoreksi"; "240 sekian perhari kayaknya ga perlu kamu state")
+- The daily pocket drifts from the records: the wife's transfers for errands are often bigger than the errands (650.000
+  for 600.000 of petrol). On 1 Nov the owner read 7.051.352 where the records said 6.921.930.
+- `saldo_rekening` on `jago-harian` (`health.LIVING_ACCOUNT`) anchors the month: `living_balance_report` (the
+  balance_reports row) and `living_balance_mark` (the last transaction id at that moment), both system keys. What is left
+  = the balance minus card purchases since the payday (daily money, not out of the account yet) minus what was spent
+  after the reading (dated later, or dated that day and recorded after it, unless the row is a bank row that took in a
+  receipt recorded before the reading). What left any account before the reading day is in the balance or was daily
+  money held elsewhere, whenever its row comes in: the 30 Oct parking 150.000 was paid from the Mandiri leftover, bank rows
+  come in weeks later, and Jago files every pocket under `jago-utama`. The pace shows the difference with the records as
+  a correction (more money: added to the month; less: counted as spent). A newer reading replaces the last; a reading
+  from another payday window is ignored; a reading before the payday's top-up is marked done is kept but not used.
+- `sisa_uang_harian` is refused once the payday's top-up (`uang-harian`) is in `plan_progress`: the balance then holds the
+  top-up too, and taken as the leftover it would make the month 2.827.889 + 7.051.352 instead of 7.546.005.
+- No per-day figure anywhere (`/rencana` footer, `/anggaran`, the plan summary, alerts) and no "padahal baru N% waktu
+  berlalu" warning: the daily money also pays electricity, phone and water, so it is not spent evenly; a 2.300.000
+  electricity bill early in the month would always look like overspending. The 80% and over-100% alerts stay.
+  `living_per_day` is gone; the stored `daily_allowance` is never shown.
+- `ringkasan_data` carries UANG HARIAN BULAN INI (spent, of, %, left until the payday, and the reading it follows), so
+  the bot answers "sisa uang harian berapa" from the code. SOUL: the current daily-account balance goes to
+  `saldo_rekening`, never to `sisa_uang_harian`; never state the daily money per day.
+- Commits e5d494c, 60ae046, the deploy scripts in `ops/datafix/2026-11-01-pocket-balance/`. 414 vault-tools tests (7 new
+  in `test_health.py`), 502 across all suites. Dry run on a copy of the live ledger: as below, 62 plans before and after.
+- Deployed 2026-11-01 01:22-01:24 WIB under the owner's delegation (until 1 Nov 09:00 WIB: "langsung memperbaiki bot tanpa
+  butuh persetujuan saya"), the steps of `deploy.sh` run one by one: bot idle; rsync; vault-tools rebuilt (healthy); backup
+  `ledger.db.bak-pre-pocket-balance` (integrity ok, 1.919 transactions, 62 plans); the reading stored with
+  `record_account_balance` on the new code (report 5, mark 2445); vault restarted when idle; Hermes listed the tools again
+  at 01:24:08 and Telegram connected at 01:24:20. Live read-only check: 7.051.352 left until the 30 Nov payday (records
+  6.921.930, +129.422), 624.075 of 7.675.427 used (8%), ok, no alert; VERIFIED. The owner sends `/new` once.
+
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
 2. Closing the pot gap without the children's needs: games (owner's own), apps not marked `wajib`, or talking to the friend.
@@ -279,7 +309,7 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 15. Transport over its October budget (1.420.000 of 1.000.000 with the parking): raise the budget or keep it as a warning.
 
 ## Next steps
-- Owner: send `/new` once after the 1 Nov deploy (section above).
+- Owner: send `/new` once after the 1 Nov 01:24 deploy (the pocket-balance section above; it also covers the 00:37 one).
 - The number guard (cardguard `on_llm_output`) added "⚠️ Cek angka" to two replies on 31 Oct 20:20 (the YONNY receipt
   photo after `ringkasan_data`, then after `record_expense` #2444; not on ANKER at 22:26) and on 30 Oct 15:27 and 16:08.
   At the next calibration, find what it flagged (an amount read from a photo is in no tool result) and whether the bot
