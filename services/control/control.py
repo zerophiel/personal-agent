@@ -14,7 +14,9 @@ import logging
 import os
 import re
 import secrets
+import shutil
 import sqlite3
+import stat
 import time
 import urllib.parse
 import urllib.request
@@ -124,6 +126,33 @@ def quiet(at: datetime | None = None) -> bool:
     return h >= 22 or h < 6
 
 
+def read_proposal(path: Path) -> object:
+    """An inbox file's JSON; ValueError for anything but a small regular file. A link is never followed: the writer is
+    another container, and a link could point at control's own secret or state."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as e:
+        raise ValueError("bukan file biasa") from e
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_INBOX_BYTES:
+        os.close(fd)
+        raise ValueError("bukan file biasa" if not stat.S_ISREG(st.st_mode) else "file terlalu besar")
+    with os.fdopen(fd, "rb") as f:
+        try:
+            return json.loads(f.read(MAX_INBOX_BYTES + 1).decode("utf-8"))
+        except RecursionError as e:
+            raise ValueError("JSON terlalu bertingkat") from e
+
+
+def discard(path: Path) -> None:
+    try:
+        path.unlink()           # a link goes, never its target
+    except IsADirectoryError:
+        shutil.rmtree(path, ignore_errors=True)
+    except FileNotFoundError:
+        pass
+
+
 def write_json(path: Path, rec: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
@@ -199,8 +228,9 @@ class Control:
         inbox.mkdir(parents=True, exist_ok=True)
 
     def send(self, text: str, **kw):
-        return self.tg.call("sendMessage", chat_id=self.owner, text=text, disable_web_page_preview="true",
-                            disable_notification="true" if quiet() else "false", **kw)
+        if quiet():
+            kw["disable_notification"] = "true"
+        return self.tg.call("sendMessage", chat_id=self.owner, text=text, disable_web_page_preview="true", **kw)
 
     def tick(self) -> None:
         """New proposal files into the store (at most MAX_PENDING waiting; the rest stay in the inbox until then), invalid
@@ -209,16 +239,14 @@ class Control:
             if self.store.counts()["pending"] >= MAX_PENDING:
                 break
             try:
-                if path.stat().st_size > MAX_INBOX_BYTES:
-                    raise ValueError("file terlalu besar")
-                body = validate(json.loads(path.read_text(encoding="utf-8")))
-            except (ValueError, UnicodeDecodeError) as e:      # a JSONDecodeError is a ValueError
+                body = validate(read_proposal(path))
+            except ValueError as e:      # JSON and UTF-8 decode errors are ValueErrors
                 self.store.reject_file(path.name, str(e))
-                path.unlink(missing_ok=True)
+                discard(path)
                 self.send(f"Satu file usulan ditolak otomatis, formatnya tidak valid: {shown(str(e), 300)}")
                 continue
             self.store.add(body)
-            path.unlink(missing_ok=True)
+            discard(path)
         for pid, body, nonce in self.store.db.execute(
                 "SELECT id, body, nonce FROM proposals WHERE status='pending' AND message_id IS NULL ORDER BY id").fetchall():
             msg = self.send(card(pid, json.loads(body)), reply_markup=buttons(nonce))
@@ -233,8 +261,11 @@ class Control:
             self.tg.call("answerCallbackQuery", callback_query_id=cq["id"],
                          text=("Disetujui" if kind == "a" else "Ditolak") if pid else "Sudah diputuskan atau tidak berlaku")
             if "message" in cq:         # the buttons go either way: they are spent or stale
-                self.tg.call("editMessageReplyMarkup", chat_id=self.owner, message_id=cq["message"]["message_id"],
-                             reply_markup=json.dumps({"inline_keyboard": []}))
+                try:
+                    self.tg.call("editMessageReplyMarkup", chat_id=self.owner, message_id=cq["message"]["message_id"],
+                                 reply_markup=json.dumps({"inline_keyboard": []}))
+                except Exception as e:  # e.g. a message too old to edit; the decision stands and is still reported
+                    log.warning("button removal failed: %s", type(e).__name__)
             if pid:
                 self.send(f"Usulan #{pid} DISETUJUI. Tersimpan untuk diterapkan; penerapan otomatis belum aktif, jadi "
                           "belum ada yang berubah." if kind == "a" else f"Usulan #{pid} DITOLAK. Tidak ada yang berubah.")

@@ -162,6 +162,33 @@ class ApprovalTests(unittest.TestCase):
         self.assertEqual(self.bot.store.counts(), {"pending": 0, "approved": 0, "rejected": 0, "invalid": 2})
         self.assertTrue(all("reply_markup" not in p and "ditolak otomatis" in p["text"] for p in self.tg.sent()))
 
+    def test_links_folders_and_deep_json_are_refused_without_touching_anything_else(self):
+        secret = self.state.parent / "secret.json"
+        secret.write_text(json.dumps(proposal()), encoding="utf-8")         # a valid proposal, but outside the inbox
+        (self.inbox / "link.json").symlink_to(secret)
+        (self.inbox / "dir.json").mkdir()
+        (self.inbox / "dir.json" / "x").write_text("x")
+        self.drop("deep.json", "[" * 100_000 + "]" * 100_000)
+        self.drop("good.json", proposal())
+        self.bot.tick()
+        self.assertEqual(list(self.inbox.iterdir()), [])
+        self.assertTrue(secret.exists())                                    # the link went, not its target
+        self.assertEqual(self.bot.store.counts(), {"pending": 1, "approved": 0, "rejected": 0, "invalid": 3})
+        self.assertEqual(sum("ditolak otomatis" in p["text"] for p in self.tg.sent()), 3)
+
+    def test_a_failed_button_removal_still_reports_the_decision(self):
+        self.drop("p1.json", proposal())
+        self.bot.tick()
+        nonce, call = self.nonce(), self.tg.call
+
+        def edit_fails(method, **params):
+            if method == "editMessageReplyMarkup":
+                raise OSError("message too old")
+            return call(method, **params)
+        self.tg.call = edit_fails
+        self.tap(f"a:{nonce}")
+        self.assertIn("Usulan #1 DISETUJUI", self.tg.sent()[-1]["text"])
+
     def test_at_most_five_wait_and_the_rest_stay_in_the_inbox(self):
         for i in range(MAX_PENDING + 1):
             self.drop(f"p{i}.json", proposal(summary=f"usulan {i}"))
