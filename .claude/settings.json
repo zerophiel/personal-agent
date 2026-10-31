@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "env": {
+    "GRAPHIFY_HOOK_STRICT": "1"
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"$(git rev-parse --show-toplevel 2>/dev/null)/ops/graphify/graph_first.py\"; [ -f \"$f\" ] || f=\"$CLAUDE_PROJECT_DIR/ops/graphify/graph_first.py\"; [ -f \"$f\" ] && CLAUDE_PROJECT_DIR=\"${f%/ops/graphify/graph_first.py}\" python3 -I \"$f\" || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
