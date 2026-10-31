@@ -3,7 +3,9 @@
 ## First-time VPS setup (each step needs owner approval)
 1. `make preflight` - read-only: must show KVM (not openvz/lxc), Ubuntu 24.04, enough disk.
 2. Harden SSH (keys only, no root login), ufw default-deny inbound except 22, unattended-upgrades, Docker from Docker's apt repo, 4 GB swap, journald + Docker log caps.
-3. Create bots in BotFather. Usernames must end in `bot`. Disable "Allow Groups" for each.
+3. Create bots in BotFather. Usernames must end in `bot`. Disable "Allow Groups" for each (Bot Settings -> Allow Groups
+   -> off). On 2026-11-01 getMe showed it still on for `@danoevault_agent` and `@danoecontrol_bot`; the Hermes configs
+   drop groups (`allowed_chats: "none"`) and control drops them in code, so this closes it at Telegram as well.
 4. `make secret-set NAME=telegram_control_token` (prompted on the VPS, never in chat).
 5. R2 backup: create `/opt/personal-agent-secrets/restic.env` on the VPS (see `scripts/backup.sh`).
 6. `make deploy`, then `make status`.
@@ -36,9 +38,14 @@ It starts only with `--profile front`; `make deploy` never starts or stops it. O
    (with the vault's key front would spend the finance bot's budget; `render-front-env.sh` refuses the vault key).
 3. `make secret-set NAME=telegram_front_token` and `make secret-set NAME=anthropic_front_key` (prompted on the VPS).
 4. On the VPS: `sudo bash scripts/data-dirs.sh` (done 2026-11-01), then `sudo bash scripts/render-front-env.sh`.
+   Decide first: front's SOUL refuses to repeat or keep card and account numbers, but nothing removes one before the
+   model sees it (vault's cardguard needs vault-tools, which front cannot reach). A rewrite-only guard for front is
+   a small plugin, built before this step if the owner wants it.
 5. Start: `sudo docker compose -f compose/docker-compose.yml --env-file config/stack.env --profile front up -d --build
    --wait change-proposals front`.
 6. Send `/start` to `@danoefront_agent`, then ask it to send a harmless test proposal: a card appears in the control bot.
+- Memory: a fact front wants to keep waits for the owner in its own chat: `/memory pending` lists them,
+  `/memory approve <id>` keeps one, `/memory reject <id>` drops it.
 - After a change to `services/hermes/front/`: rsync as `make deploy` does, then the step 5 command with `front` only.
 - Stop: the same compose command with `--profile front stop front change-proposals`.
 

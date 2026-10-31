@@ -74,6 +74,7 @@ gateway:
     telegram:
       extra:
         disable_link_previews: true
+        allowed_chats: "none"    # no group id matches: every group is dropped; DMs are never filtered by this
 
 mcp_servers:
   vault_tools:

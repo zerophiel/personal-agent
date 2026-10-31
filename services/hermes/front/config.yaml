@@ -7,10 +7,12 @@ model:
 
 agent:
   max_turns: 20
-  disabled_toolsets:        # v1: web, memory and the change-proposals MCP only; no shell, code, files or browser here
+  image_input_mode: native  # photos go to the main model as images (auto would pick text: auxiliary.vision is set)
+  disabled_toolsets:        # v1 keeps web, memory, clarify, vision and the change-proposals MCP; no shell, code or files
     - terminal              # (a terminal comes later, inside a separate sandbox container, never in this one)
     - code_execution
-    - browser               # follow-up: needs a browser container with shm_size 1g
+    - browser               # later: needs the agent-browser CLI and Chromium in the image, or a CDP/cloud provider
+    - x_search              # off by default, but turns itself on when xAI credentials exist
     - delegation
     - file
     - cronjob
@@ -41,7 +43,8 @@ compression:
 memory:
   memory_enabled: true       # general facts the owner asks it to remember; never finance data (SOUL.md)
   user_profile_enabled: false
-  write_approval: true
+  write_approval: true       # on Telegram a write is staged: /memory pending, /memory approve <id>, /memory reject <id>
+  nudge_interval: 0          # no background memory review every 10 turns (a forked agent run each time)
 
 skills:
   write_approval: true
@@ -63,6 +66,7 @@ gateway:
     telegram:
       extra:
         disable_link_previews: true
+        allowed_chats: "none"    # no group id matches: every group is dropped; DMs are never filtered by this
 
 mcp_servers:
   change_proposals:

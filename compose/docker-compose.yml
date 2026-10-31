@@ -134,7 +134,8 @@ services:
     command: ["gateway", "run"]
     restart: unless-stopped
     # the image boots as root (s6: uid remap, chown of /opt/data), then runs Hermes as uid 10000; these are all it needs
-    # (tested 2026-11-01: boots, runs as 10000, stops cleanly), the rest of Docker's default set is dropped
+    # (tested 2026-11-01: `gateway run` with these caps, pids_limit and memory stayed up as uid 10000 with 26 processes
+    # and stopped cleanly), the rest of Docker's default set is dropped
     cap_drop: [ALL]
     cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE, FOWNER, KILL]
     security_opt: ["no-new-privileges:true"]

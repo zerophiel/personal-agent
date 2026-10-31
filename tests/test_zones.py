@@ -66,12 +66,14 @@ class Compose(unittest.TestCase):
 class HermesProfiles(unittest.TestCase):
     NEVER = {"terminal", "code_execution", "file", "computer_use", "delegation", "cronjob", "kanban"}
 
-    def test_no_zone_has_a_shell_files_or_remote_control(self):
+    def test_no_zone_has_a_shell_files_groups_or_remote_control(self):
         for zone in ("vault", "front"):
             cfg = load(f"services/hermes/{zone}/config.yaml")
             self.assertLessEqual(self.NEVER, set(cfg["agent"]["disabled_toolsets"]), zone)
             self.assertEqual(cfg["unauthorized_dm_behavior"], "ignore", zone)
-            self.assertTrue(cfg["gateway"]["platforms"]["telegram"]["extra"]["disable_link_previews"], zone)
+            extra = cfg["gateway"]["platforms"]["telegram"]["extra"]
+            self.assertTrue(extra["disable_link_previews"], zone)
+            self.assertEqual(extra["allowed_chats"], "none", zone)   # every group dropped, even if BotFather allows groups
             self.assertFalse(re.search(r"opus|fable", str(cfg["model"]) + str(cfg["auxiliary"])), zone)
 
     def test_front_has_only_the_proposal_tool_and_no_finance(self):
@@ -80,8 +82,8 @@ class HermesProfiles(unittest.TestCase):
         srv = cfg["mcp_servers"]["change_proposals"]
         self.assertEqual(srv["url"], "http://change-proposals:8000/mcp")
         self.assertEqual(srv["headers"]["Authorization"], "Bearer ${env:CHANGE_PROPOSALS_MCP_TOKEN}")
-        self.assertIn("browser", cfg["agent"]["disabled_toolsets"])
-        self.assertIn("skills", cfg["agent"]["disabled_toolsets"])
+        self.assertLessEqual({"browser", "skills", "x_search"}, set(cfg["agent"]["disabled_toolsets"]))
+        self.assertEqual(cfg["memory"]["nudge_interval"], 0)                       # no background review runs
         with open(os.path.join(ROOT, "services/hermes/front/SOUL.md"), encoding="utf-8") as f:
             soul = f.read()
         self.assertIn("@danoevault_agent", soul)

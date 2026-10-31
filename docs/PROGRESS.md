@@ -318,6 +318,46 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   606.087 if les Mandarin 800.000 is paid from it; `recorded` from the stored row). The daily money is unchanged:
   7.051.352 left, 624.075 of 7.675.427 (8%).
 
+## Control bot and front agent (M3, 2026-11-01, owner: "danoe control bot dan danoe front agent itu fungsinya buat apa ya? ... Kalau belum implementasikan juga setelah ini ya"; built under the delegation until 09:00 WIB)
+- What they are for: `@danoecontrol_bot` is the owner's approval desk and has no LLM. An agent never changes itself;
+  it asks, and the owner taps Setujui or Tolak once. `@danoefront_agent` is the general assistant on the open web
+  (questions, search with sources, drafts); finance stays with `@danoevault_agent`.
+- Control v2, live since 02:08 WIB (redeployed 02:15 with the link-safe inbox read; commits 0e4e730, 9b7a355): it reads
+  `proposals-inbox`, re-validates every file (the seven fields, zone, change type, the files each type may write, length
+  caps), posts a plain-text card with one-time buttons, and records the tap in `control-state` (`control.db`,
+  `decided/`, `approved/`). `/status`, `/usulan`, `/ping`. Nothing is applied: the applier is not built.
+- Test proposal #1 ("UJI pemasangan control", 02:09 WIB) is posted and waits for the owner's Tolak tap; afterwards
+  `decided/1.json` must exist and the buttons are gone. It was accepted under the first rules (a config change without
+  files); the current rules would refuse it.
+- change-proposals (b0fa065): front's one MCP tool `submit`, which writes a proposal into the inbox and nothing else (five
+  waiting, ten per 24 hours). Its token is generated on the VPS and the image is built and smoke-tested offline; it runs
+  only with front.
+- Front (1ed7105): Hermes on Haiku 5.5 with web search, `clarify`, `vision_analyze`, memory (each write waits for the
+  owner's OK) and `submit`; terminal, code, files, browser, skills, delegation and cron are off. Web search needs no key
+  (free tiers of Exa, Parallel, Keenable or Firecrawl through squid-front, so search text leaves the VPS). Checked on
+  the VPS with dummy credentials and no network: `hermes doctor` reports no deprecated or stale key (only the missing
+  API key), and `gateway run` with front's caps, process and memory limits stays up as uid 10000 (26 processes,
+  240 MiB) and stops cleanly. Also off: x_search (it turns itself on when xAI credentials exist) and the background
+  memory review every 10 turns (`nudge_interval: 0`); photos go to the model as images (`image_input_mode: native`).
+- Groups (getMe, 02:40 WIB): `@danoevault_agent` and `@danoecontrol_bot` can still be added to a group (BotFather
+  "Allow Groups" was never turned off). The vault was never in one (all 66 sessions are DMs) and control drops
+  non-private chats in code. Both Hermes configs now set `allowed_chats: "none"`, which drops every group and leaves
+  DMs alone (a throwaway container with v0.22.5: private kept, group and supergroup dropped; the live config before
+  the change let both through). The vault restarted with it at 02:46 WIB while idle: Telegram polling again after
+  37 s, config and SOUL hashes equal to the repo's. The owner turns Allow Groups off for both bots.
+- Front is not started: it needs `telegram_front_token` and `anthropic_front_key` from the owner (RUNBOOK "Front zone").
+  The key comes from a separate Anthropic workspace with its own USD 40 limit; with the vault's key front would spend
+  the finance bot's budget, so the render script refuses that key.
+- Deferred, with reasons:
+  - The applier (writes, commits, deploys and health-checks an approved change): needs a deploy key from the owner, a
+    git checkout on the VPS (today an rsync target), a running front and the owner's review at the M3 gate. Contract in
+    `docs/SECURITY.md`.
+  - A card-number guard for front: vault's cardguard stores numbers in vault-tools, which front cannot reach; a
+    rewrite-only guard is small but cannot be tried until front runs. SOUL.md refuses numbers meanwhile; owner's call.
+  - Browser, a terminal sandbox, skills and a Sonnet route for hard questions: later, each as a proposal.
+- Tests: 530 across all suites; new `tests/test_zones.py` (one network per service, only control mounts the decisions,
+  front's mounts and toolsets, groups dropped and no Opus or Fable in any zone).
+
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
 2. Closing the pot gap without the children's needs: games (owner's own), apps not marked `wajib`, or talking to the friend.
@@ -340,6 +380,7 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 13. MTF outstanding 102.613.000 is 95.000 below 18 x 5.706.000: check the remaining amount in the MTF app.
 14. `payee_secrets` holds a card entry ending 1111 that no card uses (likely an early cardguard test): remove with the owner.
 15. Transport over its October budget (1.420.000 of 1.000.000 with the parking): raise the budget or keep it as a warning.
+16. Front zone: when to start it (two secrets, RUNBOOK "Front zone"), and whether it gets a card-number guard first.
 
 ## Next steps
 - Owner: send `/new` once after the 1 Nov 01:53 deploy (the recalibration section above; it also covers the 00:37 and
@@ -372,7 +413,10 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   (Mandiri usable + daily account); after paying, tell the bot (card payments, instalments, transfers, pot and emergency
   fund balances, the Mandiri balance in the app). (30 Oct: done in the chat, recorded by the data fix above.)
 - After the November statements: calibration per `docs/calibration.md` (Google One, Apple, Coway, bot quality, spend).
-- Remaining plan: M3 front/control/applier, M4 comms, M2 gate checks (`docs/assumptions.md`).
+- Owner: tap Tolak on the control bot's test proposal #1 (`/usulan` there posts it again).
+- Owner: BotFather -> `@danoevault_agent`, then `@danoecontrol_bot` -> Bot Settings -> Allow Groups -> off.
+- Remaining plan: M3 front start (the owner's two secrets) and the applier, M4 comms, M2 gate checks
+  (`docs/assumptions.md`).
 
 ## Operating notes
 - Deploy: `rsync` from the worktree ROOT (never a subfolder: `--delete` wipes the server tree), back up `ledger.db` first, rebuild `vault-tools`, restart `vault`. Owner must `/new` in Telegram after tool or SOUL changes (owner plans to do it once data and system are done).

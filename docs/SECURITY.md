@@ -2,11 +2,12 @@
 
 Invariants are enforced in infrastructure, not prompts.
 - Egress: internal-only networks + per-zone Squid default-deny allowlists (`config/squid/`).
-- Telegram: control checks `from.id == MY_TELEGRAM_ID` and `chat.type == private` on every message and callback; others dropped and logged (`services/control/control.py`, tested).
+- Telegram: control checks `from.id == MY_TELEGRAM_ID` and `chat.type == private` on every message and callback; others dropped and logged (`services/control/control.py`, tested). The Hermes zones answer only `TELEGRAM_ALLOWED_USERS`, ignore other DMs, and drop every group (`allowed_chats: "none"`: no group id matches it, and the filter never applies to DMs; checked against v0.22.5 in a throwaway container). BotFather "Allow Groups" should be off for every bot as well: getMe on 2026-11-01 still showed it on for the vault and control bots.
 - Containers: `cap_drop: ALL`, `no-new-privileges`, read-only root fs where possible, memory/CPU caps, `oom_score_adj` per brief.
 - Secrets: root-only dir `/opt/personal-agent-secrets` (0700), injected as Docker secrets; plaintext never in the repo (`.gitignore`). sops+age is added in M2 when zone secrets multiply.
 - vault-tools has two surfaces with different tokens: `/mcp` (model; tools handle aliases and amounts only, no tool stores or reveals a full number) and `/internal/*` (plugin only: `store_payee`, `rincian`). Tokens are random, >= 32 chars, must differ, compared in constant time; unknown paths 404. The payee encryption key (`vault_tools_key`) is generated on the VPS by `make secret-gen` and the script refuses to overwrite it (overwriting would orphan every stored number). Back it up with restic; keep the restic password separately.
 - Maintenance never deletes volumes (`scripts/prune.sh`).
+- Known limits: DNS still resolves inside internal networks; Hermes read-only config mount is unverified (spike in M1/M2).
 
 ## Approvals (M3)
 No LLM can approve anything. The chain is model -> `change-proposals` -> inbox folder -> `control` -> the owner's tap.
@@ -39,4 +40,23 @@ A host unit (root on the VPS, never inside a container) that will:
    failure revert the commit and redeploy; report the outcome through control.
 Before it exists: a deploy key (the owner creates it), a git checkout on the VPS (today `/opt/personal-agent` is an rsync
 target without `.git`), a running front zone, and the owner's review at the M3 gate.
-- Known limits: DNS still resolves inside internal networks; Hermes read-only config mount is unverified (spike in M1/M2).
+A `skill` change lands only after a human has added, once, a read-only mount of `services/hermes/<zone>/skills/` listed
+in `skills.external_dirs` and turned the `skills` toolset on (compose is never in a proposal). Not a mount over
+`<HERMES_HOME>/skills`: Hermes copies its bundled skills and a manifest there at every boot.
+
+### Front zone (M3)
+- Tools: web search and extract, `clarify`, `vision_analyze`, memory (each write waits for the owner's OK; no background
+  memory review) and `submit`.
+  Terminal, code, files, browser, skills, x_search (it switches itself on when xAI credentials exist), delegation, cron
+  and the rest are disabled (`services/hermes/front/config.yaml`,
+  checked by `tests/test_zones.py`), so no enabled tool reads the env file or the keys in it: `vision_analyze` refuses
+  `.env`/`auth.json` by name and anything whose bytes are not an image (Hermes v0.22.5 `tools/image_source.py`).
+- Its own bot and its own Anthropic key, from a separate workspace with a USD 40 limit; `scripts/render-front-env.sh`
+  refuses the vault's key and token. Front is on net-front only: no route to vault-tools, the ledger or control.
+- Web search uses no key: the image has no DuckDuckGo package, so Hermes falls back to the free tiers of Exa, Parallel,
+  Keenable or Firecrawl through squid-front (open web, private ranges blocked; Hermes also refuses private addresses).
+  Search text leaves the VPS.
+- Web text is untrusted. A prompt in a page could make front fetch a URL that carries chat text, which is why finance
+  and secrets stay out of front (SOUL.md), and why a change still needs the owner's tap in control.
+- Card and account numbers: SOUL.md tells front never to repeat or keep one, but no plugin removes them before the
+  model sees them yet; whether to build one before the first start is the owner's call (RUNBOOK "Front zone").
