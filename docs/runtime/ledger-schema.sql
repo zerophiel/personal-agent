@@ -1,4 +1,4 @@
--- Live ledger schema (sqlite_master of /data/ledger.db), user_version 13, collected 2026-10-31T10:51:57+07:00 by ops/runtime-map/collect.py.
+-- Live ledger schema (sqlite_master of /data/ledger.db), user_version 13, collected 2026-11-01T00:37:27+07:00 by ops/runtime-map/collect.py.
 -- Source of truth for changes: services/vault-tools/vault_tools/ledger.py (DDL + _migrate). Money columns are INTEGER Rupiah.
 
 CREATE TABLE accounts (

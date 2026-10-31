@@ -246,11 +246,14 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 - Dry run of the new code on an in-memory copy of the live ledger (31 Oct, after ANKER): 624.075 of 7.546.005 used (8%,
   6% of the time), ok, no warning; 6.921.930 left for 29 days (238.687/day); 243.419/day over the window; 62 plans before
   and after regenerating. 407 vault-tools tests (6 new in `test_health.py`), 495 across all suites.
-- Deploy waits for the owner's go-ahead (this session's permission check refused writes to the VPS):
-  `ops/datafix/2026-10-31-pace-fix/deploy.sh` backs up `ledger.db.bak-pre-pace-fix`, sets `living_leftover_spent` = 17.000 for
-  payday 20261030 on the code still deployed (with the key missing, the next `sisa_uang_harian` on the new code would take
-  every purchase since the payday as already out of the leftover), rebuilds vault-tools only, restarts the vault when idle,
-  and checks read-only. Then the owner sends `/new` (the session still holds the 22% warning).
+- Deployed 2026-11-01 00:34-00:37 WIB on the owner's "lanjut deploy", the steps of
+  `ops/datafix/2026-10-31-pace-fix/deploy.sh` run one by one: bot idle; backup `ledger.db.bak-pre-pace-fix` (integrity ok,
+  1.919 transactions, 62 plans); `living_leftover_spent` = 17.000 for payday 20261030 set on the code still deployed (with
+  the key missing, the next `sisa_uang_harian` on the new code would take every purchase since the payday as already out
+  of the leftover); rsync; vault-tools rebuilt (image 03dbe36a1c9f, healthy); vault restarted when idle; Hermes listed the
+  MCP tools again at 00:36:38 (56 vault_tools tools). Live read-only check on 1 Nov: 624.075 of 7.546.005 used (8%, 9% of
+  the time), ok, no alert; 6.921.930 left until the 30 Nov payday; 62 plans. Runtime map 00:37: the 157 deployed files
+  are identical to the repo. The owner sends `/new` once (the session still holds the 22% warning).
 
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
@@ -276,7 +279,14 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 15. Transport over its October budget (1.420.000 of 1.000.000 with the parking): raise the budget or keep it as a warning.
 
 ## Next steps
-- Deploy the daily-money fix (section above), then the owner sends `/new` once.
+- Owner: send `/new` once after the 1 Nov deploy (section above).
+- The number guard (cardguard `on_llm_output`) added "⚠️ Cek angka" to two replies on 31 Oct 20:20 (the YONNY receipt
+  photo after `ringkasan_data`, then after `record_expense` #2444; not on ANKER at 22:26) and on 30 Oct 15:27 and 16:08.
+  At the next calibration, find what it flagged (an amount read from a photo is in no tool result) and whether the bot
+  did its own arithmetic.
+- Vault restarts often log "Previous gateway life exited UNCLEANLY" (8 times, latest the 1 Nov 00:36 restart; 2
+  `drain_timeout`): compose sets no `stop_grace_period`, so Docker kills Hermes after 10 s. For deploy 2, with the owner:
+  a longer grace (for example 60 s) on the vault service.
 - (done 2026-10-31 14:04) Owner sent `/new` after the 30 Oct evening deploy. Still open: les Mandarin once paid
   (`transfer_selesai`), and the Mandiri October e-statement sent 30 Oct 16:14: it is still in /ingest/telegram (90-day
   retention); the bot read it twice with `ingest_statement` but the session reset at 16:17 before `record_mutations`, so
