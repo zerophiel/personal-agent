@@ -17,7 +17,7 @@ preflight:
 # Sync repo to VPS and apply compose + host timers. Plaintext secrets and the local project map are never synced.
 deploy:
 	rsync -az --delete --exclude .git --exclude .claude --exclude 'secrets/*.dec*' --exclude graphify-out --exclude CLAUDE.md ./ $(VPS_USER)@$(VPS_HOST):$(REMOTE_DIR)/
-	$(SSH) 'cd $(REMOTE_DIR) && sudo bash scripts/install-timers.sh && $(COMPOSE) up -d --build'
+	$(SSH) 'cd $(REMOTE_DIR) && sudo bash scripts/install-timers.sh && sudo bash scripts/control-dirs.sh && $(COMPOSE) up -d --build'
 
 status:
 	$(SSH) 'cd $(REMOTE_DIR) && $(COMPOSE) ps && df -h / && free -m && docker system df'

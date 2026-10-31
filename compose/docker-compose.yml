@@ -113,7 +113,12 @@ services:
       HTTPS_PROXY: http://squid-ctl:3128
       NO_PROXY: localhost
       TELEGRAM_TOKEN_FILE: /run/secrets/telegram_control_token
+      CONTROL_STATE_DIR: /state
+      PROPOSALS_INBOX_DIR: /inbox
     secrets: [telegram_control_token]
+    volumes:   # both owned by uid 10001 (scripts/control-dirs.sh); two folders, so an inbox file can never be an approval
+      - /opt/personal-agent-data/control-state:/state     # control only: control.db, decided/, approved/ (the applier's input)
+      - /opt/personal-agent-data/proposals-inbox:/inbox   # change-proposals writes, control reads and empties
     networks: [net-ctl]
     read_only: true
     tmpfs: ["/tmp"]
