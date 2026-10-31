@@ -247,7 +247,7 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   6% of the time), ok, no warning; 6.921.930 left for 29 days (238.687/day); 243.419/day over the window; 62 plans before
   and after regenerating. 407 vault-tools tests (6 new in `test_health.py`), 495 across all suites.
 - Deploy waits for the owner's go-ahead (this session's permission check refused writes to the VPS):
-  `deploy_pace.sh` in the session's tmp backs up `ledger.db.bak-pre-pace-fix`, sets `living_leftover_spent` = 17.000 for
+  `ops/datafix/2026-10-31-pace-fix/deploy.sh` backs up `ledger.db.bak-pre-pace-fix`, sets `living_leftover_spent` = 17.000 for
   payday 20261030 on the code still deployed (with the key missing, the next `sisa_uang_harian` on the new code would take
   every purchase since the payday as already out of the leftover), rebuilds vault-tools only, restarts the vault when idle,
   and checks read-only. Then the owner sends `/new` (the session still holds the 22% warning).
