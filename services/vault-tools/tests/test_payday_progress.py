@@ -252,6 +252,17 @@ class Progress(unittest.TestCase):
         tools.mark_transfers_done(conn, NOV_1, all_open=True)            # all done: the balance is final, no caveat
         self.assertNotIn("transfer gajian", tools.record_account_balance(conn, NOV_1, "mandiri-utama", 4_000_000).lower())
 
+    def test_a_transfer_paid_into_the_reported_account_is_not_one_leaving_it(self):
+        conn = world()
+        PayeeVault(conn, KEY).store("jenius-akun", "account", "Jenius", "9" * 10)
+        conn.execute("INSERT INTO accounts(alias,bank,kind,last4) VALUES ('jenius-rek','Jenius','main','9999')")  # same account
+        tools.upsert_card(conn, "jenius-1", "Jenius", "0480", 26, 13, 20_000_000, pay_to_alias="jenius-akun", interest_bp_month=225)
+        tools.generate_payday_plan(conn, NOV_1)
+        self.assertIn("selesai: cimb-1 Rp 200.000; dbs-1 Rp 7.000.000; sekolah-va Rp 2.000.000; uang-harian Rp 3.000.000. Bila",
+                      tools.record_account_balance(conn, NOV_1, "jenius-rek", 1_000_000))
+        self.assertIn("dbs-1 Rp 7.000.000; jenius-1 Rp 6.000.000; sekolah-va",
+                      tools.record_account_balance(conn, NOV_1, "mandiri-utama", 1_000_000))
+
     def test_rincian_and_the_reports_mark_what_is_done(self):
         conn = world()
         pay_as_on_30_oct(conn)

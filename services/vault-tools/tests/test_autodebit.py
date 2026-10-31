@@ -122,9 +122,18 @@ class BalanceCheck(unittest.TestCase):
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM balance_reports").fetchone()[0], 2)
 
     def test_a_debit_due_today_gives_both_figures(self):
-        out = tools.record_account_balance(self.world(), date(2026, 11, 1), "mandiri-utama", 5_900_000)
+        conn = self.world()
+        out = tools.record_account_balance(conn, date(2026, 11, 1), "mandiri-utama", 5_900_000)
         self.assertIn("BELUM terpotong: butuh Rp 6.071.000, saldo KURANG Rp 171.000", out)
         self.assertIn("SUDAH terpotong: butuh Rp 5.801.000, saldo CUKUP (lebih Rp 99.000)", out)
+        # a salary transfer still open: what is left after it, for both cases as well
+        PayeeVault(conn, bytes(range(32))).store("sekolah-va", "va", "BCA", "9" * 10)
+        tools.upsert_expense(conn, "sekolah", "sekolah-va", 50_000, 1)
+        tools.generate_payday_plan(conn, date(2026, 11, 1))
+        self.assertIn("Transfer gajian yang belum tercatat selesai: sekolah-va Rp 50.000. Bila dibayar dari rekening ini: bila "
+                      "autodebet hari ini BELUM terpotong, saldonya KURANG Rp 221.000 untuk itu; bila SUDAH terpotong, sesudahnya "
+                      "yang bisa dipakai Rp 49.000. Laporkan saldo lagi",
+                      tools.record_account_balance(conn, date(2026, 11, 1), "mandiri-utama", 5_900_000))
 
     def test_after_the_last_debit_nothing_is_due_until_the_next_salary(self):
         out = tools.record_account_balance(self.world(), date(2026, 11, 10), "mandiri-utama", 500_000)

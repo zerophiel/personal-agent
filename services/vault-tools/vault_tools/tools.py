@@ -1041,27 +1041,38 @@ def record_account_balance(conn, today: date, alias: str, balance: int) -> str:
         return out + _living_balance(conn, today, cur.lastrowid) + (" " + format_autodebit_check(check) if check["debits"] else "")
     out += format_autodebit_check(check)
     if current_payday(today) <= today:   # the payday days: a balance read before the salary transfers still holds their money
-        todo = _open_transfers(conn, today)
+        todo = _open_transfers(conn, today, alias)
         if todo is None:
             out += " Angka ini hanya benar bila semua transfer gajian sudah dilakukan; bila belum, laporkan lagi setelah transfer."
         elif todo:   # named and counted, so the bot does not take them off itself (salary money sits in more than one account)
-            total, free = sum(v for _, v in todo), check["balance"] - check["need"]
-            out += (" Transfer gajian yang belum tercatat selesai: " + "; ".join(f"{a} {format_idr(v)}" for a, v in todo) + ". "
-                    + (f"Bila dibayar dari rekening ini, sesudahnya yang bisa dipakai {format_idr(free - total)}." if free >= total else
-                       f"Bila dibayar dari rekening ini, saldonya KURANG {format_idr(total - free)} untuk itu.")
+            total = sum(v for _, v in todo)
+
+            def after(need: int) -> str:
+                free = balance - need
+                return (f"sesudahnya yang bisa dipakai {format_idr(free - total)}" if free >= total else
+                        f"saldonya KURANG {format_idr(total - free)} untuk itu")
+            out += (" Transfer gajian yang belum tercatat selesai: " + "; ".join(f"{a} {format_idr(v)}" for a, v in todo)
+                    + (f". Bila dibayar dari rekening ini: bila autodebet hari ini BELUM terpotong, {after(check['need'])}; bila "
+                       f"SUDAH terpotong, {after(check['need_if_debited'])}." if check["due_today"] else
+                       f". Bila dibayar dari rekening ini, {after(check['need'])}.")
                     + " Laporkan saldo lagi setelah transfer.")
     return out
 
 
-def _open_transfers(conn, today: date) -> list[tuple[str, int]] | None:
-    """The current payday plan's transfers not recorded as done (auto-debits apart: autodebit_check counts them); None
-    without a plan for the current payday."""
+def _open_transfers(conn, today: date, alias: str) -> list[tuple[str, int]] | None:
+    """The current payday plan's transfers not recorded as done that could leave `alias`: auto-debits apart (autodebit_check
+    counts them) and those paid into `alias` itself (a payee with its bank and last digits: the emergency fund's dana-darurat
+    is the jago-darurat account); None without a plan for the current payday."""
     row = conn.execute("SELECT snapshot_json FROM plans ORDER BY id DESC LIMIT 1").fetchone()
     snap = json.loads(row["snapshot_json"]) if row else None
     if snap is None or snap["payday"] != current_payday(today).isoformat():
         return None
+    acct = conn.execute("SELECT bank, last4 FROM accounts WHERE alias=?", (alias,)).fetchone()
+    own = {alias} | {r["alias"] for r in conn.execute("SELECT alias FROM payee_secrets WHERE kind='account' AND lower(bank)=lower(?)"
+                                                      " AND last4=?", (acct["bank"], acct["last4"]))}
+    into = own | {t["to_alias"] for t in snap["transfers"] if t.get("pay_to") in own}
     return [(it["to"], it["planned"] - it["done"]) for it in payday_progress(conn, snap)["items"]
-            if it["method"] != "autodebit" and it["planned"] > it["done"]]
+            if it["method"] != "autodebit" and it["to"] not in into and it["planned"] > it["done"]]
 
 
 def plan_to_dict(plan: Plan) -> dict:

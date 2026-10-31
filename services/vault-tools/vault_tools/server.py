@@ -162,7 +162,8 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
     def saldo_rekening(rekening: str, saldo: int) -> str:
         """Catat SALDO REKENING biasa (bukan pot) yang TAMPIL di aplikasi bank sekarang, apa adanya (jangan dikurangi saldo
         yang ditahan bank: kode yang menghitung). Kode menjawab CUKUP/KURANG untuk autodebet dari rekening itu sampai gajian
-        berikutnya; sampaikan apa adanya. Saat gajian: tanyakan SETELAH pemilik selesai transfer. Ini bukan sisa uang harian
+        berikutnya, yang bisa dipakai, dan di hari gajian transfer gajian yang belum tercatat selesai beserta sisanya bila
+        dibayar dari rekening itu; sampaikan apa adanya. Saat gajian: tanyakan SETELAH pemilik selesai transfer. Ini bukan sisa uang harian
         (itu sisa_uang_harian, sebelum gaji masuk). Untuk rekening harian (jago-harian, mis. "saldo poket harian sekarang"):
         uang harian bulan ini dikoreksi ke saldo itu (uang masuk atau keluar yang tidak tercatat) dan kode menjawab sisanya
         sampai gajian; sampaikan apa adanya, tanpa angka per hari."""
