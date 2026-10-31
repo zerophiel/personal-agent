@@ -26,11 +26,23 @@ from pathlib import Path
 log = logging.getLogger("control")
 
 ZONES = ("front", "comms", "vault")
-CHANGE_TYPES = ("skill", "mcp", "tool", "toolset", "egress_domain", "schedule", "config", "credential")
+# Where each kind of change may write ({zone} filled in; a trailing / is a folder). Everything else is refused before the
+# owner sees it: host scripts, compose, plugins, control and secrets never change through a button (a new service is an
+# escalation, a secret value goes through make secret-set; a credential proposal only asks for one, so it has no files).
+PATHS = {
+    "skill": ("services/hermes/{zone}/skills/",),
+    "mcp": ("services/hermes/{zone}/config.yaml",),
+    "tool": ("services/hermes/{zone}/config.yaml",),
+    "toolset": ("services/hermes/{zone}/config.yaml",),
+    "schedule": ("services/hermes/{zone}/config.yaml",),
+    "config": ("services/hermes/{zone}/config.yaml", "services/hermes/{zone}/SOUL.md"),
+    "egress_domain": ("config/squid/{zone}.conf",),
+    "credential": (),
+}
+CHANGE_TYPES = tuple(PATHS)
 TEXT_LIMITS = {"summary": 500, "permission_diff": 2000, "risk_notes": 1000, "rollback": 1000}
 MAX_FILES, MAX_FILE_CHARS, MAX_INBOX_BYTES, MAX_PENDING = 20, 50_000, 1_200_000, 5
 SAFE_PATH = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./-]{0,199}")
-OFF_LIMITS = (".git/", "secrets/", "services/control/")   # never through an approval: the repo, secrets, control itself
 NONCE = re.compile(r"[0-9a-f]{32}")
 HELP = ("control (tanpa LLM): /status, /usulan (usulan perubahan yang menunggu keputusan), /ping. Usulan dari agen lain "
         "datang dengan tombol Setujui/Tolak; hanya kamu yang bisa menekannya, dan setiap tombol hanya berlaku sekali.")
@@ -50,9 +62,16 @@ def is_authorized(update: dict, owner_id: int) -> bool:
     return sender.get("id") == owner_id and chat.get("type") == "private"
 
 
+def path_allowed(path: str, zone: str, change_type: str) -> bool:
+    if not SAFE_PATH.fullmatch(path) or ".." in path.split("/") or "//" in path:
+        return False
+    return any((path.startswith(p) and len(path) > len(p)) if p.endswith("/") else path == p
+               for p in (x.format(zone=zone) for x in PATHS[change_type]))
+
+
 def validate(raw: object) -> dict:
     """A proposal as control accepts it, else ValueError: these fields and no others, zone and change type from fixed lists,
-    lengths capped, file paths inside the repo and off the repo's own machinery. The text is the model's: shown, never run."""
+    lengths capped, files only where that change type may write (PATHS). The text is the model's: shown, never run."""
     if not isinstance(raw, dict):
         raise ValueError("bukan objek JSON")
     extra = sorted(str(k) for k in set(raw) - set(TEXT_LIMITS) - {"zone", "change_type", "files"})
@@ -74,16 +93,22 @@ def validate(raw: object) -> dict:
     files = raw.get("files", [])
     if not isinstance(files, list) or len(files) > MAX_FILES:
         raise ValueError(f"files harus daftar, paling banyak {MAX_FILES}")
+    allowed = [x.format(zone=out["zone"]) for x in PATHS[out["change_type"]]]
+    if not allowed and files:
+        raise ValueError(f"usulan {out['change_type']} tidak berisi file")
+    if allowed and not files:
+        raise ValueError(f"usulan {out['change_type']} perlu file yang diubah")
     out["files"] = []
     for f in files:
         if not isinstance(f, dict) or set(f) != {"path", "content"} or not all(isinstance(v, str) for v in f.values()):
             raise ValueError("setiap file berisi path dan content (teks)")
-        p = f["path"]
-        if not SAFE_PATH.fullmatch(p) or ".." in p.split("/") or "//" in p or (p + "/").startswith(OFF_LIMITS):
-            raise ValueError("path file harus relatif di dalam repo, di luar .git, secrets dan control")
+        if not path_allowed(f["path"], out["zone"], out["change_type"]):
+            raise ValueError(f"usulan {out['change_type']} untuk zona {out['zone']} hanya boleh mengubah: {', '.join(allowed)}")
         if len(f["content"]) > MAX_FILE_CHARS:
             raise ValueError(f"isi file lebih dari {MAX_FILE_CHARS} karakter")
-        out["files"].append({"path": p, "content": f["content"]})
+        if f["path"] in (g["path"] for g in out["files"]):
+            raise ValueError("satu path hanya boleh sekali")
+        out["files"].append({"path": f["path"], "content": f["content"]})
     return out
 
 

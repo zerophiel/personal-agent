@@ -116,7 +116,7 @@ services:
       CONTROL_STATE_DIR: /state
       PROPOSALS_INBOX_DIR: /inbox
     secrets: [telegram_control_token]
-    volumes:   # both owned by uid 10001 (scripts/control-dirs.sh); two folders, so an inbox file can never be an approval
+    volumes:   # both owned by uid 10001 (scripts/data-dirs.sh); two folders, so an inbox file can never be an approval
       - /opt/personal-agent-data/control-state:/state     # control only: control.db, decided/, approved/ (the applier's input)
       - /opt/personal-agent-data/proposals-inbox:/inbox   # change-proposals writes, control reads and empties
     networks: [net-ctl]
@@ -126,6 +126,24 @@ services:
     oom_score_adj: -500
     cpus: 0.25
     depends_on: [squid-ctl]
+
+  change-proposals:   # M3: the front agent's only way to ask for a change; it writes the inbox and nothing else
+    <<: *hardened
+    profiles: ["front"]
+    build:
+      context: ../services          # control/control.py is copied in: the proposal rules are control's own
+      dockerfile: change-proposals/Dockerfile
+    environment:
+      PROPOSALS_INBOX_DIR: /inbox
+    secrets: [change_proposals_mcp_token]
+    volumes:
+      - /opt/personal-agent-data/proposals-inbox:/inbox   # control (net-ctl) reads it: all the two zones share
+    networks: [net-front]
+    read_only: true
+    tmpfs: ["/tmp"]
+    mem_limit: 192m
+    cpus: 0.25
+    cpu_shares: 512
 
 secrets:
   telegram_control_token:
@@ -144,3 +162,5 @@ secrets:
     file: /opt/personal-agent-secrets/pdf_passwords
   notion_token:    # internal integration token; set with `make secret-set NAME=notion_token`
     file: /opt/personal-agent-secrets/notion_token
+  change_proposals_mcp_token:   # random; `make secret-gen NAME=change_proposals_mcp_token TYPE=token`
+    file: /opt/personal-agent-secrets/change_proposals_mcp_token

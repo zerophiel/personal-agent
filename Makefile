@@ -17,7 +17,7 @@ preflight:
 # Sync repo to VPS and apply compose + host timers. Plaintext secrets and the local project map are never synced.
 deploy:
 	rsync -az --delete --exclude .git --exclude .claude --exclude 'secrets/*.dec*' --exclude graphify-out --exclude CLAUDE.md ./ $(VPS_USER)@$(VPS_HOST):$(REMOTE_DIR)/
-	$(SSH) 'cd $(REMOTE_DIR) && sudo bash scripts/install-timers.sh && sudo bash scripts/control-dirs.sh && $(COMPOSE) up -d --build'
+	$(SSH) 'cd $(REMOTE_DIR) && sudo bash scripts/install-timers.sh && sudo bash scripts/data-dirs.sh && $(COMPOSE) up -d --build'
 
 status:
 	$(SSH) 'cd $(REMOTE_DIR) && $(COMPOSE) ps && df -h / && free -m && docker system df'
@@ -57,6 +57,7 @@ restore:
 test:
 	python3 -I -m unittest discover -s tests -v
 	cd services/control && python3 -I -m unittest discover -s tests -v
+	cd services/change-proposals && $${VAULT_PY:-python3} -I -m unittest discover -s tests -v   # needs mcp, as the vault-tools server tests
 	cd services/ingest-gmail && python3 -I -m unittest discover -s tests -v
 	cd services/vault-tools && $${VAULT_PY:-python3} -I -m unittest discover -s tests -v   # VAULT_PY=venv python to include server tests
 

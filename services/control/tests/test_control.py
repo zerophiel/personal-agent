@@ -68,18 +68,28 @@ class FakeTelegram:
 class ValidateTests(unittest.TestCase):
     def test_a_good_proposal_passes_as_is(self):
         self.assertEqual(validate(proposal())["files"][0]["path"], "config/squid/front.conf")
-        self.assertEqual(validate(proposal(files=[]))["files"], [])
+        self.assertEqual(validate(proposal(change_type="credential", files=[]))["files"], [])
+        skill = [{"path": "services/hermes/front/skills/cuaca/SKILL.md", "content": "# cuaca\n"}]
+        self.assertEqual(validate(proposal(change_type="skill", files=skill))["files"], skill)
 
     def test_bad_proposals_are_refused(self):
+        f = lambda path, content="": [{"path": path, "content": content}]   # noqa: E731
         for bad in (proposal(zone="control"), proposal(change_type="deploy"), proposal(summary=" "),
                     proposal(summary="x" * 501), proposal(extra="y"),
-                    proposal(files=[{"path": "../etc/passwd", "content": ""}]),
-                    proposal(files=[{"path": "/etc/passwd", "content": ""}]),
-                    proposal(files=[{"path": "secrets/telegram", "content": ""}]),
-                    proposal(files=[{"path": "services/control/control.py", "content": ""}]),
-                    proposal(files=[{"path": "a//b", "content": ""}]),
-                    proposal(files=[{"path": "a.txt", "content": 1}]), ["not", "a", "dict"]):
-            with self.assertRaises(ValueError):
+                    proposal(files=f("../etc/passwd")), proposal(files=f("/etc/passwd")),
+                    proposal(files=f("secrets/telegram")), proposal(files=f("services/control/control.py")),
+                    proposal(files=f("config/squid//front.conf")), proposal(files=f("config/squid/front.conf", 1)),
+                    proposal(files=f("compose/docker-compose.yml")), proposal(files=f("scripts/install-timers.sh")),
+                    proposal(files=f("config/squid/vault.conf")),                       # another zone's proxy
+                    proposal(zone="comms"),                                            # front.conf for comms
+                    proposal(files=[]),                                                # egress_domain with no file
+                    proposal(change_type="credential"),                                # a credential with files
+                    proposal(change_type="skill", files=f("services/hermes/front/skills/")),
+                    proposal(change_type="skill", files=f("services/hermes/front/skills/x/../../SOUL.md")),
+                    proposal(change_type="skill", files=f("services/hermes/front/plugins/x/__init__.py")),
+                    proposal(change_type="config", files=f("services/hermes/front/SOUL.md") * 2),
+                    ["not", "a", "dict"]):
+            with self.assertRaises(ValueError, msg=str(bad)[:120]):
                 validate(bad)
 
     def test_model_text_is_defanged(self):
