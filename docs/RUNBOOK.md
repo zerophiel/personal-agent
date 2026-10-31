@@ -16,6 +16,32 @@ KVM, Ubuntu 24.04.4, sshd drop-in `/etc/ssh/sshd_config.d/00-hardening.conf` (no
 - `make prune-dry` keeps images of the current compose and `releases/previous.txt`; no volume is touched.
 - Restore test: `restic restore latest --target /tmp/restore-test` then inspect.
 
+## Control bot (M3, live since 2026-11-01)
+- `@danoecontrol_bot`, owner only: `/status` (waiting, approved, rejected, invalid counts), `/usulan` (posts the waiting
+  proposals again with their buttons), `/ping`. A proposal card shows the agent's summary, permission change, files,
+  risk and rollback; Setujui/Tolak work once. Approved means recorded in `control-state/approved/`, not applied: the
+  applier is not built yet (contract in `docs/SECURITY.md`).
+- Folders: `sudo bash scripts/data-dirs.sh` (also run by `make deploy`) before the first start.
+- Deploy only control: rsync as `make deploy` does, then
+  `sudo docker compose -f compose/docker-compose.yml --env-file config/stack.env up -d --build --wait control`.
+- Read its state without printing nonces: `sudo docker exec -i personal-agent-control-1 python -I -` with a short
+  read-only script on `file:/state/control.db?mode=ro` (counts and statuses only).
+
+## Front zone (M3, defined, not started)
+`@danoefront_agent`: Hermes on Haiku 5.5 with web search, memory (each write needs the owner's OK) and one MCP tool,
+`submit` (change-proposals), which sends a change request to the control bot. No shell, code, files, browser or skills.
+It starts only with `--profile front`; `make deploy` never starts or stops it. Owner steps, in order:
+1. BotFather: `@danoefront_agent` -> Bot Settings -> Allow Groups -> off.
+2. Anthropic Console: a separate workspace for front with a USD 40 monthly limit, and an API key from that workspace
+   (with the vault's key front would spend the finance bot's budget; `render-front-env.sh` refuses the vault key).
+3. `make secret-set NAME=telegram_front_token` and `make secret-set NAME=anthropic_front_key` (prompted on the VPS).
+4. On the VPS: `sudo bash scripts/data-dirs.sh` (done 2026-11-01), then `sudo bash scripts/render-front-env.sh`.
+5. Start: `sudo docker compose -f compose/docker-compose.yml --env-file config/stack.env --profile front up -d --build
+   --wait change-proposals front`.
+6. Send `/start` to `@danoefront_agent`, then ask it to send a harmless test proposal: a card appears in the control bot.
+- After a change to `services/hermes/front/`: rsync as `make deploy` does, then the step 5 command with `front` only.
+- Stop: the same compose command with `--profile front stop front change-proposals`.
+
 ## Restore
 Always restore to a scratch directory, verify the ledger, then copy deliberately.
 

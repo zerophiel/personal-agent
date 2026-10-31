@@ -127,6 +127,36 @@ services:
     cpus: 0.25
     depends_on: [squid-ctl]
 
+  front:   # M3 front zone: the owner's general assistant on the open web. Starts only with --profile front, after the owner's
+           # two secrets exist and scripts/render-front-env.sh has run (docs/RUNBOOK.md, "Front zone")
+    image: nousresearch/hermes-agent@sha256:9c5561579f3ffdf333401797094ac3a743738d6c25d40f4331c7bf77b694238d
+    profiles: ["front"]
+    command: ["gateway", "run"]
+    restart: unless-stopped
+    # the image boots as root (s6: uid remap, chown of /opt/data), then runs Hermes as uid 10000; these are all it needs
+    # (tested 2026-11-01: boots, runs as 10000, stops cleanly), the rest of Docker's default set is dropped
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE, FOWNER, KILL]
+    security_opt: ["no-new-privileges:true"]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    env_file:
+      - path: /opt/personal-agent-data/front.env   # rendered on the VPS by scripts/render-front-env.sh
+        required: false                           # so compose still parses before the owner's front secrets exist
+    volumes:
+      - /opt/personal-agent-data/hermes-front:/opt/data
+      # read-only overlays: the agent cannot edit its own config or persona
+      - ../services/hermes/front/config.yaml:/opt/data/config.yaml:ro
+      - ../services/hermes/front/SOUL.md:/opt/data/SOUL.md:ro
+    networks: [net-front]
+    mem_limit: 2g
+    oom_score_adj: 300
+    cpus: 1.0
+    cpu_shares: 512
+    pids_limit: 256
+    depends_on: [squid-front, change-proposals]
+
   change-proposals:   # M3: the front agent's only way to ask for a change; it writes the inbox and nothing else
     <<: *hardened
     profiles: ["front"]
