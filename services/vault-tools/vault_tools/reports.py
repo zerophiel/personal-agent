@@ -240,6 +240,10 @@ def _anggaran(conn, today: date) -> str:
         if rd:
             left += (f"\n<i>mengikuti saldo {e(rd['alias'])} {e(format_idr(rd['balance']))} ({e(tgl(rd['as_of']))} {e(rd['at'])})"
                      + (f"; selisih dengan catatan {e(('+' if fix > 0 else '-') + format_idr(abs(fix)))}" if fix else "") + "</i>")
+        if pace["unsorted"]["rows"]:
+            u = pace["unsorted"]
+            left += (f"\n<i>belum dihitung: {u['rows']} mutasi keluar {e(format_idr(u['amount']))} dari bank lain yang belum "
+                     "dikategorikan</i>")
         out.append(f"🗓️ {b('Uang harian')} sampai gajian {e(tgl(pace['next_payday']))}\nTerpakai {b(format_idr(pace['spent']))} dari "
                    f"{e(format_idr(pace['allowance']) + split)}\n{left}")
     return "\n\n".join(out)

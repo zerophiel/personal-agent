@@ -136,6 +136,11 @@ class _Banks:
     def spent(self):
         return hl.spending_pace(self.conn, TODAY)["spent"]
 
+    def pace(self):
+        """(spent, rows and amount still uncategorized at another bank than the daily account's: not counted yet)"""
+        p = hl.spending_pace(self.conn, TODAY)
+        return p["spent"], p["unsorted"]["rows"], p["unsorted"]["amount"]
+
     def count(self):
         return self.conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
 
@@ -148,10 +153,10 @@ class MergeRules(_Banks, unittest.TestCase):
         rid = spend(self.conn, 100_000, "ISI FLAZZ", category="transport", account_alias="mandiri-utama")["id"]
         self.upload("bca-utama", "a", ("2026-11-05", "TRSF E-BANKING 1234567", -100_000))
         self.assertIsNone(self.merged(rid))
-        self.assertEqual(self.spent(), 200_000)                                   # two payments, both counted
+        self.assertEqual(self.pace(), (100_000, 1, 100_000))    # two payments: the BCA row waits for its category
         self.upload("mandiri-utama", "b", ("2026-11-06", "FLAZZ TOPUP 998877", -100_000))
         self.assertEqual(self.merged(rid), self.conn.execute("SELECT id FROM transactions WHERE merchant LIKE 'FLAZZ%'").fetchone()[0])
-        self.assertEqual(self.spent(), 200_000)                                   # the receipt is inside its own bank's row
+        self.assertEqual(self.pace(), (100_000, 1, 100_000))    # the receipt is inside its own bank's row
 
     def test_a_pocket_is_in_its_banks_one_statement(self):
         rid = spend(self.conn, 156_541, "PHO STREET", category="makan", account_alias="jago-harian")["id"]
@@ -190,7 +195,7 @@ class MergeRules(_Banks, unittest.TestCase):
         self.assertEqual((self.merged(cash), self.merged(own) is None), (None, False))    # the free row did not take it
         late = spend(self.conn, 80_000, "BAKSO", day="2026-11-06")                         # nor a record made after it
         self.assertEqual(("merged_into" in late, self.merged(late["id"])), (False, None))
-        self.assertEqual(self.spent(), 320_000)
+        self.assertEqual(self.pace(), (240_000, 1, 80_000))     # the transfer to Andi waits for its category
 
     def test_a_row_a_rule_sorted_keeps_its_category_and_status(self):
         """The record's category only fills a row that has none; the status was overwritten anyway, so a rule's row turned
@@ -217,7 +222,7 @@ class LateRecordsAndResentScreenshots(_Banks, unittest.TestCase):
         self.assertEqual((r["status"], r.get("merged_into"), self.merged(r["id"])), ("stored", mut, mut))
         self.assertIn(f"sudah ada di mutasi bank #{mut} (QRIS WARUNG BU SRI, 2026-11-05, Rp 80.000, rekening bca-utama)",
                       r["alerts"][0])
-        self.assertEqual(self.spent(), 155_000)                         # the two statement rows, nothing twice
+        self.assertEqual(self.pace(), (80_000, 1, 75_000))     # the two statement rows, nothing twice; GRAB not sorted yet
         card = spend(self.conn, 75_000, "GRAB", day="2026-11-06", category="transport", card_alias="cimb-1")
         self.assertEqual(("merged_into" in card, self.merged(card["id"])), (False, None))   # it is on the card statement
 
@@ -230,7 +235,7 @@ class LateRecordsAndResentScreenshots(_Banks, unittest.TestCase):
         self.upload("bca-utama", "c", ("2026-11-05", "QRIS WARUNG BU SRI", -80_000), period=("2026-11-05", "2026-11-30"))
         own = self.conn.execute("SELECT id FROM transactions WHERE merchant='QRIS WARUNG BU SRI'").fetchone()[0]
         self.assertEqual(self.merged(r["id"]), own)
-        self.assertEqual(self.spent(), 160_000)                         # two payments, each counted once
+        self.assertEqual(self.pace(), (80_000, 1, 80_000))     # two payments, each once; the other one not sorted yet
 
     def test_a_resent_screenshot_of_a_merged_purchase_is_flagged_not_stored_again(self):
         """Live shape (PHO STREET #2440): recorded, corrected (its key is then id-based), merged on upload, the screenshot
@@ -520,6 +525,77 @@ class PlanInForce(unittest.TestCase):
         self.assertIsNone(hl.spending_pace(conn, date(2026, 11, 30)))      # the 30 Oct plan's month has ended
         self.assertIsNone(hl.spending_pace(conn, date(2026, 10, 29)))      # before any stored payday
         self.assertIsNone(tools.plan_in_force(conn, date(2026, 10, 29)))
+
+
+class UnsortedElsewhere(unittest.TestCase):
+    """Regression 2026-11-02: the 30 Oct payday's transfers and fees out of the salary account were uploaded uncategorized
+    and counted as daily spending, so most of the month read as spent ('watch' with the balance reading, 'over' without
+    one). A row of another bank than the daily account's waits for its category, and the pace reports it."""
+
+    def world(self):
+        conn = planned()
+        conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('jago-harian','Jago','main')")
+        conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('jago-utama','jago','main')")
+        conn.commit()
+        spend(conn, 100_000, category="makan", account_alias="jago-harian")
+        return conn
+
+    def upload(self, conn, account, h, *rows):
+        mu.record_mutations(conn, account, h * 64, "2026-10-30", "2026-11-30", None, None,
+                            [{"date": d, "description": desc, "amount": a} for d, desc, a in rows])
+        return {r["merchant"]: r["id"] for r in conn.execute("SELECT id, merchant FROM transactions WHERE source='mutation'")}
+
+    def test_the_paydays_transfers_wait_for_their_category(self):
+        conn = self.world()
+        rows = self.upload(conn, "mandiri-utama", "a", ("2026-10-30", "TRSF BIFAST KE KARTU", -3_000_000),
+                           ("2026-10-30", "BIAYA TRSF BIFAST", -2_500), ("2026-10-30", "TRSF KE TOKO ABC", -800_000))
+        p = hl.spending_pace(conn, TODAY)
+        self.assertEqual((p["spent"], p["status"], p["unsorted"]), (100_000, "ok", {"rows": 3, "amount": 3_802_500}))
+        self.assertIn("; BELUM DIHITUNG: 3 mutasi keluar Rp 3.802.500 dari bank selain bank jago-harian yang belum "
+                      "dikategorikan", tools.data_overview(conn, TODAY))
+        self.assertIn("belum dihitung: 3 mutasi keluar Rp 3.802.500 dari bank lain yang belum dikategorikan",
+                      reports._anggaran(conn, TODAY))
+        self.assertIn(("info", "3 mutasi keluar Rp 3.802.500 dari bank selain bank jago-harian sejak gajian 2026-10-30 belum "
+                               "dikategorikan, jadi belum dihitung sebagai pengeluaran harian."), hl.health_check(conn, TODAY)["findings"])
+        mu.set_category(conn, rows["TRSF BIFAST KE KARTU"], "wajib:kartu")     # an obligation: neither counted nor waiting
+        mu.set_category(conn, rows["TRSF KE TOKO ABC"], "belanja")             # the owner says it was a purchase
+        p = hl.spending_pace(conn, TODAY)
+        self.assertEqual((p["spent"], p["unsorted"]), (900_000, {"rows": 1, "amount": 2_500}))
+
+    def test_without_a_daily_account_every_row_counts(self):
+        conn = planned()
+        self.upload(conn, "mandiri-utama", "b", ("2026-11-02", "TRSF KE TOKO ABC", -300_000))
+        p = hl.spending_pace(conn, TODAY)
+        self.assertEqual((p["spent"], p["unsorted"]["rows"]), (300_000, 0))
+        self.assertNotIn("BELUM DIHITUNG", tools.data_overview(conn, TODAY))
+
+    def test_a_row_of_the_daily_accounts_bank_still_counts(self):
+        """Jago files every pocket under one account: a row of jago-utama may be a purchase from the daily pocket."""
+        conn = self.world()
+        self.upload(conn, "jago-utama", "c", ("2026-11-03", "Monthly spending: TOKO ABC POS Transaction", -60_000))
+        self.upload(conn, "jago-harian", "d", ("2026-11-04", "QRIS TOKO XYZ", -40_000))
+        p = hl.spending_pace(conn, TODAY)
+        self.assertEqual((p["spent"], p["unsorted"]["rows"]), (200_000, 0))
+
+    def test_a_receipt_inside_another_banks_row_makes_it_a_purchase(self):
+        conn = self.world()
+        rid = spend(conn, 75_000, "PARKIR KANTOR", day="2026-11-06", account_alias="mandiri-utama")["id"]     # no category
+        rows = self.upload(conn, "mandiri-utama", "e", ("2026-11-06", "QRIS PARKIR KANTOR", -75_000))
+        self.assertEqual(conn.execute("SELECT merged_into FROM transactions WHERE id=?", (rid,)).fetchone()[0],
+                         rows["QRIS PARKIR KANTOR"])
+        p = hl.spending_pace(conn, TODAY)
+        self.assertEqual((p["spent"], p["unsorted"]["rows"]), (175_000, 0))
+
+    def test_a_balance_reading_is_not_moved_by_a_row_waiting_for_its_category(self):
+        conn = self.world()
+        tools.record_account_balance(conn, TODAY, "jago-harian", 5_000_000)
+        before = hl.spending_pace(conn, TODAY)
+        self.assertIsNotNone(before["reading"])
+        rows = self.upload(conn, "mandiri-utama", "f", (TODAY.isoformat(), "TRSF BIFAST KE KARTU", -3_000_000))   # after the reading
+        p = hl.spending_pace(conn, TODAY)
+        self.assertEqual((p["remaining"], p["spent"], p["unsorted"]["rows"]), (before["remaining"], before["spent"], 1))
+        mu.set_category(conn, rows["TRSF BIFAST KE KARTU"], "belanja")        # sorted as a purchase: spent after the reading
+        self.assertEqual(hl.spending_pace(conn, TODAY)["remaining"], before["remaining"] - 3_000_000)
 
 
 class Budgets(unittest.TestCase):

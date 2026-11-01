@@ -276,10 +276,10 @@
     "semantic_hash": "9a666ca447b0a66048b639c605ec8f6a"
   },
   "services/vault-tools/tests/test_corrections.py": {
-    "mtime": 1793501434.8594666,
-    "seen": 1793505699.7712646,
-    "ast_hash": "513428f2cb082d407855ce0479a45695",
-    "semantic_hash": "513428f2cb082d407855ce0479a45695"
+    "mtime": 1793556212.4256444,
+    "seen": 1793556403.0151002,
+    "ast_hash": "e7efc89e4332fc90bdbc499aee90155e",
+    "semantic_hash": ""
   },
   "services/vault-tools/tests/test_cuti_fetch.py": {
     "mtime": 1793075861.0724707,
@@ -288,10 +288,10 @@
     "semantic_hash": "b7fcd5e93eddba11e5d44e3285e75a5b"
   },
   "services/vault-tools/tests/test_health.py": {
-    "mtime": 1793471829.360821,
-    "seen": 1793480755.5451734,
-    "ast_hash": "87185289516415d6292c1d1c9b035ba8",
-    "semantic_hash": "87185289516415d6292c1d1c9b035ba8"
+    "mtime": 1793556267.5087116,
+    "seen": 1793556403.015102,
+    "ast_hash": "4c311940e5c29d71017dde2a18d0d133",
+    "semantic_hash": ""
   },
   "services/vault-tools/tests/test_invariants.py": {
     "mtime": 1793502710.2046957,
@@ -432,10 +432,10 @@
     "semantic_hash": "5c57b962e2f84825cd9e18675405fdaf"
   },
   "services/vault-tools/vault_tools/health.py": {
-    "mtime": 1793471829.1976523,
-    "seen": 1793480755.5451918,
-    "ast_hash": "d24f303a00ec9e62c581c287fc126ab2",
-    "semantic_hash": "d24f303a00ec9e62c581c287fc126ab2"
+    "mtime": 1793556150.0575309,
+    "seen": 1793556403.0151176,
+    "ast_hash": "864333dd65063ed398fabc410455ff61",
+    "semantic_hash": ""
   },
   "services/vault-tools/vault_tools/invariants.py": {
     "mtime": 1793502557.8799422,
@@ -504,10 +504,10 @@
     "semantic_hash": "ff6688638d45042cb3b3fcf6cc797d90"
   },
   "services/vault-tools/vault_tools/reports.py": {
-    "mtime": 1793501377.7919896,
-    "seen": 1793505699.7712905,
-    "ast_hash": "5b4877cea6a4c846450961ff86146052",
-    "semantic_hash": "5b4877cea6a4c846450961ff86146052"
+    "mtime": 1793556150.0582976,
+    "seen": 1793556403.0151265,
+    "ast_hash": "fd93e985366a5e08b30b1f15989d7bb7",
+    "semantic_hash": ""
   },
   "services/vault-tools/vault_tools/rincian.py": {
     "mtime": 1793501377.8959897,
@@ -558,10 +558,10 @@
     "semantic_hash": "046b86a2ba659829b868ccadf4d19296"
   },
   "services/vault-tools/vault_tools/tools.py": {
-    "mtime": 1793502215.343959,
-    "seen": 1793505699.7712965,
-    "ast_hash": "f7a2c569b5ab26a5c618835d29d83b57",
-    "semantic_hash": "f7a2c569b5ab26a5c618835d29d83b57"
+    "mtime": 1793556150.058061,
+    "seen": 1793556403.0151324,
+    "ast_hash": "94c44c396cf083eb09b879762bb698e6",
+    "semantic_hash": ""
   },
   "tests/test_gmail_token_check.py": {
     "mtime": 1793082140.8021452,
@@ -612,10 +612,10 @@
     "semantic_hash": "9a618bdc62e8f09780bb02bd79cc63e9"
   },
   "docs/PROGRESS.md": {
-    "mtime": 1793550577.0218933,
-    "seen": 1793552722.5283525,
-    "ast_hash": "b6b68cb59c27683f6e2e3189d3ed84f8",
-    "semantic_hash": "b6b68cb59c27683f6e2e3189d3ed84f8"
+    "mtime": 1793554962.9217062,
+    "seen": 1793556403.0151417,
+    "ast_hash": "46b1ea155259745694a273597f4873c1",
+    "semantic_hash": ""
   },
   "docs/RUNBOOK.md": {
     "mtime": 1793550497.2138956,
@@ -636,10 +636,10 @@
     "semantic_hash": "ac365ea32f77ba78d1468b6a2988c384"
   },
   "docs/calibration.md": {
-    "mtime": 1793472923.861605,
-    "seen": 1793496374.1840906,
-    "ast_hash": "cb3eee217f009314309566c2af998b7f",
-    "semantic_hash": "cb3eee217f009314309566c2af998b7f"
+    "mtime": 1793554044.4817455,
+    "seen": 1793556403.0151439,
+    "ast_hash": "ff21220cf4e3839ca7ba59acb1149983",
+    "semantic_hash": ""
   },
   "docs/payday.md": {
     "mtime": 1793503739.4472196,
@@ -958,5 +958,11 @@
     "seen": 1793552722.528231,
     "ast_hash": "51ce9a103919173f025ec332011b7f6e",
     "semantic_hash": "51ce9a103919173f025ec332011b7f6e"
+  },
+  "tests/test_deploy.py": {
+    "mtime": 1793553998.497747,
+    "seen": 1793556403.015134,
+    "ast_hash": "8ec1ef375beee3d6fbc512fe1075522e",
+    "semantic_hash": ""
   }
 }

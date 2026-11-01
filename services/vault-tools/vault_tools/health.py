@@ -5,7 +5,9 @@ Conventions
 - Amounts are integer Rupiah; money out is negative in `transactions`.
 - Categories that are NOT discretionary spending: 'transfer_internal', anything starting with
   'wajib:' (obligations such as school, lessons, loans, card bills) or 'sinking:' (pot deposits).
-  Everything else (including uncategorized) counts as day-to-day spending.
+  Everything else counts as day-to-day spending, uncategorized rows included, with one exception: a bank row of another
+  bank than the daily account's that has no category yet (UNSORTED_ELSEWHERE). On a payday those are the plan's
+  transfers and their fees, so the spending pace leaves them out and reports them until they are categorized.
 - A receipt for money a mutation of the same bank shows is merged into it (`merged_into`), so it is never counted twice:
   when the statement is stored, or when the receipt is recorded or corrected after that bank's statements reach its day.
   A card purchase never is (it is on the card statement), nor a cash one (no bank shows it). A merged receipt can still be
@@ -30,6 +32,15 @@ DEFAULT_DSR_MAX_BP = 3000          # monthly debt payments <= 30% of net income
 WATCH_PCT, OVER_PCT = 80, 100
 MATCH_DAYS = 2
 LIVING_ACCOUNT = "jago-harian"      # the account the owner spends day-to-day from (its number is the payee 'uang-harian')
+# Not day-to-day spending until it has a category: a bank row of another bank than the daily account's (Jago files every
+# pocket under one account, so a Jago row may be a daily purchase), with no receipt merged into it (a receipt makes it the
+# owner's purchase). Without a daily account every row counts. Regression 2026-11-02: the 30 Oct payday's transfers and
+# fees out of the salary account, uploaded uncategorized, read as most of the month's daily money spent. Bound to
+# LIVING_ACCOUNT (?).
+UNSORTED_ELSEWHERE = ("t.source = 'mutation' AND t.category IS NULL"
+                      " AND EXISTS (SELECT 1 FROM accounts x, accounts d WHERE x.id = t.account_id AND d.alias = ?"
+                      " AND LOWER(TRIM(x.bank)) <> LOWER(TRIM(d.bank)))"
+                      " AND NOT EXISTS (SELECT 1 FROM transactions u WHERE u.merged_into = t.id)")
 
 
 def is_discretionary(category: str | None) -> bool:
@@ -476,10 +487,12 @@ def set_budget(conn, category: str, monthly_amount: int) -> str:
 
 def _spent_by_category(conn, start: date, end: date) -> dict[str, int]:
     """Spend per category. Rows paid by a card count under 'kartu:<category>' (a card budget), all others under the plain
-    category (cash budget): a Tokopedia payment from a bank account must not eat the card budget."""
+    category (cash budget): a Tokopedia payment from a bank account must not eat the card budget. A row of another bank
+    than the daily account's, still uncategorized, is left out (UNSORTED_ELSEWHERE; unsorted_elsewhere reports it)."""
     out: dict[str, int] = {}
-    for r in conn.execute("SELECT category, amount, card_id FROM transactions WHERE amount < 0 AND merged_into IS NULL"
-                          " AND txn_date BETWEEN ? AND ?", (start.isoformat(), end.isoformat())):
+    for r in conn.execute("SELECT t.category, t.amount, t.card_id FROM transactions t WHERE t.amount < 0 AND t.merged_into IS NULL"
+                          f" AND t.txn_date BETWEEN ? AND ? AND NOT ({UNSORTED_ELSEWHERE})",
+                          (start.isoformat(), end.isoformat(), LIVING_ACCOUNT)):
         key = r["category"] or "belum dikategorikan"
         if r["card_id"] is not None:
             key = "kartu:" + key
@@ -507,6 +520,15 @@ def cash_spent(conn, start: date, end: date) -> int:
     return sum(v for c, v in _spent_by_category(conn, start, end).items() if is_discretionary(c) and not c.startswith("kartu:"))
 
 
+def unsorted_elsewhere(conn, start: date, end: date) -> dict:
+    """The money-out rows dated start..end that the spending pace leaves out until they are categorized
+    (UNSORTED_ELSEWHERE): how many and how much."""
+    r = conn.execute("SELECT COUNT(*) AS n, COALESCE(-SUM(t.amount), 0) AS total FROM transactions t WHERE t.amount < 0"
+                     f" AND t.merged_into IS NULL AND t.txn_date BETWEEN ? AND ? AND {UNSORTED_ELSEWHERE}",
+                     (start.isoformat(), end.isoformat(), LIVING_ACCOUNT)).fetchone()
+    return {"rows": r["n"], "amount": r["total"]}
+
+
 def living_anchor(conn, payday: date, nxt: date) -> dict | None:
     """The owner's latest reading of the daily account's balance in this payday window, with the last transaction id that
     was recorded at that moment (record_account_balance keeps both)."""
@@ -526,13 +548,15 @@ def _by_balance(conn, a: dict, payday: date, today: date) -> tuple[int, int]:
     the Mandiri leftover), whenever it is recorded; a bank account's rows can come in weeks later, and Jago files every
     pocket under one account. What comes off: card purchases since the payday (daily money, not out of the account yet)
     and what was spent after the reading, dated later or dated that day and recorded after it (not a bank row that took in
-    a receipt recorded before the reading)."""
+    a receipt recorded before the reading). A row of another bank than the daily account's, still uncategorized, is not
+    spending yet (UNSORTED_ELSEWHERE), as in the count without a reading."""
     card = after = 0
     for r in conn.execute(
             "SELECT t.id, t.amount, t.category, t.card_id, t.txn_date,"
             " EXISTS (SELECT 1 FROM transactions m WHERE m.merged_into = t.id AND m.id <= ?) AS seen"
-            " FROM transactions t WHERE t.amount < 0 AND t.merged_into IS NULL AND t.txn_date BETWEEN ? AND ?",
-            (a["mark"], payday.isoformat(), today.isoformat())):
+            " FROM transactions t WHERE t.amount < 0 AND t.merged_into IS NULL AND t.txn_date BETWEEN ? AND ?"
+            f" AND NOT ({UNSORTED_ELSEWHERE})",
+            (a["mark"], payday.isoformat(), today.isoformat(), LIVING_ACCOUNT)):
         if not is_discretionary(r["category"]):
             continue
         if r["card_id"] is not None:
@@ -571,7 +595,8 @@ def spending_pace(conn, today: date) -> dict | None:
     status = "over" if spent > allowance else "watch" if pct >= WATCH_PCT else "ok"
     return {"payday": payday.isoformat(), "next_payday": nxt.isoformat(), "allowance": allowance,
             "from_salary": snap["cash_to_hold"], "leftover": held, "spent_before_leftover": before, "spent": spent,
-            "remaining": allowance - spent, "pct_used": pct, "status": status, "correction": correction, "reading": reading}
+            "remaining": allowance - spent, "pct_used": pct, "status": status, "correction": correction, "reading": reading,
+            "unsorted": unsorted_elsewhere(conn, payday, today)}
 
 
 def alerts_for(conn, today: date, category: str | None, txn_date: date | None = None) -> list[str]:
@@ -693,6 +718,10 @@ def health_check(conn, today: date, month: str | None = None) -> dict:
         findings.append(("bad" if pace["status"] == "over" else "warn",
                          f"Pengeluaran harian: {format_idr(pace['spent'])} dari uang harian bulan ini "
                          f"{format_idr(pace['allowance'])} ({pace['pct_used']}%)."))
+    if pace and pace["unsorted"]["rows"]:
+        u = pace["unsorted"]
+        findings.append(("info", f"{u['rows']} mutasi keluar {format_idr(u['amount'])} dari bank selain bank {LIVING_ACCOUNT} sejak "
+                                 f"gajian {pace['payday']} belum dikategorikan, jadi belum dihitung sebagai pengeluaran harian."))
     for b in budget_status(conn, month):
         if b["status"] != "ok":
             findings.append(("bad" if b["status"] == "over" else "warn",

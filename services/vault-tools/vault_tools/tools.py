@@ -241,13 +241,16 @@ def data_overview(conn, today: date) -> str:
                     "dari sisa ini (tidak dihitung lagi di uang harian)" if th.get("living_leftover_spent") else ""))
     pace = spending_pace(conn, today)
     if pace:        # the figure the owner asks for ("sisa uang harian berapa"): from the code, never worked out in chat
-        rd = pace["reading"]
+        rd, u = pace["reading"], pace["unsorted"]
         L.append(f"UANG HARIAN BULAN INI (sampai gajian {pace['next_payday']}): terpakai {format_idr(pace['spent'])} dari "
                  f"{format_idr(pace['allowance'])} ({pace['pct_used']}%), "
                  + (f"sisa {format_idr(pace['remaining'])}" if pace["remaining"] >= 0 else f"lewat {format_idr(-pace['remaining'])}")
                  + (f"; mengikuti saldo {rd['alias']} {format_idr(rd['balance'])} yang dilaporkan {rd['as_of']} pukul {rd['at']} WIB"
                     + (f", selisih dengan catatan {'+' if pace['correction'] > 0 else '-'}{format_idr(abs(pace['correction']))}"
                        if pace["correction"] else "") if rd else "")
+                 + (f"; BELUM DIHITUNG: {u['rows']} mutasi keluar {format_idr(u['amount'])} dari bank selain bank {LIVING_ACCOUNT} "
+                    "yang belum dikategorikan (biasanya transfer gajian dan biaya admin; yang ternyata belanja harian ikut "
+                    "terhitung setelah dikategorikan)" if u["rows"] else "")
                  + ". Jangan dibagi per hari (uang harian juga membayar listrik, telepon, air)")
     L.append("ANGGARAN: " + ("; ".join(f"{k[7:]} {format_idr(v)}" for k, v in sorted(th.items()) if k.startswith("budget:")) or "belum ada"))
     return "\n".join(L)

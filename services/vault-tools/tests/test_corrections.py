@@ -237,7 +237,8 @@ class MergedRecords(unittest.TestCase):
                       " mutasi itu kembali belum dikategorikan (tadinya makan, dari catatan ini). Sekarang cocok dengan mutasi"
                       f" bank #{kopi} (QRIS KOPI KENANGAN, 2026-10-27, Rp 50.000, rekening jago-utama)", out)
         self.assertEqual((self.row(rid)[0], self.row(trsf)[1], self.row(kopi)[1]), (kopi, None, "makan"))
-        self.assertEqual(self.spent(), {"belum dikategorikan": 50_000, "makan": 50_000})  # two payments, both once
+        self.assertEqual(self.spent(), {"makan": 50_000})       # two payments, both once: the transfer waits for its category
+        self.assertEqual(health.unsorted_elsewhere(self.conn, date(2026, 10, 1), date(2026, 10, 31)), {"rows": 1, "amount": 50_000})
 
     def test_lepas_keeps_it_out_of_that_row_for_good(self):
         rid = self.record(156_541, "PHO STREET", "2026-10-27")
