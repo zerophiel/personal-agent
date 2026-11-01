@@ -5,7 +5,7 @@ REMOTE_DIR ?= /opt/personal-agent
 SSH := ssh $(VPS_USER)@$(VPS_HOST)
 COMPOSE := sudo docker compose -f compose/docker-compose.yml --env-file config/stack.env
 
-.PHONY: help preflight deploy status logs secret-set secret-gen pdf-passwords prune prune-dry backup restore test runtime-map graph
+.PHONY: help preflight deploy applied-pull status logs secret-set secret-gen pdf-passwords prune prune-dry backup restore test runtime-map graph
 
 help:
 	@grep -E '^[a-z-]+:' Makefile | cut -d: -f1 | tr '\n' ' '; echo
@@ -14,10 +14,17 @@ help:
 preflight:
 	$(SSH) 'bash -s' < scripts/preflight.sh
 
-# Sync repo to VPS and apply compose + host timers. Plaintext secrets and the local project map are never synced.
+# Sync repo to VPS and apply compose + host timers. Plaintext secrets and the local project map are never synced. The
+# guard holds the applier meanwhile and refuses while it has applied a change this checkout lacks (make applied-pull).
 deploy:
+	bash scripts/deploy-guard.sh start $(VPS_USER)@$(VPS_HOST)
 	rsync -az --delete --exclude .git --exclude .claude --exclude 'secrets/*.dec*' --exclude graphify-out --exclude CLAUDE.md ./ $(VPS_USER)@$(VPS_HOST):$(REMOTE_DIR)/
 	$(SSH) 'cd $(REMOTE_DIR) && sudo bash scripts/install-timers.sh && sudo bash scripts/data-dirs.sh && $(COMPOSE) up -d --build'
+	bash scripts/deploy-guard.sh end $(VPS_USER)@$(VPS_HOST)
+
+# The front changes the applier made on the VPS on the owner's tap (services/applier), as one commit each in this checkout
+applied-pull:
+	python3 -I scripts/applied-pull.py $(VPS_USER)@$(VPS_HOST)
 
 status:
 	$(SSH) 'cd $(REMOTE_DIR) && $(COMPOSE) ps && df -h / && free -m && docker system df'
@@ -59,6 +66,7 @@ test:
 	cd services/hermes/vault && python3 -I -m unittest discover -s tests -v   # the cardguard plugin
 	cd services/hermes/front && python3 -I -m unittest discover -s tests -v   # the cardblock plugin
 	cd services/control && python3 -I -m unittest discover -s tests -v
+	cd services/applier && python3 -I -m unittest discover -s tests -v   # a fake docker; its zone-rule test needs PyYAML
 	cd services/change-proposals && $${VAULT_PY:-python3} -I -m unittest discover -s tests -v   # needs mcp, as the vault-tools server tests
 	cd services/ingest-gmail && python3 -I -m unittest discover -s tests -v
 	cd services/vault-tools && $${VAULT_PY:-python3} -I -m unittest discover -s tests -v   # VAULT_PY=venv python to include server tests
