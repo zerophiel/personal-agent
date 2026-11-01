@@ -5,15 +5,18 @@ import tempfile
 import threading
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 _path = os.path.join(os.path.dirname(__file__), "..", "plugins", "cardguard", "__init__.py")
 _spec = importlib.util.spec_from_file_location("cardguard", _path)
 cg = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cg)
+OWNER = "99"
 
 
-def ev(text, chat_type="dm", mid=1):
-    return SimpleNamespace(text=text, message_id=mid, source=SimpleNamespace(chat_type=chat_type, chat_id=99))
+def ev(text, chat_type="dm", mid=1, user_id=OWNER):
+    return SimpleNamespace(text=text, message_id=mid,
+                           source=SimpleNamespace(chat_type=chat_type, chat_id=99, user_id=user_id))
 
 
 class Fake:
@@ -42,6 +45,9 @@ class CardGuard(unittest.TestCase):
         cg._post, cg._bot = self.f.post, self.f.bot
         self.tmp = tempfile.TemporaryDirectory()
         cg.TTL_FILE = os.path.join(self.tmp.name, "ttl", "rincian.jsonl")
+        env = mock.patch.dict(os.environ, {"TELEGRAM_ALLOWED_USERS": OWNER})
+        env.start()
+        self.addCleanup(env.stop)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -61,7 +67,9 @@ class CardGuard(unittest.TestCase):
         self.f.bot_calls.clear()
         self.assertIsNone(cg.on_inbound(ev("/rencana besok")))                      # not an exact command: a normal message
         self.assertIsNone(cg.on_inbound(ev("/model")))
-        self.assertEqual(cg.on_inbound(ev("/rencana", chat_type="group")), None)    # private chat only
+        self.f.posts.clear()
+        self.assertEqual(cg.on_inbound(ev("/rencana", chat_type="group")), {"action": "skip"})   # private chat only:
+        self.assertEqual((self.f.posts, self.f.bot_calls), ([], []))                              # dropped, unanswered
 
     def test_reports_go_out_as_html_split_on_blank_lines_under_the_telegram_limit(self):
         paras = [f"<b>Bagian {i}</b>\n" + ("baris panjang " * 60) for i in range(12)]          # about 900 characters each
@@ -215,10 +223,41 @@ class CardGuard(unittest.TestCase):
             self.assertEqual(self.f.posts, [], bad)
         self.assertIn("deleteMessage", self.methods())
 
-    def test_payee_command_ignored_outside_private_chat(self):
+    def test_payee_command_outside_private_chat_dropped_and_never_stored(self):
         out = cg.on_inbound(ev("/rekening bca-rek BCA 1234567890", chat_type="group"))
-        self.assertIsNone(out)
+        self.assertEqual(out, {"action": "skip"})
         self.assertEqual(self.f.posts, [])
+
+    def test_anyone_else_gets_no_command_answered_and_no_number_stored(self):
+        for text in ("/rencana", "/rincian", "/usulan", "/rekening bca-rek BCA 1234567890", "/va x BCA 8808123456789012",
+                     "4111111111111111", "kartu 4111 1111 1111 1111"):
+            self.f.posts.clear(); self.f.bot_calls.clear()
+            self.assertEqual(cg.on_inbound(ev(text, user_id="5")), {"action": "skip"}, text)
+            self.assertEqual((self.f.posts, self.methods()), ([], []), text)    # no store, no reply, no delete
+        self.assertIsNone(cg.on_inbound(ev("halo, saldo saya berapa?", user_id="5")))   # Hermes' own check decides
+        self.assertEqual(self.f.posts, [])
+
+    def test_without_an_allowlist_or_a_user_id_nobody_is_the_owner(self):
+        self.assertEqual(cg.on_inbound(ev("/rincian", user_id=None)), {"action": "skip"})
+        with mock.patch.dict(os.environ, {"TELEGRAM_ALLOWED_USERS": ""}):
+            self.assertEqual(cg.on_inbound(ev("/rincian")), {"action": "skip"})
+            self.assertEqual(cg.on_inbound(ev("4111111111111111")), {"action": "skip"})
+        self.assertEqual((self.f.posts, self.methods()), ([], []))
+
+    def test_an_empty_allowlist_is_logged_at_boot(self):
+        hooks = []
+        with mock.patch.dict(os.environ, {"TELEGRAM_ALLOWED_USERS": ""}), mock.patch.object(cg, "_started", True), \
+                self.assertLogs("cardguard", "ERROR") as logs:
+            cg.register(SimpleNamespace(register_hook=lambda name, fn: hooks.append(name)))
+        self.assertIn("TELEGRAM_ALLOWED_USERS is empty", logs.output[0])
+        self.assertIn("pre_gateway_dispatch", hooks)
+
+    def test_the_owner_check_takes_the_id_as_hermes_writes_it(self):
+        with mock.patch.dict(os.environ, {"TELEGRAM_ALLOWED_USERS": " 7, 99 "}):
+            self.assertTrue(cg._is_owner(ev("x")))
+            self.assertTrue(cg._is_owner(ev("x", user_id=99)))       # an int id compares as its text
+            self.assertFalse(cg._is_owner(ev("x", user_id="990")))
+            self.assertFalse(cg._is_owner(ev("x", chat_type="group")))
 
     def test_payee_command_vault_failure_tells_owner_and_deletes(self):
         self.f.status, self.f.body = 500, b"{}"
@@ -237,10 +276,26 @@ class CardGuard(unittest.TestCase):
         with open(cg.TTL_FILE, "w") as f:
             f.write(json.dumps({"c": 1, "m": 10, "exp": 100}) + "\n" + json.dumps({"c": 1, "m": 11, "exp": 900}) + "\n")
         gone = []
-        self.assertEqual(cg.sweep_ttl(now=500, deleter=lambda c, m: gone.append(m)), 1)
+        with self.assertLogs("cardguard", "INFO") as logs:
+            self.assertEqual(cg.sweep_ttl(now=500, deleter=lambda c, m: gone.append(m) or True), 1)
         self.assertEqual(gone, [10])
+        self.assertIn("Telegram deleted 1 of 1 expired message(s), 0 kept", logs.output[0])
         with open(cg.TTL_FILE) as f:
             self.assertEqual([json.loads(line)["m"] for line in f], [11])
+
+    def test_a_refused_delete_is_retried_while_telegram_allows_it(self):
+        os.makedirs(os.path.dirname(cg.TTL_FILE))
+        with open(cg.TTL_FILE, "w") as f:
+            f.write(json.dumps({"c": 1, "m": 10, "exp": 100}) + "\n")
+        self.assertEqual(cg.sweep_ttl(now=200, deleter=lambda c, m: None), 0)          # refused: kept
+        with open(cg.TTL_FILE) as f:
+            self.assertEqual([json.loads(line)["m"] for line in f], [10])
+        self.assertEqual(cg.sweep_ttl(now=300, deleter=lambda c, m: True), 1)          # next sweep: deleted
+        with open(cg.TTL_FILE, "w") as f:
+            f.write(json.dumps({"c": 1, "m": 12, "exp": 100}) + "\n")
+        self.assertEqual(cg.sweep_ttl(now=100 + cg.RETRY_SECONDS, deleter=lambda c, m: None), 1)   # past 48 h: dropped
+        with open(cg.TTL_FILE) as f:
+            self.assertEqual(f.read(), "")
 
     def test_error_inside_hook_fails_closed(self):
         class Boom:

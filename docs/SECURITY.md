@@ -7,7 +7,10 @@ Invariants are enforced in infrastructure, not prompts.
 - Secrets: root-only dir `/opt/personal-agent-secrets` (0700), injected as Docker secrets; plaintext never in the repo (`.gitignore`). sops+age is added in M2 when zone secrets multiply.
 - vault-tools has two surfaces with different tokens: `/mcp` (model; tools handle aliases and amounts only, no tool stores or reveals a full number) and `/internal/*` (plugin only: `store_payee`, `rincian`). Tokens are random, >= 32 chars, must differ, compared in constant time; unknown paths 404. The payee encryption key (`vault_tools_key`) is generated on the VPS by `make secret-gen` and the script refuses to overwrite it (overwriting would orphan every stored number). Back it up with restic; keep the restic password separately.
 - Maintenance never deletes volumes (`scripts/prune.sh`).
-- Known limits: DNS still resolves inside internal networks; Hermes read-only config mount is unverified (spike in M1/M2).
+- Checked at the M2 gate (2026-11-01, docs/assumptions.md): external names do not resolve inside the internal networks
+  and a direct connection has no route (ENETUNREACH from every zone container), so neither DNS nor Telegram's
+  DNS-over-HTTPS fallback is a way out; the read-only config mount holds (spike #1). Hermes does not bound hooks by its
+  hook timeout; every blocking call in the plugins has its own.
 
 ## Approvals (M3)
 No LLM can approve anything. The chain is model -> `change-proposals` -> inbox folder -> `control` -> the owner's tap.
@@ -68,6 +71,10 @@ in `skills.external_dirs` and turned the `skills` toolset on (compose is never i
   sender check). An error drops the message as well. The detection is vault cardguard's, kept equal by a test.
   Left to SOUL.md: a photo of a card, account and VA numbers, PINs, OTPs and passwords. Luhn also flags some IMEIs and
   reference numbers; the notice asks the owner to send the message again without the digit run.
-- Vault's cardguard checks no sender: Telegram's intake filter (TELEGRAM_ALLOWED_USERS with `unauthorized_dm_behavior:
-  ignore`) drops a stranger before the hook, but `pair` or `decline` would let a stranger's `/rincian` reach it. Keep
-  `ignore`; an owner check in cardguard is a follow-up (docs/PROGRESS.md).
+- Vault's cardguard acts only for the owner in a private chat, decided as cardblock decides (a test keeps the two
+  equal): anyone else's command (`/rincian`, `/rekening`, `/va`, the reports) or card number is dropped unanswered and
+  nothing is stored or sent. Telegram's intake filter (TELEGRAM_ALLOWED_USERS with `unauthorized_dm_behavior: ignore`)
+  already drops a stranger before the hook; the check keeps `/rincian` the owner's if that setting ever changes to
+  `pair` or `decline`. Hermes gives every Telegram message, media included, `user_id = str(user.id)`; on 2026-11-01 all
+  30 of vault's Telegram sessions carried the allowlisted id. An empty allowlist drops every command and is logged at
+  boot. Loaded at the next vault restart after 2026-11-01 (docs/PROGRESS.md).

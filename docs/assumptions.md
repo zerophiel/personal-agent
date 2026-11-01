@@ -17,8 +17,20 @@
 
 | 12 | All vault MCP tools are visible to the model | **Fail by default -> fixed** (2026-10-27) | With 28 tools, Hermes' Tool Search deferred 30 of 36 tools ("tier 1: 6 core/visible tools kept, 30 deferred"); the bot told the owner it had no PDF tool. Fix: `tools.tool_search.enabled: off` in `config.yaml` (doc: /user-guide/features/tool-search; there is no per-server "always visible" key). Also: a long-lived Telegram session keeps stale history (old dummy card/salary questions); `/new` starts a fresh one. |
 
-## Still open
-- Telegram-side copy of the raw message: `cardguard` now calls `deleteMessage` (dm chats only, background thread, failures logged without the token). Implemented and unit-tested with a fake deleter; **live test pending** (needs the container with the vault bot token). `event.message_id` matches Telegram's native id (observed ids 2 and 5 around bot replies 3 and 4).
-- Whether a `skip` plus direct Bot API reply (design for `/rincian`) writes anything to the session store.
-- Hermes logs "Discovering Telegram API fallback IPs via DNS-over-HTTPS": confirm it cannot bypass the proxy when DoH is blocked (spike worked, but check the fallback path).
-- Hooks are not bounded by `plugins.hook_callback_timeout`: a hung callback blocks that message.
+## Closed at the M2 gate (2026-11-01, read-only probes on the VPS)
+- Telegram-side copy of the raw message: closed by #10 (`deleteMessage ok`, the owner saw the message disappear).
+  `event.message_id` matches Telegram's native id.
+- `skip` plus a direct Bot API reply writes nothing to the session store: closed by #11. The 24-hour auto-delete runs:
+  8 `/rincian` sends in the vault logs, 0 rows left in the TTL file and 0 failed sweeps. A sweep drops a row whether or
+  not Telegram accepted the delete, so this shows the sweep ran, not that each delete worked; `sweep_ttl` now logs how
+  many deletes Telegram accepted (counts only), so the next sweep after a vault restart settles it.
+- DNS-over-HTTPS fallback cannot bypass the proxy: a direct TCP connection to both of Hermes' seed Telegram IPs fails
+  with ENETUNREACH from all five zone containers (vault, front, vault-tools, control, change-proposals), external names
+  do not resolve in them (`getaddrinfo` fails), and squid-vault denied the DoH queries themselves (`dns.google`,
+  `cloudflare-dns.com`, docs/runtime/proxies.md). Hermes' fallback transport also takes its proxy from
+  `TELEGRAM_PROXY`/`HTTPS_PROXY` (v0.22.5 `plugins/platforms/telegram/telegram_network.py`), so a fallback IP either goes
+  through the zone's squid (where an IP is not on any allowlist) or to a network with no route.
+- Hooks are not bounded by `plugins.hook_callback_timeout`, so each plugin bounds itself: every blocking call has a
+  timeout (vault-tools 8 s, reports 30 s, Telegram 15 s, per socket operation) and deletes run in threads. Worst cases:
+  a report 30 s + 2 x 15 s per message part (an HTML part refused is sent again plain), `/rincian` 8 + 15 s, a card
+  number 8 s per number + 15 s; `cardblock` makes no network call on the dispatch path.

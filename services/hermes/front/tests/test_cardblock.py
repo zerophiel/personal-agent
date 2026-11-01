@@ -128,7 +128,23 @@ class CardBlock(unittest.TestCase):
 
 
 class SameDetectionAsVault(unittest.TestCase):
-    """Front's cardblock and vault's cardguard must flag exactly the same numbers."""
+    """Front's cardblock and vault's cardguard must flag exactly the same numbers and take the same sender as the owner."""
+
+    def test_same_owner_check(self):
+        cg = load("cardguard_for_owner_parity", "..", "..", "vault", "plugins", "cardguard", "__init__.py")
+        calls = []
+        self.addCleanup(setattr, cb, "_bot", cb._bot)
+        cb._bot = lambda method, **params: calls.append(method) or True
+        cases = [("1001", "dm", "1001"), (1001, "dm", "1001"), ("1002", "dm", "1001"), ("1001", "group", "1001"),
+                 (None, "dm", "1001"), ("1001", "dm", " 7, 1001 "), ("1001", "dm", "")]
+        for user_id, chat_type, allowed in cases:
+            calls.clear()
+            event = SimpleNamespace(text=CARD, message_id=7,
+                                    source=SimpleNamespace(chat_type=chat_type, chat_id=5, user_id=user_id))
+            with mock.patch.dict(os.environ, {"TELEGRAM_ALLOWED_USERS": allowed}):
+                self.assertEqual(cb.on_inbound(event), DROPPED)
+                threading.Event().wait(0.1)      # cardblock tells the owner from a thread
+                self.assertEqual("deleteMessage" in calls, cg._is_owner(event), (user_id, chat_type, allowed))
 
     def test_parity(self):
         cg = load("cardguard_for_parity", "..", "..", "vault", "plugins", "cardguard", "__init__.py")

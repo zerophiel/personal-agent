@@ -479,10 +479,12 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   comes and no answer follows; an ordinary question afterwards gets one.
 - Owner: BotFather -> `@danoevault_agent`, `@danoecontrol_bot` and `@danoefront_agent` -> Bot Settings -> Allow Groups
   -> off.
-- Front follow-ups: an owner check in vault's cardguard (defense in depth, on a quiet day, not a payday); after a week,
-  front's cost per day from its `state.db` against the USD 40 limit.
-- Remaining plan: the M3 applier (a deploy key from the owner, a git checkout on the VPS), M4 comms, M2 gate checks
-  (`docs/assumptions.md`).
+- Front follow-ups: (built 2026-11-01) vault's cardguard now acts only for the owner in a private chat; it loads at the
+  next vault restart (a quiet moment, not a payday; no `/new` needed). After that restart, the first TTL sweep logs how
+  many `/rincian` deletes Telegram accepted (`ttl sweep: Telegram deleted N of M`). After a week, front's cost per day
+  from its `state.db` against the USD 40 limit.
+- (done 2026-11-01) M2 gate checks: all four closed with evidence (`docs/assumptions.md`).
+- Remaining plan: the M3 applier, M4 comms.
 
 ## Operating notes
 - Deploy: `rsync` from the worktree ROOT (never a subfolder: `--delete` wipes the server tree), back up `ledger.db` first, rebuild `vault-tools`, restart `vault`. Owner must `/new` in Telegram after tool or SOUL changes (owner plans to do it once data and system are done).

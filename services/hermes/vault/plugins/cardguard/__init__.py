@@ -1,6 +1,8 @@
 """cardguard: keep full card numbers out of the model's world, and serve the owner's slash commands (vault profile only).
 
-pre_gateway_dispatch, in this order of precedence:
+pre_gateway_dispatch acts only for the owner in a private chat (TELEGRAM_ALLOWED_USERS, as Hermes reads it). Anyone else's
+command or card number is dropped unanswered and nothing is stored (Telegram's intake filter drops strangers before this
+hook, so this is defense in depth); their other text goes on to Hermes' own checks. For the owner, in this order:
  1. "/rincian": ask vault-tools (internal API) for the transfer list WITH full numbers, send it
     straight to Telegram via the Bot API, record it for auto-deletion, and `skip` so Hermes never
     sees the reply or the command.
@@ -48,6 +50,18 @@ def _digits_of(raw: str) -> str | None:
 
 def find_numbers(text: str) -> list[str]:
     return [d for m in _CANDIDATE.finditer(text) if (d := _digits_of(m.group(0)))]
+
+
+def _owner_ids() -> set[str]:
+    """The ids in TELEGRAM_ALLOWED_USERS (vault.env: the owner's alone); empty means nobody is the owner."""
+    return {x.strip() for x in os.environ.get("TELEGRAM_ALLOWED_USERS", "").split(",") if x.strip()}
+
+
+def _is_owner(event) -> bool:
+    """The owner in a private chat (Hermes sets user_id to str(user.id)); front's cardblock decides the same way."""
+    src = getattr(event, "source", None)
+    user_id = getattr(src, "user_id", None)
+    return getattr(src, "chat_type", None) == "dm" and user_id is not None and str(user_id) in _owner_ids()
 
 
 def replace_numbers(text: str, alias_by_digits: dict[str, str]) -> str:
@@ -113,8 +127,12 @@ def _ttl_record(chat_id, message_id) -> None:
         f.write(json.dumps({"c": chat_id, "m": message_id, "exp": time.time() + TTL_SECONDS}) + "\n")
 
 
+RETRY_SECONDS = 23 * 3600     # a bot may delete its own message for 48 hours: 24 h of TTL, then 23 h of retries
+
+
 def sweep_ttl(now: float | None = None, deleter=None) -> int:
-    """Delete recorded messages past their TTL; keep the rest. Returns number deleted."""
+    """Delete recorded messages past their TTL; keep the rest, and keep a refused delete for the next sweep while
+    Telegram still allows it. Returns the number of rows taken off the list."""
     now = now or time.time()
     deleter = deleter or (lambda c, m: _bot("deleteMessage", chat_id=c, message_id=m))
     with _ttl_lock:
@@ -123,15 +141,24 @@ def sweep_ttl(now: float | None = None, deleter=None) -> int:
                 rows = [json.loads(line) for line in f if line.strip()]
         except FileNotFoundError:
             return 0
-        keep, gone = [], 0
+        keep, gone, ok, due = [], 0, 0, 0
         for r in rows:
-            if r["exp"] <= now:
-                deleter(r["c"], r["m"])
-                gone += 1
-            else:
+            if r["exp"] > now:
                 keep.append(r)
+                continue
+            due += 1
+            if deleter(r["c"], r["m"]):
+                ok += 1
+                gone += 1
+            elif now - r["exp"] < RETRY_SECONDS:
+                keep.append(r)
+            else:
+                gone += 1
         with open(TTL_FILE, "w") as f:
             f.writelines(json.dumps(r) + "\n" for r in keep)
+    if due:
+        log.info("cardguard: ttl sweep: Telegram deleted %d of %d expired message(s), %d kept for a retry",
+                 ok, due, due - gone)
     return gone
 
 
@@ -300,19 +327,24 @@ def on_inbound(event, **kwargs):
         text = getattr(event, "text", None)
         if not text:
             return None
-        private = getattr(getattr(event, "source", None), "chat_type", None) == "dm"
-        m = _REPORT_CMD.match(text.strip())
-        if private and m:
+        cmd = text.strip()
+        m = _REPORT_CMD.match(cmd)
+        rincian, payee = cmd.lower() == "/rincian", bool(_PAYEE_CMD.match(cmd))
+        if not _is_owner(event):
+            if m or rincian or payee or find_numbers(text):
+                log.info("cardguard dropped message %s (not the owner in a private chat)",
+                         getattr(event, "message_id", "?"))
+                return {"action": "skip"}
+            return None
+        if m:
             return _report(event, m.group(1).lower())
-        if private and text.strip().lower() == "/rincian":
+        if rincian:
             return _rincian(event)
-        if private and _PAYEE_CMD.match(text.strip()):
+        if payee:
             return _payee_command(event, text)
         digits_list = find_numbers(text)
         if not digits_list:
             return None
-        if not private:
-            return {"action": "skip"}
         mapping = {}
         for digits in dict.fromkeys(digits_list):
             status, raw = _post("/internal/store_payee",
@@ -428,6 +460,8 @@ _started = False
 
 def register(ctx):
     global _started
+    if not _owner_ids():
+        log.error("cardguard: TELEGRAM_ALLOWED_USERS is empty; every command and card number will be dropped")
     ctx.register_hook("pre_gateway_dispatch", on_inbound)
     ctx.register_hook("pre_llm_call", on_pre_llm)
     ctx.register_hook("post_tool_call", on_tool_result)
