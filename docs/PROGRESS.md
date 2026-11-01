@@ -489,6 +489,42 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   so the owner sends `/new` once. Live-bot snapshot 20:16 WIB: only the M3 gate's files differ (Makefile, compose,
   data-dirs, control v3, the applier, tests).
 
+## A card's repayment is its bill, never a move between own accounts (2026-11-01 night, found checking October's categories; owner: "Lanjuttt")
+- Owner `/new` to vault 22:17:48 WIB (session_reset; no error since the 20:13 restart), then October's categorizing
+  with the bot. Read-only before it: October's 105 unverified rows sit in 89 keys, each key one wording; no transfer
+  to a card number among them.
+- Found: from 52e70ac (2026-10-28) `suggest.groups` counted the owner's cards among the own accounts (`own_last4`
+  held `cards.last4`), so a BI Fast transfer to an own card's number was suggested `transfer_internal`, and
+  `apply_suggestions` stored it so: four September repayments, cimb-9888 -147.268, dbs-5685 -1.215.273, hsbc-5915
+  -1.951.647, mega-5855 -2.274.554, together 5.588.742, are missing from September's cashflow expenses. A card's
+  spending reaches the bank cashflow only as its repayment, and `health_check` reads that cashflow. Their four stored
+  rules would have verified every later payment to those cards the same way on import, and the owner-name branch
+  would also have read a card transfer carrying the cardholder's name as an own move. Unaffected: living cost and the
+  daily pace leave out both `wajib:` and `transfer_internal`; DSR comes from the debts and statements. Jago's "Main
+  Pocket Interest" (August 8.136, September 5.603) and its tax (-1.627, -1.120) were `transfer_internal` rules too:
+  the pocket-move pattern matches "main pocket".
+- Fix (tests 647, 3 new): `mutations.card_paid` names the card when the text carries its number (`****NNNN`, or a
+  long number ending in its last4) and its bank's name; without the bank's name a third party's account with the
+  same four digits is not a card. Suggestions: after the fee check, money out to an own card is `wajib:kartu`, also
+  in the owner's name (money in from a card gets no suggestion); "pocket interest" is `bunga` before the pocket-move
+  check; `own_last4` holds the accounts only. Guard: `set_category` and `set_category_rule` refuse
+  `transfer_internal` for an own card's payment ("ini pembayaran kartu ..., pakai kategori 'wajib:kartu'"),
+  `set_category_keyword` skips those rows and says how many, `apply_suggestions` skips a refused group and names it,
+  a keyword never overrides the card check, and on import a stored `transfer_internal` rule leaves such a row
+  unverified. `set_category`'s docstring names `wajib:kartu` for card payments; no SOUL change, so no `/new`.
+- Data fix `ops/datafix/2026-11-01-card-internal`: a backup (`ledger.db.bak-pre-card-internal`), then the four card
+  rules and rows -> `wajib:kartu`, the two pocket rules and four rows -> `bunga` / `biaya-bank`, each logged in
+  `change_log` (14 rows). It stops when the rules found are not those four cards and two pocket keys, when September
+  does not hold one row per card, when a card row has no such rule, or when a receipt is merged into a row. Dry run
+  with the new code on an in-memory copy of the live ledger: August income +8.136, expenses +1.627; September income
+  +5.603, expenses 41.029.662 -> 46.619.524 (+5.588.742 cards, +1.120 tax); October unchanged; living cost August
+  4.771.710 -> 4.773.337, September 7.546.005 -> 7.547.125 (the tax; `living_reserve` stays the owner's 7.546.005);
+  of the 411 uncategorized groups (643 rows, all months) no suggestion changes; the four fixed rules refuse
+  `transfer_internal`; no own-move rule left whose key also holds a card repayment. A content dry run against the VPS:
+  only the four vault-tools files differ.
+- `deploy.sh` (on the owner's go-ahead): checkout clean and pushed, the idle check, `services/vault-tools` synced onto
+  its twin and rebuilt, the fix, the vault restarted when idle, `verify.py`. Not deployed yet.
+
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
 2. Closing the pot gap without the children's needs: games (owner's own), apps not marked `wajib`, or talking to the friend.
@@ -526,14 +562,18 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
     - card-bus (the Kanban replacement in `docs/ARCHITECTURE.md`, for one zone to hand work to another): still wanted?
 19. (done 2026-11-01 20:13 WIB: the 17 doubled Mandiri rows removed and the overlap matching live, with vault's
     cardguard owner check; section "Two overlapping bank files" above)
+20. Deploy the card-repayment fix (section "A card's repayment is its bill" above)? Go-ahead runs its `deploy.sh`.
+    Until then September's cashflow expenses read 5.588.742 low, and a new statement's payment to cimb-9888,
+    dbs-5685, hsbc-5915 or mega-5855 by BI Fast is stored as `transfer_internal`.
 
 ## Next steps
 - (done 2026-11-01 20:13 WIB) The doubled-rows fix. Owner: `/new` once to vault, whose session still holds the 186,8
   juta reply. Bank files over an already recorded period are fine again: same-day same-amount rows match, and BUKU
   TIDAK COCOK flags a row the second file dates otherwise.
-- Next: the bot categorizes October with the owner (100 rows unverified; 30 of them from 27-31 Oct: the salary,
-  seven moves to the owner's own accounts, which count as spending until marked `transfer_internal`, eight card and
-  instalment payments by VA, two other transfers, fees, interest).
+- Next: the bot categorizes October with the owner (started after the 22:17 WIB `/new`; 105 rows unverified, 89
+  keys: the salary, seven moves to the owner's own accounts in five keys, which count as spending until marked
+  `transfer_internal`, the card and instalment payments by VA (`wajib:kartu`), other transfers, fees, interest).
+  Then the card-repayment fix on the owner's go-ahead (open question 20).
 - (done 2026-11-01 18:21 WIB) Owner sent `/new` after the 1 Nov 10:27 deploy (Deploy 2 above).
 - (done 2026-11-01, the recalibration section above) The number guard's four flags on 30-31 Oct were the bot's own
   arithmetic or its own reading of a photo. At each calibration, read the replies it flagged since the last one ("Cek
