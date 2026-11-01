@@ -26,8 +26,15 @@
       "output_tokens": 284286,
       "files": 12,
       "note": "delta --update of the 12 docs changed since 7d6b54d (Deploy 2 PROGRESS and payday spec, vault SOUL, live-bot snapshot of 10:29): the previous deep extraction kept with line numbers moved; 4 deep agents read every line and wrote patches only (60 nodes and 299 edges added, 135 nodes corrected, 1 node and 6 edges dropped); tokens summed from the agents' transcripts; after re-clustering 33 new community names and 35 renames where a saved name had moved onto other members"
+    },
+    {
+      "date": "2026-11-01T05:13:35.341373+00:00",
+      "input_tokens": 4320472,
+      "output_tokens": 189031,
+      "files": 14,
+      "note": "delta --update of the 14 docs changed since bd5ad48 (front live: PROGRESS, RUNBOOK, SECURITY, front SOUL; live-bot snapshot 11:45 WIB), 5 agents; community names audited after the re-cluster (25 renamed, 49 named)"
     }
   ],
-  "total_input_tokens": 21294367,
-  "total_output_tokens": 3274503
+  "total_input_tokens": 25614839,
+  "total_output_tokens": 3463534
 }
