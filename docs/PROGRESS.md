@@ -524,8 +524,15 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   after (0 bad, 0 warn, 3 info); no account shares its last four digits with a card. Through the MCP server the
   refusal reaches the bot as the tool's error text, as `set_threshold`'s does. A content dry run against the VPS:
   only the four vault-tools files differ.
-- `deploy.sh` (on the owner's go-ahead): checkout clean and pushed, the idle check, `services/vault-tools` synced onto
-  its twin and rebuilt, the fix, the vault restarted when idle, `verify.py`. Not deployed yet.
+- `deploy.sh`: checkout clean and pushed, the idle check, `services/vault-tools` synced onto its twin and rebuilt, the
+  fix, the vault restarted when idle, `verify.py`. Deployed on the owner's "Gas sekarang", 2026-11-01 23:12:14-23:13:18
+  WIB: the bot idle (last message 18:25); vault-tools rebuilt and healthy; backup `ledger.db.bak-pre-card-internal`
+  (1970 transactions, integrity ok); the six rules and eight rows changed (14 `change_log` rows); the vault restarted
+  23:12:57. Then, read-only: no own-move rule or row paying an own card, no main-pocket interest left as an own move;
+  no mutation file off the ledger; September income 45.928.296, expenses 46.619.524, living cost 7.547.125 (unverified
+  52); August 34.834.455, 79.177.797, 4.773.337; October unchanged (unverified 100); audit 0 bad, 0 warn, 3 info. The
+  gateway connected to Telegram, cardguard restored its command menu, MCP 57 tools; no error, traceback or recovered
+  turn since. No `/new`.
 
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
@@ -551,7 +558,8 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 16. (done 2026-11-01: front runs since 11:34 WIB with the `cardblock` guard, section "Front live" above)
 17. The M3 gate: install the applier (section "The applier" above, contract in `docs/SECURITY.md`)? Yes means
     `make deploy` (control's diff and mounts, the data folders) and then `sudo bash services/applier/install.sh` on the
-    VPS (`docs/RUNBOOK.md`, Applier). From then on a Setujui on a front change applies it.
+    VPS (`docs/RUNBOOK.md`, Applier). From then on a Setujui on a front change applies it. Owner, 2026-11-01 ~23:10
+    WIB: "Ya, pasang" (after the card fix); being installed.
 18. M4 comms, nothing built (the repo holds net-comms and squid-comms, which allows Anthropic and the Google APIs):
     - What it may do: read and label mail, write drafts, or also send; calendar read only, or create events too.
       Google has no scope for drafts without sending (`gmail.modify` and `gmail.compose` both send), so the broker
@@ -564,9 +572,8 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
     - card-bus (the Kanban replacement in `docs/ARCHITECTURE.md`, for one zone to hand work to another): still wanted?
 19. (done 2026-11-01 20:13 WIB: the 17 doubled Mandiri rows removed and the overlap matching live, with vault's
     cardguard owner check; section "Two overlapping bank files" above)
-20. Deploy the card-repayment fix (section "A card's repayment is its bill" above)? Go-ahead runs its `deploy.sh`.
-    Until then September's cashflow expenses read 5.588.742 low, and a new statement's payment to cimb-9888,
-    dbs-5685, hsbc-5915 or mega-5855 by BI Fast is stored as `transfer_internal`.
+20. (done 2026-11-01 23:13 WIB on the owner's "Gas sekarang": the card-repayment fix is live; section "A card's
+    repayment is its bill" above)
 
 ## Next steps
 - (done 2026-11-01 20:13 WIB) The doubled-rows fix. Owner: `/new` once to vault, whose session still holds the 186,8
@@ -575,13 +582,15 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 - Next: the bot categorizes October with the owner (started after the 22:17 WIB `/new`; 105 rows unverified, 89
   keys: the salary, seven moves to the owner's own accounts in five keys, which count as spending until marked
   `transfer_internal`, the card and instalment payments by VA (`wajib:kartu`), other transfers, fees, interest).
-  Then the card-repayment fix on the owner's go-ahead (open question 20).
+  The card-repayment fix went live before it (23:13 WIB, open question 20).
 - (done 2026-11-01 18:21 WIB) Owner sent `/new` after the 1 Nov 10:27 deploy (Deploy 2 above).
 - (done 2026-11-01, the recalibration section above) The number guard's four flags on 30-31 Oct were the bot's own
   arithmetic or its own reading of a photo. At each calibration, read the replies it flagged since the last one ("Cek
   angka" in Hermes `state.db`): each is a number no tool gave, and the fix is a tool that gives it.
 - (done 2026-11-01, Deploy 2) Vault restarts often logged "Previous gateway life exited UNCLEANLY" (8 times up to the
   1 Nov 00:36 restart): the vault service now has `stop_grace_period: 60s`. At the next restarts, check it is gone.
+  The 10:27 and 20:13 restarts exited cleanly; the 23:12 one did not (stopped 23:12:57, "no exit path ran", after
+  Telegram network errors at 23:01 and 23:04): the bot was idle, nothing to recover, no error since. Keep watching.
 - (done 2026-10-31 14:04) Owner sent `/new` after the 30 Oct evening deploy. Still open: les Mandarin once paid
   (`transfer_selesai`; the 30 Oct payday's progress has no such item yet). The Mandiri October e-statement was recorded
   on 1 Nov 18:23 WIB (see "Two overlapping bank files" above).
