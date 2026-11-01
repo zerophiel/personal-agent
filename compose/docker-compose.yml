@@ -116,10 +116,16 @@ services:
       TELEGRAM_TOKEN_FILE: /run/secrets/telegram_control_token
       CONTROL_STATE_DIR: /state
       PROPOSALS_INBOX_DIR: /inbox
+      CONTROL_REPO_DIR: /repo
+      APPLIER_OUTCOME_DIR: /outcome
     secrets: [telegram_control_token]
-    volumes:   # both owned by uid 10001 (scripts/data-dirs.sh); two folders, so an inbox file can never be an approval
+    volumes:   # the first two owned by uid 10001 (scripts/data-dirs.sh); two folders, so an inbox file can never be an approval
       - /opt/personal-agent-data/control-state:/state     # control only: control.db, decided/, approved/ (the applier's input)
       - /opt/personal-agent-data/proposals-inbox:/inbox   # change-proposals writes, control reads and empties
+      # the installed front files, so the diff before the buttons is control's own, never the agent's
+      - ../services/hermes/front:/repo/services/hermes/front:ro
+      - ../config/squid:/repo/config/squid:ro
+      - /opt/personal-agent-data/applier/outcome:/outcome:ro   # what the applier did (services/applier), told once
     networks: [net-ctl]
     read_only: true
     tmpfs: ["/tmp"]
