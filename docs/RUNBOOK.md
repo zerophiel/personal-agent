@@ -21,9 +21,10 @@ KVM, Ubuntu 24.04.4, sshd drop-in `/etc/ssh/sshd_config.d/00-hardening.conf` (no
 ## Control bot (M3, live since 2026-11-01)
 - `@danoecontrol_bot`, owner only: `/status` (waiting, approved, rejected, invalid counts), `/usulan` (posts the waiting
   proposals again with their buttons), `/ping`. A proposal card shows the agent's summary, permission change, files,
-  risk and rollback; Setujui/Tolak work once. Approved means recorded in `control-state/approved/`; nothing is applied
-  until the applier is installed (section Applier), and the card says which. From the next `make deploy` on, control
-  posts the diff it computed itself before every card.
+  risk and rollback; Setujui/Tolak work once. Approved means recorded in `control-state/approved/`; since the applier's
+  install (2026-11-01 23:23 WIB, section Applier) an approved front change is applied, and the card says whether a tap
+  applies it. Since control v3 (deployed 2026-11-01 23:22 WIB) control posts the diff it computed itself before every
+  card.
 - Folders: `sudo bash scripts/data-dirs.sh` (also run by `make deploy`) before the first start.
 - Deploy only control: rsync as `make deploy` does, then
   `sudo docker compose -f compose/docker-compose.yml --env-file config/stack.env up -d --build --wait control`.
@@ -55,10 +56,11 @@ on 1 Nov; 1 and 6 are the owner's):
 - After a change to `services/hermes/front/`: rsync as `make deploy` does, then the step 5 command with `front` only.
 - Stop: the same compose command with `--profile front stop front change-proposals`.
 
-## Applier (M3, built 2026-11-01, not installed)
+## Applier (M3, installed 2026-11-01 23:23 WIB)
 `services/applier` applies a front change the owner approved in control (contract in `docs/SECURITY.md`). Its units are
 in `services/applier/systemd/`, not `host/`, so `make deploy` never enables them.
-- Install, only after the owner's go-ahead at the M3 gate:
+- Install (done 2026-11-01 23:22-23:24 WIB on the owner's go-ahead at the M3 gate; again only after an uninstall, and
+  only with the owner's go-ahead):
   1. `make deploy`: it carries the applier, control with its diff and new mounts, and the data folders
      (`scripts/data-dirs.sh` creates `applier/` and `applier/outcome/`).
   2. On the VPS: `cd /opt/personal-agent && sudo bash services/applier/install.sh`. The host check runs first, changes

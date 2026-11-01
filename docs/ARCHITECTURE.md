@@ -25,8 +25,8 @@ Only proxies join `egress`; a container with no proxy variable has no route out.
 front (Hermes, Haiku) -> `submit` on change-proposals -> `proposals-inbox/<time>-<random>.json` -> control re-validates,
 posts the diff it computes itself against the installed files (read-only mounts of `services/hermes/front/` and
 `config/squid/`), then the card with one-time Setujui/Tolak buttons -> the tap is recorded in `control-state`
-(`decided/`, and `approved/` when approved) -> the applier (`services/applier`, a root host unit; built 2026-11-01, not
-installed) applies an approved front change and writes `applier/outcome/<id>.json`, which control reports once.
+(`decided/`, and `approved/` when approved) -> the applier (`services/applier`, a root host unit; installed 2026-11-01
+23:23 WIB) applies an approved front change and writes `applier/outcome/<id>.json`, which control reports once.
 Contract in `docs/SECURITY.md`. Control commands: `/status` (counts, with the applier's outcomes), `/usulan` (re-post
 waiting proposals with their buttons), `/ping`.
 

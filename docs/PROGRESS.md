@@ -325,10 +325,11 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 - Control v2, live since 02:08 WIB (redeployed 02:15 with the link-safe inbox read; commits 0e4e730, 9b7a355): it reads
   `proposals-inbox`, re-validates every file (the seven fields, zone, change type, the files each type may write, length
   caps), posts a plain-text card with one-time buttons, and records the tap in `control-state` (`control.db`,
-  `decided/`, `approved/`). `/status`, `/usulan`, `/ping`. Nothing is applied: the applier is not built.
+  `decided/`, `approved/`). `/status`, `/usulan`, `/ping`. Nothing was applied then: the applier was not built
+  (installed since 23:23 WIB, section "M3 installed" below).
 - Test proposal #1 ("UJI pemasangan control", 02:09 WIB) is posted and waits for the owner's Tolak tap; afterwards
   `decided/1.json` must exist and the buttons are gone. It was accepted under the first rules (a config change without
-  files); the current rules would refuse it.
+  files); the current rules would refuse it. (The owner tapped Setujui; the applier skipped it at its install.)
 - change-proposals (b0fa065): front's one MCP tool `submit`, which writes a proposal into the inbox and nothing else (five
   waiting, ten per 24 hours). Its token is generated on the VPS and the image is built and smoke-tested offline; it runs
   only with front.
@@ -349,9 +350,9 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   from a separate Anthropic workspace with its own USD 40 limit; with the vault's key front would spend the finance
   bot's budget, so the render script refuses that key. Front runs since 11:34 WIB (section "Front live" below).
 - Deferred, with reasons:
-  - (built 2026-11-01 without a deploy key or git on the VPS, section "The applier" below; not installed) The applier
-    (writes, commits, deploys and health-checks an approved change): needs a deploy key from the owner, a git checkout
-    on the VPS (today an rsync target), a running front and the owner's review at the M3 gate. Contract in
+  - (built 2026-11-01 without a deploy key or git on the VPS, section "The applier" below; installed 23:23 WIB) The
+    applier (writes, commits, deploys and health-checks an approved change): needs a deploy key from the owner, a git
+    checkout on the VPS (today an rsync target), a running front and the owner's review at the M3 gate. Contract in
     `docs/SECURITY.md`.
   - (built 2026-11-01, section "Front live" below) A card-number guard for front: vault's cardguard stores numbers in
     vault-tools, which front cannot reach, so front's `cardblock` drops the message instead.
@@ -420,13 +421,13 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   (`docs/SECURITY.md`).
 - Tests: 584 (`make test` now also runs both Hermes plugin suites).
 
-## The applier, built and not installed (M3, 2026-11-01 afternoon, owner: "Lanjut sampe selesai")
-- Control v3 (6648796, not deployed): before the card, the diff of each file against the installed one, computed by
-  control from read-only mounts of `services/hermes/front/` and `config/squid/` (never the agent's text) and stored with
-  the proposal as `review` (the installed files' hashes; shown whole or why not). The card says what a tap will do:
-  applied exactly as shown, not applied automatically and why, or that applying is not automatic yet. The applier's
-  outcomes are told once and counted in `/status`. A v2 `control.db` migrates in place; a proposal from before the
-  migration is never applied.
+## The applier, built (M3, 2026-11-01 afternoon, owner: "Lanjut sampe selesai"); installed 23:23 WIB
+- Control v3 (6648796, deployed 2026-11-01 23:22 WIB): before the card, the diff of each file against the installed
+  one, computed by control from read-only mounts of `services/hermes/front/` and `config/squid/` (never the agent's
+  text) and stored with the proposal as `review` (the installed files' hashes; shown whole or why not). The card says
+  what a tap will do: applied exactly as shown, not applied automatically and why, or that applying is not automatic
+  yet. The applier's outcomes are told once and counted in `/status`. A v2 `control.db` migrates in place; a proposal
+  from before the migration is never applied.
 - Zone rules (bddb5ec), found missing while building the applier, that every front change now passes first: front's
   config may set only listed keys (a `model.base_url` would have sent every chat and the Anthropic key elsewhere while
   `provider` still said anthropic); both profiles Anthropic Haiku or Sonnet only, with no env reference or URL outside
@@ -440,8 +441,8 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 - Checked on the VPS, read-only: python3 3.12.3 with PyYAML 6.0.1 (the zone rules run there), flock, Compose 5.6.1,
   systemd 255; the files inside front and squid-front hash as the host's; in the running squid image a broken
   `http_access` line exits 0 and only prints `aclParseAccessLine`, so the applier reads the output, not the exit code.
-- None of it is deployed or installed. The M3 gate is the owner's (open question 17); until then Setujui only records
-  the approval.
+- (done 2026-11-01 23:22-23:24 WIB on the owner's "Ya, pasang", open question 17) Deployed and installed, section "M3
+  installed" below. Until then Setujui only recorded the approval.
 - Tests: 639 across all suites, none skipped (applier 22 with a fake docker; its zone-rule test runs the real
   `tests/test_zones.py` against named mutations of the front files).
 
@@ -534,6 +535,33 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   gateway connected to Telegram, cardguard restored its command menu, MCP 57 tools; no error, traceback or recovered
   turn since. No `/new`.
 
+## M3 installed: control v3 and the applier (2026-11-01 23:22-23:25 WIB, owner: "Ya, pasang")
+- Before: vault idle (its last message 18:25 WIB); ledger backup `/data/ledger.db.bak-pre-m3` (SQLite API, integrity
+  ok, 1970 transactions). Checked first: the compose diff is control's entry only (`CONTROL_REPO_DIR`,
+  `APPLIER_OUTCOME_DIR`, the read-only mounts of `services/hermes/front/`, `config/squid/` and `applier/outcome`); what
+  change-proposals imports from `control.py` (`PATHS`, `TEXT_LIMITS`, `validate` with `path_allowed`, the size limits)
+  is the same in the server's copy and in v3, so its 11:34 image stays right; front and change-proposals are in the
+  `front` profile, which `make deploy` leaves alone.
+- `make deploy` (23:22 WIB): deploy-guard start and end (no hold left), timers, data folders (`applier/` root 0700,
+  `applier/outcome/` root 0755); images control and vault-tools rebuilt, both recreated 23:22:18 and healthy.
+  vault-tools rebuilt only because the rsync carries local `__pycache__` files (open question 21). The vault restarted
+  while idle at 23:23:13 and exited cleanly ("Previous gateway exited cleanly"): Telegram connected, cardguard's menu
+  restored, MCP 57 tools.
+- `sudo bash services/applier/install.sh` (23:23:38 WIB): the eight host checks ok (control.db read-only with the
+  review column, `approved/` a folder, regular files, `tests/test_zones.py` on the installed tree, front and
+  squid-front running, `squid -k parse` on front.conf, front's Telegram state, root's state folders); the install time
+  recorded (`outcome/applier.json`); `pa-applier.path` and `pa-applier.timer` enabled and active; the first run logged
+  "#1 skipped". `applied/` and `failed/` are empty; the 23:25 timer run finished without error.
+- Control v3 after: `control.db` migrated in place (columns `review` and `diff`); #1 approved (skipped by the applier)
+  and #2 rejected, neither with a review, so neither can ever be applied; 0 invalid, nothing reported yet; mounts
+  `/repo/services/hermes/front`, `/repo/config/squid` and `/outcome` read-only; no restart, no error; squid-ctl logged 9
+  Telegram tunnels (200) in its first minutes. Front, change-proposals and the four proxies untouched (front up since
+  11:34 WIB).
+- From now on a Setujui on a front change applies exactly the diff above the card (front's `config.yaml` and
+  `SOUL.md`, `config/squid/front.conf`); everything else stays human-built. When `make deploy` refuses with "applied
+  on the VPS but not in this checkout": `make applied-pull`, push, deploy again (`docs/RUNBOOK.md`, Applier). After an
+  applied change to front's `config.yaml` or `SOUL.md`: `/new` to `@danoefront_agent`.
+
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
 2. Closing the pot gap without the children's needs: games (owner's own), apps not marked `wajib`, or talking to the friend.
@@ -556,10 +584,11 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 14. `payee_secrets` holds a card entry ending 1111 that no card uses (likely an early cardguard test): remove with the owner.
 15. Transport over its October budget (1.420.000 of 1.000.000 with the parking): raise the budget or keep it as a warning.
 16. (done 2026-11-01: front runs since 11:34 WIB with the `cardblock` guard, section "Front live" above)
-17. The M3 gate: install the applier (section "The applier" above, contract in `docs/SECURITY.md`)? Yes means
-    `make deploy` (control's diff and mounts, the data folders) and then `sudo bash services/applier/install.sh` on the
-    VPS (`docs/RUNBOOK.md`, Applier). From then on a Setujui on a front change applies it. Owner, 2026-11-01 ~23:10
-    WIB: "Ya, pasang" (after the card fix); being installed.
+17. (done 2026-11-01 23:24 WIB on the owner's "Ya, pasang" at ~23:10 WIB, after the card fix: control v3 and the
+    applier are live, section "M3 installed" above) The M3 gate: install the applier (section "The applier" above,
+    contract in `docs/SECURITY.md`)? Yes means `make deploy` (control's diff and mounts, the data folders) and then
+    `sudo bash services/applier/install.sh` on the VPS (`docs/RUNBOOK.md`, Applier). From then on a Setujui on a front
+    change applies it.
 18. M4 comms, nothing built (the repo holds net-comms and squid-comms, which allows Anthropic and the Google APIs):
     - What it may do: read and label mail, write drafts, or also send; calendar read only, or create events too.
       Google has no scope for drafts without sending (`gmail.modify` and `gmail.compose` both send), so the broker
@@ -574,6 +603,10 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
     cardguard owner check; section "Two overlapping bank files" above)
 20. (done 2026-11-01 23:13 WIB on the owner's "Gas sekarang": the card-repayment fix is live; section "A card's
     repayment is its bill" above)
+21. `make deploy` ships local `__pycache__` folders (its rsync excludes `.git`, `.claude`, decrypted secrets,
+    `graphify-out` and `CLAUDE.md` only). After any local test run, vault-tools' build context differs, so a deploy
+    rebuilds and recreates it and the vault needs a restart while idle, as on 1 Nov 23:22 with no vault-tools change.
+    Add `--exclude __pycache__` to the rsync (a repo change; the bots' code stays the same)?
 
 ## Next steps
 - (done 2026-11-01 20:13 WIB) The doubled-rows fix. Owner: `/new` once to vault, whose session still holds the 186,8
@@ -582,7 +615,7 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 - Next: the bot categorizes October with the owner (started after the 22:17 WIB `/new`; 105 rows unverified, 89
   keys: the salary, seven moves to the owner's own accounts in five keys, which count as spending until marked
   `transfer_internal`, the card and instalment payments by VA (`wajib:kartu`), other transfers, fees, interest).
-  The card-repayment fix went live before it (23:13 WIB, open question 20).
+  The card-repayment fix went live before it (23:13 WIB, open question 20), M3 right after (23:24 WIB).
 - (done 2026-11-01 18:21 WIB) Owner sent `/new` after the 1 Nov 10:27 deploy (Deploy 2 above).
 - (done 2026-11-01, the recalibration section above) The number guard's four flags on 30-31 Oct were the bot's own
   arithmetic or its own reading of a photo. At each calibration, read the replies it flagged since the last one ("Cek
@@ -590,7 +623,8 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 - (done 2026-11-01, Deploy 2) Vault restarts often logged "Previous gateway life exited UNCLEANLY" (8 times up to the
   1 Nov 00:36 restart): the vault service now has `stop_grace_period: 60s`. At the next restarts, check it is gone.
   The 10:27 and 20:13 restarts exited cleanly; the 23:12 one did not (stopped 23:12:57, "no exit path ran", after
-  Telegram network errors at 23:01 and 23:04): the bot was idle, nothing to recover, no error since. Keep watching.
+  Telegram network errors at 23:01 and 23:04): the bot was idle, nothing to recover, no error since. The 23:23
+  restart (M3) exited cleanly again. Keep watching.
 - (done 2026-10-31 14:04) Owner sent `/new` after the 30 Oct evening deploy. Still open: les Mandarin once paid
   (`transfer_selesai`; the 30 Oct payday's progress has no such item yet). The Mandiri October e-statement was recorded
   on 1 Nov 18:23 WIB (see "Two overlapping bank files" above).
@@ -622,9 +656,9 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   first TTL sweep that finds an expired `/rincian` message logs how many deletes Telegram accepted (`ttl sweep:
   Telegram deleted N of M`). After a week, front's cost per day from its `state.db` against the USD 40 limit.
 - (done 2026-11-01) M2 gate checks: all four closed with evidence (`docs/assumptions.md`).
-- Remaining plan: the M3 gate (open question 17: the applier is built and tested, installing it is the owner's call),
-  then M4 comms once the owner has answered open question 18.
+- Remaining plan: (done 2026-11-01 23:24 WIB) the M3 gate, section "M3 installed" above; next M4 comms once the owner
+  has answered open question 18.
 
 ## Operating notes
-- Deploy: `rsync` from the worktree ROOT (never a subfolder: `--delete` wipes the server tree), back up `ledger.db` first, rebuild `vault-tools`, restart `vault`. Owner must `/new` in Telegram after tool or SOUL changes (owner plans to do it once data and system are done).
+- Deploy: `rsync` from the worktree ROOT (never a subfolder: `--delete` wipes the server tree), back up `ledger.db` first, rebuild `vault-tools`, restart `vault`. Owner must `/new` in Telegram after tool or SOUL changes (owner plans to do it once data and system are done). Since 2026-11-01 23:23 WIB the applier is installed: `make deploy` refuses while the VPS has an applied front change this checkout lacks (`make applied-pull`, push, deploy again).
 - Run the vault agent for batches via `hermes chat --oneshot`, ask for status only, and use a Monitor script for progress.

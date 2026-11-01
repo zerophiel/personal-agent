@@ -38,16 +38,16 @@ No LLM can approve anything. The chain is model -> `change-proposals` -> inbox f
 - **change-proposals** has one tool (`submit`), a bearer token (`change_proposals_mcp_token`), the inbox mount and
   nothing else; it applies nothing, cannot read decisions, and caps itself at five waiting files and ten per 24 hours.
 
-### Applier (built 2026-11-01, not installed: the owner decides at the M3 gate)
+### Applier (installed 2026-11-01 23:23 WIB on the owner's go-ahead at the M3 gate)
 `services/applier/applier.py`, a root host unit, never inside a container; stdlib only, no LLM. It drives Docker, which
 is root on the host anyway, so systemd does not sandbox it: what keeps it narrow is what it accepts.
 - **Input**: only `control-state/approved/<id>.json` (small, regular, never a link), and only when `control.db`, opened
   read-only, records that id as approved with the same proposal and the same review; then control's own `validate()`.
   Each id once: `applied/`, `failed/` or `skipped/` under `/opt/personal-agent-data/applier` (root, 0700). Approvals
-  decided before the install time (`outcome/applier.json`) are skipped without a message, as the test #1 will be
-  (Setujui on 1 Nov, a config change without files that today's rules refuse). The test #2 (front's skill, waiting for
-  the owner's Tolak) can never be applied either way: skills are refused, and so is anything posted before control
-  showed diffs.
+  decided before the install time (`outcome/applier.json`) are skipped without a message, as the test #1 was at the
+  install (`skipped/1.json`; Setujui on 1 Nov, a config change without files that today's rules refuse). The test #2
+  (front's skill, rejected by the owner on 1 Nov) could never have been applied either way: skills are refused, and so
+  is anything posted before control showed diffs.
 - **What it applies**: zone front, and only the three files mounted into front and squid-front (`FRONT_FILES`: front's
   `config.yaml` and `SOUL.md`, `config/squid/front.conf`), narrower than control's `PATHS` on purpose. Vault, comms,
   `credential` and `skill` are refused with the reason the owner reads: a human builds them from the proposal, and a
