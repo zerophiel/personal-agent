@@ -29,10 +29,11 @@ KVM, Ubuntu 24.04.4, sshd drop-in `/etc/ssh/sshd_config.d/00-hardening.conf` (no
 - Read its state without printing nonces: `sudo docker exec -i personal-agent-control-1 python -I -` with a short
   read-only script on `file:/state/control.db?mode=ro` (counts and statuses only).
 
-## Front zone (M3, defined, not started)
+## Front zone (M3, live since 2026-11-01 11:34 WIB)
 `@danoefront_agent`: Hermes on Haiku 5.5 with web search, memory (each write needs the owner's OK) and one MCP tool,
 `submit` (change-proposals), which sends a change request to the control bot. No shell, code, files, browser or skills.
-It starts only with `--profile front`; `make deploy` never starts or stops it. Owner steps, in order:
+It starts only with `--profile front`; `make deploy` never starts or stops it. First start, in order (steps 2-5 done
+on 1 Nov; 1 and 6 are the owner's):
 1. BotFather: `@danoefront_agent` -> Bot Settings -> Allow Groups -> off.
 2. Anthropic Console: a separate workspace for front with a USD 40 monthly limit, and an API key from that workspace
    (with the vault's key front would spend the finance bot's budget; `render-front-env.sh` refuses the vault key).
@@ -42,7 +43,12 @@ It starts only with `--profile front`; `make deploy` never starts or stops it. O
    deletes it in Telegram and tells the owner (`docs/SECURITY.md`, front zone).
 5. Start: `sudo docker compose -f compose/docker-compose.yml --env-file config/stack.env --profile front up -d --build
    --wait change-proposals front`.
-6. Send `/start` to `@danoefront_agent`, then ask it to send a harmless test proposal: a card appears in the control bot.
+6. Send `/start` to `@danoefront_agent`, then the public Visa test number (CARD in
+   `services/hermes/front/tests/test_cardblock.py`) to front only: the message disappears and a notice comes. The
+   `submit` path was tested on 1 Nov with a one-shot, `sudo docker exec personal-agent-front-1 hermes chat --oneshot -q
+   "..."` (the `hermes` shim drops to uid 10000): proposal #2 appeared in the control bot.
+- Logs: `/opt/personal-agent-data/hermes-front/logs/` (`agent.log`, `gateway.log`, `errors.log`); the data directory is
+  root-only, so use `sudo` with absolute paths (`cd` into it fails).
 - Memory: a fact front wants to keep waits for the owner in its own chat: `/memory pending` lists them,
   `/memory approve <id>` keeps one, `/memory reject <id>` drops it.
 - After a change to `services/hermes/front/`: rsync as `make deploy` does, then the step 5 command with `front` only.

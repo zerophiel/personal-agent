@@ -345,15 +345,15 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   DMs alone (a throwaway container with v0.22.5: private kept, group and supergroup dropped; the live config before
   the change let both through). The vault restarted with it at 02:46 WIB while idle: Telegram polling again after
   37 s, config and SOUL hashes equal to the repo's. The owner turns Allow Groups off for both bots.
-- Front is not started: it needs `telegram_front_token` and `anthropic_front_key` from the owner (RUNBOOK "Front zone").
-  The key comes from a separate Anthropic workspace with its own USD 40 limit; with the vault's key front would spend
-  the finance bot's budget, so the render script refuses that key.
+- Front needed `telegram_front_token` and `anthropic_front_key` from the owner (set 09:08 and 09:09 WIB). The key comes
+  from a separate Anthropic workspace with its own USD 40 limit; with the vault's key front would spend the finance
+  bot's budget, so the render script refuses that key. Front runs since 11:34 WIB (section "Front live" below).
 - Deferred, with reasons:
   - The applier (writes, commits, deploys and health-checks an approved change): needs a deploy key from the owner, a
     git checkout on the VPS (today an rsync target), a running front and the owner's review at the M3 gate. Contract in
     `docs/SECURITY.md`.
-  - A card-number guard for front: vault's cardguard stores numbers in vault-tools, which front cannot reach; a
-    rewrite-only guard is small but cannot be tried until front runs. SOUL.md refuses numbers meanwhile; owner's call.
+  - (built 2026-11-01, section "Front live" below) A card-number guard for front: vault's cardguard stores numbers in
+    vault-tools, which front cannot reach, so front's `cardblock` drops the message instead.
   - Browser, a terminal sandbox, skills and a Sonnet route for hard questions: later, each as a proposal.
 - Tests: 530 across all suites; new `tests/test_zones.py` (one network per service, only control mounts the decisions,
   front's mounts and toolsets, groups dropped and no Opus or Fable in any zone).
@@ -389,6 +389,36 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   (`tagihan_sekali`, `cicilan_dibayar` with `batal`); no errors in either log. CHECK report OK: plan #63 = #62 in money,
   only les-mandarin-manuel 800.000 open.
 
+## Front live, card numbers dropped, prune fixed (M3, 2026-11-01 11:34 WIB, owner: "Setelah ini semua selesai kamu jangan lupa lanjut ke control bot dan front agent ya")
+- `cardblock` (702a114), front's only plugin, mounted read-only: a message whose text holds a Luhn-valid 13-19 digit
+  run (photo captions and inlined text documents included) is dropped before dispatch, so neither the model nor
+  `state.db` sees it. The owner's message is deleted and a fixed notice sent; anyone else's is dropped silently (Hermes
+  runs the hook before its sender check); an error drops the message too. Detection equals vault's cardguard (a parity
+  test). Photos of a card, account and VA numbers, PINs and OTPs stay with SOUL.md; Luhn also flags some IMEIs (the
+  notice says to send again without the digits). It loads like vault's cardguard (the same capability line;
+  `hermes plugins show cardblock`: enabled); the proof on Telegram is the owner's test (next steps).
+- Weekly prune: the 1 Nov 03:00 run removed the change-proposals and ingest-gmail images (rebuilt by the front start and
+  the 06:00 timer) because `config --images` ran without profiles; the digest-pinned Hermes image, listed as `<none>`,
+  was kept only because vault was running. `scripts/prune.sh` now keeps the images of every profile, of running
+  containers and of the release manifests, compared by full image ID, and stops before removing anything when compose
+  cannot list them. Dry run on the VPS before the start: nothing unused.
+- Start (11:33:58-11:34:32 WIB, `--profile front up -d --build --wait change-proposals front`): both healthy; Telegram
+  polling through squid-front; 6 tool schemas (web search, web extract, `clarify`, `vision_analyze`, memory, `submit`);
+  MCP `change_proposals` registered its one tool; gateway as uid 10000, 293 MiB of 2 GiB. The rendered env file is 0600
+  with 10 names, the front token differs from control's and the allowlist is the owner alone; the container's env has
+  no vault name. The first-boot warnings equal vault's first boot (config migration skipped; 63 commands over
+  Telegram's menu limit of 60).
+- One-shot 11:40:55 WIB (9 s, USD 0.0016 estimated; the 9.8K-token system prompt is cached): front called `submit` once,
+  control took the file from the inbox and posted card #2 (pending; one file,
+  `services/hermes/front/skills/uji-control/SKILL.md`). That proves the front key, squid-front, the MCP token and the
+  inbox. Squid-front saw at boot, before any chat, model catalogs (models.dev, openrouter.ai), Nous pages
+  (portal.nousresearch.com, hermes-agent.nousresearch.com, nousresearch.github.io) and two DNS-over-HTTPS resolvers
+  (Telegram fallback IPs); afterwards only api.telegram.org and api.anthropic.com.
+- Test proposal #1 was decided at 10:57:10 WIB with Setujui, not Tolak: `approved/1.json` exists and nothing is applied
+  (there is no applier, it has no files, and today's rules refuse it). The applier must never apply #1 or #2
+  (`docs/SECURITY.md`).
+- Tests: 584 (`make test` now also runs both Hermes plugin suites).
+
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
 2. Closing the pot gap without the children's needs: games (owner's own), apps not marked `wajib`, or talking to the friend.
@@ -410,7 +440,7 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 13. MTF outstanding 102.613.000 is 95.000 below 18 x 5.706.000: check the remaining amount in the MTF app.
 14. `payee_secrets` holds a card entry ending 1111 that no card uses (likely an early cardguard test): remove with the owner.
 15. Transport over its October budget (1.420.000 of 1.000.000 with the parking): raise the budget or keep it as a warning.
-16. Front zone: when to start it (two secrets, RUNBOOK "Front zone"), and whether it gets a card-number guard first.
+16. (done 2026-11-01: front runs since 11:34 WIB with the `cardblock` guard, section "Front live" above)
 
 ## Next steps
 - Owner: send `/new` once after the 1 Nov 10:27 deploy (Deploy 2 above; it also covers the earlier 1 Nov deploys).
@@ -442,9 +472,16 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   (Mandiri usable + daily account); after paying, tell the bot (card payments, instalments, transfers, pot and emergency
   fund balances, the Mandiri balance in the app). (30 Oct: done in the chat, recorded by the data fix above.)
 - After the November statements: calibration per `docs/calibration.md` (Google One, Apple, Coway, bot quality, spend).
-- Owner: tap Tolak on the control bot's test proposal #1 (`/usulan` there posts it again).
-- Owner: BotFather -> `@danoevault_agent`, then `@danoecontrol_bot` -> Bot Settings -> Allow Groups -> off.
-- Remaining plan: M3 front start (the owner's two secrets) and the applier, M4 comms, M2 gate checks
+- (done 2026-11-01 10:57 WIB, with Setujui) Test proposal #1. Owner: tap Tolak on #2, front's test of `submit`
+  (`/usulan` in the control bot posts it again).
+- Owner, front: `/start` to `@danoefront_agent`, then send it (only it: the vault's cardguard would store the number) the
+  public Visa test number, CARD in `services/hermes/front/tests/test_cardblock.py`. The message disappears, the notice
+  comes and no answer follows; an ordinary question afterwards gets one.
+- Owner: BotFather -> `@danoevault_agent`, `@danoecontrol_bot` and `@danoefront_agent` -> Bot Settings -> Allow Groups
+  -> off.
+- Front follow-ups: an owner check in vault's cardguard (defense in depth, on a quiet day, not a payday); after a week,
+  front's cost per day from its `state.db` against the USD 40 limit.
+- Remaining plan: the M3 applier (a deploy key from the owner, a git checkout on the VPS), M4 comms, M2 gate checks
   (`docs/assumptions.md`).
 
 ## Operating notes

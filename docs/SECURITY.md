@@ -39,7 +39,9 @@ A host unit (root on the VPS, never inside a container) that will:
    `docker compose up -d <that zone's service>` (`egress_domain`: reconfigure that zone's squid), health-check it, and on
    failure revert the commit and redeploy; report the outcome through control.
 Before it exists: a deploy key (the owner creates it), a git checkout on the VPS (today `/opt/personal-agent` is an rsync
-target without `.git`), a running front zone, and the owner's review at the M3 gate.
+target without `.git`) and the owner's review at the M3 gate; front runs since 2026-11-01.
+Approvals recorded before it exists are tests and are never applied: #1 (Setujui on 1 Nov, a config change without
+files that today's rules refuse) and #2 (front's test skill). At install the applier records them as not applied.
 A `skill` change lands only after a human has added, once, a read-only mount of `services/hermes/<zone>/skills/` listed
 in `skills.external_dirs` and turned the `skills` toolset on (compose is never in a proposal). Not a mount over
 `<HERMES_HOME>/skills`: Hermes copies its bundled skills and a manifest there at every boot.
@@ -55,7 +57,8 @@ in `skills.external_dirs` and turned the `skills` toolset on (compose is never i
   refuses the vault's key and token. Front is on net-front only: no route to vault-tools, the ledger or control.
 - Web search uses no key: the image has no DuckDuckGo package, so Hermes falls back to the free tiers of Exa, Parallel,
   Keenable or Firecrawl through squid-front (open web, private ranges blocked; Hermes also refuses private addresses).
-  Search text leaves the VPS.
+  Search text leaves the VPS. At boot, before any chat, Hermes also fetches model catalogs (models.dev, openrouter.ai),
+  Nous pages and two DNS-over-HTTPS resolvers (squid-front's log, 2026-11-01).
 - Web text is untrusted. A prompt in a page could make front fetch a URL that carries chat text, which is why finance
   and secrets stay out of front (SOUL.md), and why a change still needs the owner's tap in control.
 - Card numbers: the `cardblock` plugin (`services/hermes/front/plugins/cardblock`, mounted read-only) drops every
