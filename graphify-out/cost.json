@@ -40,8 +40,15 @@
       "output_tokens": 207944,
       "files": 5,
       "note": "delta --update of the 5 docs changed since 2188d82 (the applier, built and not installed: SECURITY contract, RUNBOOK install and rollback, ARCHITECTURE outcome folder, PROGRESS section and open questions 17-18, assumptions M2 gate checks), 2 agents; make graph for the 16 changed code files; community names audited after the re-cluster (77 named, 13 renamed)"
+    },
+    {
+      "date": "2026-11-01T14:03:13.559310+00:00",
+      "input_tokens": 6126896,
+      "output_tokens": 339152,
+      "files": 13,
+      "note": "doc delta from 65e324f: PROGRESS, SECURITY, assumptions and 10 docs/runtime files after the doubled-rows deploy (5 patch agents)"
     }
   ],
-  "total_input_tokens": 29128985,
-  "total_output_tokens": 3671478
+  "total_input_tokens": 35255881,
+  "total_output_tokens": 4010630
 }
