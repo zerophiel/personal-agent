@@ -555,12 +555,19 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
 
     @mcp.tool()
     @locked
-    def transfer_selesai(tujuan: list[str] | None = None, semua: bool = False, batal: bool = False) -> str:
+    def transfer_selesai(tujuan: list[str] | None = None, semua: bool = False, batal: bool = False,
+                         gajian: str | None = None) -> str:
         """Tandai transfer rencana gajian yang SUDAH dilakukan pemilik, selain kartu dan cicilan: pengeluaran tetap
         (sekolah, les, IPL), dana darurat, pot, uang harian, tagihan sekali bayar (jadi lunas). tujuan = alias seperti di
         status_gajian; semua=true untuk semua yang belum; batal=true menghapus tanda. Kartu dicatat dengan
-        record_card_payment, cicilan dengan cicilan_dibayar."""
-        return tools.mark_transfers_done(conn, today(), [t for t in tujuan or [] if t] or None, semua, batal)
+        record_card_payment, cicilan dengan cicilan_dibayar. gajian (YYYY-MM-DD): kosongkan, KECUALI alat ini bertanya
+        (sejak 7 hari setelah gajian ada dua rencana: bulan ini dan berikutnya); isi dengan jawaban pemilik. semua=true
+        tanpa gajian selalu untuk rencana bulan ini."""
+        try:
+            payday = date.fromisoformat(gajian) if gajian else None
+        except ValueError:
+            raise ValueError(f"gajian harus YYYY-MM-DD, bukan {gajian!r}") from None
+        return tools.mark_transfers_done(conn, today(), [t for t in tujuan or [] if t] or None, semua, batal, payday)
 
     @mcp.tool()
     @locked

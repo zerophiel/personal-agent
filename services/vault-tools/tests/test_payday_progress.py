@@ -24,6 +24,7 @@ except ImportError:  # system python without mcp/starlette: run these in the vau
 
 KEY = bytes(range(32))
 BEFORE, PAYDAY, NOV_1 = date(2026, 10, 27), date(2026, 10, 30), date(2026, 11, 1)
+NOV_8 = date(2026, 11, 8)    # a week after the payday: a plan call plans 30 Nov, the month's plan is still 30 Oct's
 
 
 def stmt(conn, card_id, printed, due, total, minimum):
@@ -282,6 +283,61 @@ class Progress(unittest.TestCase):
         self.assertIn("dibayar Rp 7.000.000, minimum sudah terpenuhi: tidak telat", tools.data_overview(conn, NOV_1))
 
 
+class TwoPlansOpen(unittest.TestCase):
+    """Regression 2026-11-02: from PAYDAY_LOOKBACK_DAYS after a payday transfer_selesai marked the coming payday's plan,
+    even for a transfer still open in the month's plan (a lesson fee of 30 Oct, paid but not marked, would have been
+    marked in the 30 Nov plan, and semua=true would have marked the whole 30 Nov plan, weeks before its salary)."""
+
+    def world(self):
+        conn = world()
+        tools.generate_payday_plan(conn, NOV_1)          # the month's plan, stored in the payday's week
+        return conn
+
+    def marks(self, conn):
+        return sorted(tuple(r) for r in conn.execute("SELECT payday, item FROM plan_progress"))
+
+    def test_a_transfer_open_in_both_plans_is_asked_for(self):
+        conn = self.world()
+        with self.assertRaises(ValueError) as e:
+            tools.mark_transfers_done(conn, NOV_8, ["sekolah"])
+        self.assertIn("sekolah-va (rencana 2026-10-30 jatuh tempo 2026-11-01; rencana 2026-11-30 jatuh tempo 2026-12-01) "
+                      "belum ditandai selesai di keduanya", str(e.exception))
+        self.assertIn("gajian='2026-10-30' atau gajian='2026-11-30'", str(e.exception))
+        self.assertEqual(self.marks(conn), [])
+        self.assertEqual(tools.mark_transfers_done(conn, NOV_8, ["sekolah"], payday=PAYDAY),
+                         "Tercatat selesai (gajian 2026-10-30): sekolah-va Rp 2.000.000. Transfer lain yang belum ditandai: uang-harian.")
+        # the month's is done: the next one is the coming payday's, made early
+        self.assertIn("Tercatat selesai (gajian 2026-11-30): sekolah-va", tools.mark_transfers_done(conn, NOV_8, ["sekolah"]))
+        self.assertEqual(self.marks(conn), [("2026-10-30", "sekolah-va"), ("2026-11-30", "sekolah-va")])
+        with self.assertRaisesRegex(ValueError, "sudah bertanda selesai di keduanya"):
+            tools.mark_transfers_done(conn, NOV_8, ["sekolah-va"], undo=True)
+        tools.mark_transfers_done(conn, NOV_8, ["sekolah-va"], undo=True, payday=date(2026, 11, 30))
+        self.assertEqual(self.marks(conn), [("2026-10-30", "sekolah-va")])
+        tools.mark_transfers_done(conn, NOV_8, ["sekolah-va"], undo=True)       # marked in one plan only: no question
+        self.assertEqual(self.marks(conn), [])
+        with self.assertRaisesRegex(ValueError, "Pilihan: 2026-10-30, 2026-11-30"):
+            tools.mark_transfers_done(conn, NOV_8, ["sekolah"], payday=date(2026, 9, 30))
+
+    def test_all_open_is_the_months_plan_never_the_whole_coming_one(self):
+        conn = self.world()
+        self.assertEqual(tools.mark_transfers_done(conn, NOV_8, all_open=True),
+                         "Tercatat selesai (gajian 2026-10-30): sekolah-va Rp 2.000.000; uang-harian Rp 3.000.000.")
+        self.assertEqual(tools.mark_transfers_done(conn, NOV_8, all_open=True),
+                         "Tidak ada yang diubah: semua transfer itu sudah tercatat selesai. Transfer rencana gajian 2026-11-30 "
+                         "(berikutnya) ditandai per tujuan, atau semua dengan gajian='2026-11-30'.")
+        self.assertEqual(self.marks(conn), [("2026-10-30", "sekolah-va"), ("2026-10-30", "uang-harian")])
+        self.assertIn("Tercatat selesai (gajian 2026-11-30): sekolah-va",
+                      tools.mark_transfers_done(conn, NOV_8, all_open=True, payday=date(2026, 11, 30)))
+        self.assertIn("Tanda selesai dihapus: sekolah-va", tools.mark_transfers_done(conn, NOV_8, all_open=True, undo=True))
+        self.assertEqual(self.marks(conn), [("2026-11-30", "sekolah-va"), ("2026-11-30", "uang-harian")])
+
+    def test_in_the_paydays_week_there_is_one_plan(self):
+        conn = self.world()
+        self.assertIn("Tercatat selesai (gajian 2026-10-30): sekolah-va", tools.mark_transfers_done(conn, NOV_1, ["sekolah"]))
+        with self.assertRaisesRegex(ValueError, "Pilihan: 2026-10-30$"):
+            tools.mark_transfers_done(conn, NOV_1, ["sekolah"], payday=date(2026, 11, 30))
+
+
 class CardPayment(unittest.TestCase):
     def test_the_same_payment_twice_on_one_day_is_refused_unless_confirmed(self):
         conn = world()
@@ -348,6 +404,22 @@ class Migration(unittest.TestCase):
 
 @unittest.skipUnless(HAVE_SERVER, "mcp/starlette not installed")
 class ThroughTheTools(unittest.TestCase):
+    def test_transfer_selesai_asks_which_payday_from_a_week_after_it(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "l.db")
+            conn = world(path)
+            tools.generate_payday_plan(conn, NOV_1)
+            conn.close()
+            app = create_app(path, KEY, "m" * 40, "i" * 40, allowed_hosts=["testserver"], today=lambda: NOV_8,
+                             ingest_dir=d, passwords_path=None)
+            call = lambda n, a=None: json.dumps(asyncio.run(app.state.mcp.call_tool(n, a or {})), default=str, ensure_ascii=False)  # noqa: E731
+            with self.assertRaisesRegex(Exception, "gajian='2026-10-30' atau gajian='2026-11-30'"):
+                call("transfer_selesai", {"tujuan": ["sekolah"], "semua": False, "batal": False, "gajian": ""})
+            self.assertIn("Tercatat selesai (gajian 2026-10-30): sekolah-va",
+                          call("transfer_selesai", {"tujuan": ["sekolah"], "semua": False, "batal": False, "gajian": "2026-10-30"}))
+            with self.assertRaisesRegex(Exception, "YYYY-MM-DD"):
+                call("transfer_selesai", {"tujuan": ["sekolah"], "gajian": "30 Okt"})
+
     def test_the_new_tools_with_empty_fields_as_a_model_sends_them(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "l.db")

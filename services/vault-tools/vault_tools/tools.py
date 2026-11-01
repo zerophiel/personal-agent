@@ -1637,17 +1637,61 @@ def undo_debt_payment(conn, today: date, alias: str, amount: int, due: str | Non
             f"dibatalkan. Sisa {r['tenor_left']} angsuran, sisa utang {format_idr(r['outstanding'])}.{note}")
 
 
-def mark_transfers_done(conn, today: date, items: list[str] | None = None, all_open: bool = False, undo: bool = False) -> str:
+def _own_transfers(snap: dict) -> dict:
+    """The items of a plan that transfer_selesai marks: neither card bills nor instalments."""
+    return {it["to"]: it for it in snap["progress"]["items"] if it["kind"] in ("transfer", "uang harian", "tagihan sekali")}
+
+
+def _which_payday(plans: list[dict], owns: list[dict], aliases: list[str], undo: bool) -> ValueError:
+    m, c = plans
+    due = lambda own, a: own[a]["due"] if a in own and own[a]["due"] else "-"      # noqa: E731
+    what = ", ".join(f"{a} (rencana {m['payday']} jatuh tempo {due(owns[0], a)}; rencana {c['payday']} jatuh tempo "
+                     f"{due(owns[1], a)})" for a in aliases)
+    state = "sudah bertanda selesai" if undo else "belum ditandai selesai"
+    return ValueError(f"Ada dua rencana gajian yang berjalan, dan {what} {state} di keduanya. Tanyakan pemilik: untuk gajian "
+                      f"{m['payday']} (rencana bulan ini) atau gajian {c['payday']} (rencana berikutnya)? Lalu ulangi dengan "
+                      f"gajian='{m['payday']}' atau gajian='{c['payday']}'.")
+
+
+def mark_transfers_done(conn, today: date, items: list[str] | None = None, all_open: bool = False, undo: bool = False,
+                        payday: date | None = None) -> str:
     """transfer_selesai: the owner made (or, with undo, did not make) transfers of the current payday's plan that are not card
     bills or instalments: fixed costs, deposits, the living money, one-off bills (marked paid). Recorded per destination, so
-    nobody asks again."""
-    snap = generate_payday_plan(conn, today)
-    payday = snap["payday"]
-    prog = snap["progress"]
-    own = {it["to"]: it for it in prog["items"] if it["kind"] in ("transfer", "uang harian", "tagihan sekali")}
-    names = {r["alias"]: r["payee_alias"] for r in conn.execute("SELECT alias, payee_alias FROM fixed_expenses")}
+    nobody asks again. From PAYDAY_LOOKBACK_DAYS after a payday two plans are open: the month's (plan_in_force, its stored
+    snapshot) and the coming payday's. A transfer open in both (marked in both, with undo) is asked for (`payday`): a late
+    transfer of the month and an early one of the coming payday look the same. all_open without `payday` is the month's,
+    never the whole coming plan before its salary is in. Regression 2026-11-02: from 7 Nov a lesson fee of the 30 Oct plan,
+    paid but not yet marked, would have been marked in the 30 Nov plan, and semua=true would have marked all of it."""
     if all_open == bool(items):
         raise ValueError("isi tujuan (alias dari status_gajian) ATAU semua=true, salah satu")
+    plans = [generate_payday_plan(conn, today)]       # the payday's week, then the coming payday (current_payday)
+    month = plan_in_force(conn, today)
+    if month is not None and month["payday"] < plans[0]["payday"] and today.isoformat() < month["next_payday"]:
+        plans.insert(0, dict(month, progress=payday_progress(conn, month)))
+    if payday is not None:
+        named = [p for p in plans if p["payday"] == payday.isoformat()]
+        if not named:
+            raise ValueError(f"gajian {payday.isoformat()} tidak bisa ditandai sekarang. Pilihan: "
+                             + ", ".join(p["payday"] for p in plans))
+        plans = named
+    names = {r["alias"]: r["payee_alias"] for r in conn.execute("SELECT alias, payee_alias FROM fixed_expenses")}
+    owns = [_own_transfers(p) for p in plans]
+    want = (lambda it: it["done"] > 0) if undo else (lambda it: it["done"] < it["planned"])       # noqa: E731
+    pick = 0                       # one plan; of two, semua=true is the month's (the coming payday's salary is not in yet)
+    if len(plans) == 2 and not all_open:
+        asked = [names.get(x, x) for x in items or []]
+        both = [a for a in asked if all(a in own and want(own[a]) for own in owns) and owns[0][a]["kind"] != "tagihan sekali"]
+        if both:                                      # a one-off bill is one bill in both plans: paying it settles it
+            raise _which_payday(plans, owns, both, undo)
+        # the month's when it is open there (or only there), else the coming payday's (whose answer names the choices)
+        where = {0 if a in owns[0] and (want(owns[0][a]) or a not in owns[1]) else 1 for a in asked}
+        if len(where) > 1:
+            raise ValueError("Tujuan ini ada di dua rencana gajian yang berbeda: tandai satu gajian per panggilan, dengan "
+                             f"gajian='{plans[0]['payday']}' atau gajian='{plans[1]['payday']}'.")
+        pick = where.pop()
+    snap, own = plans[pick], owns[pick]
+    payday = snap["payday"]
+    prog = snap["progress"]
     if all_open:
         chosen = [a for a, it in own.items() if (it["done"] > 0 if undo else it["done"] < it["planned"])]
     else:
@@ -1677,7 +1721,10 @@ def mark_transfers_done(conn, today: date, items: list[str] | None = None, all_o
                          (payday, a, own[a]["planned"], today.isoformat(), stamp))
     conn.commit()
     if not chosen:
-        return "Tidak ada yang diubah: " + ("tidak ada tanda selesai." if undo else "semua transfer itu sudah tercatat selesai.")
+        later = (f" Transfer rencana gajian {plans[1]['payday']} (berikutnya) ditandai per tujuan, atau semua dengan "
+                 f"gajian='{plans[1]['payday']}'." if all_open and len(plans) == 2 else "")
+        return ("Tidak ada yang diubah: " + ("tidak ada tanda selesai." if undo else "semua transfer itu sudah tercatat selesai.")
+                + later)
     left = [a for a, it in own.items() if a not in chosen and it["done"] < it["planned"]] if not undo else []
     return (("Tanda selesai dihapus: " if undo else f"Tercatat selesai (gajian {payday}): ")
             + "; ".join(f"{a} {format_idr(own[a]['planned'])}" for a in chosen) + "."
