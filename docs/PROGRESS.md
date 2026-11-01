@@ -440,10 +440,46 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 - Checked on the VPS, read-only: python3 3.12.3 with PyYAML 6.0.1 (the zone rules run there), flock, Compose 5.6.1,
   systemd 255; the files inside front and squid-front hash as the host's; in the running squid image a broken
   `http_access` line exits 0 and only prints `aclParseAccessLine`, so the applier reads the output, not the exit code.
-- Nothing deployed or installed today. The M3 gate is the owner's (open question 17); until then Setujui only records
+- None of it is deployed or installed. The M3 gate is the owner's (open question 17); until then Setujui only records
   the approval.
 - Tests: 639 across all suites, none skipped (applier 22 with a fake docker; its zone-rule test runs the real
   `tests/test_zones.py` against named mutations of the front files).
+
+## Two overlapping bank files no longer count a row twice (2026-11-01 evening, owner: "Oke saya sudah lakukan yg di vault front control dan botfather sesuai permintaanmu")
+- Checked on the VPS, read-only, after the owner's steps: control #2 rejected 12:54 WIB; front's card test at 18:26
+  (cardblock dropped the message, deleteMessage ok, no card number in front's `state.db`, the ordinary question at
+  18:27 answered); vault `/new` 18:21; the Mandiri October e-statement recorded 18:23 (214 rows = the PDF's 214 dated
+  lines, reconciled, Rp 1 of cents); Flazz #2438 merged into the Mandiri BI Fast -100.000 of 28 Oct (#2475), Coway
+  #2447 into the -540.000 of 30 Oct (#2505); no tool errors, no "Cek angka". Allow Groups cannot be read without the
+  bot tokens: the owner's word.
+- Found: of the e-statement's 65 new rows, 17 (#2449-#2465, 5-24 Oct) are rows the 1-26 Oct file already holds, read
+  with other wording; the dedupe key holds the normalized description, so they were stored again: -82.847.429 of
+  October outflow twice (six card payoffs of 15 Oct among them). Each file balances on its own, so neither the
+  reconciliation nor `periksa_data` saw it. The bot suspected it ("sekitar 29 baris yang tidak dikenali sebagai
+  duplikat") and told the owner "186,8 juta keluar"; without the 17 it is 103.973.941 (64.930.593 of it still
+  uncategorized), unverified 117 -> 100. Nothing was stored from them: no plan, snapshot, fund or payment record after
+  the file, and the daily pace counts from the payday only. The other 28 files agree with the ledger (|diff| <= 2).
+- Fix, built and not deployed: `record_mutations` first lets every exact key claim its stored row, then lets a row
+  left over take a stored row of another file of the account with the same day and amount, the most similar wording
+  first, each once; a row the earlier file lacks stays new (`matched_by_date_amount` in the result). It also warns
+  BUKU TIDAK COCOK when the account's rows over the file's period no longer add up to its balance change
+  (`ledger_gap`), and `periksa_data` reports the same as a MASALAH (audit rule 8). Not matched still: a row the second
+  document dates on another day; inside the overlap the ledger check flags it. Tests 644 (5 new).
+- Data fix `ops/datafix/2026-11-01-mandiri-dupes`: a backup, the 17 rows removed by id after checks (still the
+  e-statement's, uncategorized, nothing merged into them, a same-day same-amount row each in the 1-26 Oct file, both
+  files agreeing with the ledger afterwards), each logged whole in `change_log`, the file's `new_rows` 65 -> 48.
+  Dry run on an in-memory copy of the live ledger: gaps 0 and -1, audit mutation findings 2 -> 0 with the other three
+  findings unchanged; the new code re-recording the e-statement's 65 rows stores 48 and matches 17.
+- Found with it: vault's cardguard owner check (e9c1bc4, 14:54 WIB) never reached the VPS. The plugin there hashes
+  to a473d4d's, so the earlier note in Next steps that it "loads at the next vault restart" (corrected there) was
+  wrong: a restart alone would have reloaded the old one. A content dry run of the whole repo against the VPS: besides M3 (control v3, the applier,
+  compose, scripts) and docs, only this fix and cardguard with its test differ.
+- `deploy.sh` syncs two folders onto their twins: `services/vault-tools` (rebuilt) and `services/hermes/vault` (only
+  cardguard and its test differ). Then it restarts the vault when idle, which loads cardguard and reconnects Hermes
+  to the new tool server, and checks that the plugin in the container is the repo's. Pre-checked read-only in the
+  vault container with the new module: the allowlist holds exactly the owner, `_is_owner` is true for the owner's
+  DM only (not a group, not another id), card detection unchanged. Control stays v2, nothing of M3 ships, no `/new`.
+  Waiting for the owner (open question 19).
 
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
@@ -480,46 +516,51 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
     - Its own bot: BotFather (Allow Groups off), then `make secret-set NAME=telegram_comms_token`.
     - Which Anthropic key pays its USD 10: a third workspace with its own limit, as front has.
     - card-bus (the Kanban replacement in `docs/ARCHITECTURE.md`, for one zone to hand work to another): still wanted?
+19. The doubled Mandiri rows (section "Two overlapping bank files" above): go for
+    `ops/datafix/2026-11-01-mandiri-dupes/deploy.sh`? Until it runs, October's cashflow and living-cost month carry the
+    17 rows, and another bank's October e-statement (BCA's file covers 1-28 Oct) would double the same way. It also
+    brings vault's cardguard owner check (e9c1bc4), which never reached the VPS.
 
 ## Next steps
-- Owner: send `/new` once after the 1 Nov 10:27 deploy (Deploy 2 above; it also covers the earlier 1 Nov deploys).
+- Owner: go for the doubled-rows fix (open question 19); no other bank e-statement before it.
+- After it: the bot categorizes October with the owner (100 rows unverified; 30 of them from 27-31 Oct: the salary,
+  seven moves to the owner's own accounts, which count as spending until marked `transfer_internal`, eight card and
+  instalment payments by VA, two other transfers, fees, interest).
+- (done 2026-11-01 18:21 WIB) Owner sent `/new` after the 1 Nov 10:27 deploy (Deploy 2 above).
 - (done 2026-11-01, the recalibration section above) The number guard's four flags on 30-31 Oct were the bot's own
   arithmetic or its own reading of a photo. At each calibration, read the replies it flagged since the last one ("Cek
   angka" in Hermes `state.db`): each is a number no tool gave, and the fix is a tool that gives it.
 - (done 2026-11-01, Deploy 2) Vault restarts often logged "Previous gateway life exited UNCLEANLY" (8 times up to the
   1 Nov 00:36 restart): the vault service now has `stop_grace_period: 60s`. At the next restarts, check it is gone.
 - (done 2026-10-31 14:04) Owner sent `/new` after the 30 Oct evening deploy. Still open: les Mandarin once paid
-  (`transfer_selesai`), and the Mandiri October e-statement sent 30 Oct 16:14: it is still in /ingest/telegram (90-day
-  retention); the bot read it twice with `ingest_statement` but the session reset at 16:17 before `record_mutations`, so
-  the owner only asks the bot to record that file, no re-send.
+  (`transfer_selesai`; the 30 Oct payday's progress has no such item yet). The Mandiri October e-statement was recorded
+  on 1 Nov 18:23 WIB (see "Two overlapping bank files" above).
 - (done 2026-11-01, Deploy 2 above) Admin fees, bills paid once, the `cicilan_dibayar` undo; the `format_autodebit_check`
   sentence was fixed in the recalibration. Still open: after a week, compare cached tokens per turn and compactions per
   day with the 60K week.
-- After the Mandiri October e-statement is stored: Coway #2447 must be merged into its 540.000 debit of 30 Oct. If the
-  bank shows the fee inside that debit (one row of another amount), it is not: fix #2447 with the owner (`ubah_belanja`).
+- (done 2026-11-01 18:23 WIB) Coway #2447 merged into its 540.000 debit of 30 Oct (#2505).
 - (done 2026-10-30 morning) Owner sent `/new` once before the payday session (deploy: `lepas`/`tunai` on `ubah_belanja`,
   `tunai` on `record_expense`, SOUL). The bot now asks where a purchase was paid from when the screenshot does not show it.
 - Done 2026-10-30 (session from 10:02 WIB, edit 10:04 WIB): owner sent `/new` and had the bot fix PHO STREET #2440 (Jenius ->
   jago-harian): the bot listed it, asked what was wrong, showed before -> after, waited for "ya", then `ubah_belanja`;
   `change_log` #1 holds only the account and dedupe key change; no warnings; no new transaction rows. The account of an own
   record feeds no plan or living-cost figure (`living.monthly` sums by month and category).
-- After the next uploads, check the two live own records merged where they belong: PHO STREET #2440 into the Jago October
-  POS row (file under `jago-utama`); Flazz #2438 (Mandiri, `transfer_internal`; #2439 is merged into it) into the Mandiri
-  "Transfer BI Fast Ke BCA" -100.000 of 28 Oct, NOT into BCA's "FLAZZ BCA TOPUP" (all 129 Flazz top-ups go through BCA,
-  `transport` by rule; that row must stay counted once as transport).
+- After the Jago October e-statement: PHO STREET #2440 must merge into the Jago October POS row (file under
+  `jago-utama`). (done 2026-11-01 18:23 WIB) Flazz #2438 (Mandiri, `transfer_internal`; #2439 is merged into it)
+  merged into the Mandiri "Transfer BI Fast Ke BCA" -100.000 of 28 Oct (#2475), not into BCA's "FLAZZ BCA TOPUP",
+  which stays counted once as transport.
 - On the 30 Nov payday: ask the bot for the payday list; it asks for the leftover living cash just BEFORE the salary
   (Mandiri usable + daily account); after paying, tell the bot (card payments, instalments, transfers, pot and emergency
   fund balances, the Mandiri balance in the app). (30 Oct: done in the chat, recorded by the data fix above.)
 - After the November statements: calibration per `docs/calibration.md` (Google One, Apple, Coway, bot quality, spend).
-- (done 2026-11-01 10:57 WIB, with Setujui) Test proposal #1. Owner: tap Tolak on #2, front's test of `submit`
-  (`/usulan` in the control bot posts it again).
-- Owner, front: `/start` to `@danoefront_agent`, then send it (only it: the vault's cardguard would store the number) the
-  public Visa test number, CARD in `services/hermes/front/tests/test_cardblock.py`. The message disappears, the notice
-  comes and no answer follows; an ordinary question afterwards gets one.
-- Owner: BotFather -> `@danoevault_agent`, `@danoecontrol_bot` and `@danoefront_agent` -> Bot Settings -> Allow Groups
-  -> off.
-- Front follow-ups: (built 2026-11-01) vault's cardguard now acts only for the owner in a private chat; it loads at the
-  next vault restart (a quiet moment, not a payday; no `/new` needed). After that restart, the first TTL sweep logs how
+- (done 2026-11-01 10:57 WIB, with Setujui) Test proposal #1. (done 12:54 WIB) The owner tapped Tolak on #2, front's
+  test of `submit`.
+- (done 2026-11-01 18:26 WIB) Front's card test: the public Visa test number (CARD in
+  `services/hermes/front/tests/test_cardblock.py`) was dropped and deleted, nothing stored, the next question answered.
+- (owner reports done 2026-11-01) BotFather -> Allow Groups off for `@danoevault_agent`, `@danoecontrol_bot` and
+  `@danoefront_agent`; not checkable from here without the bot tokens.
+- Front follow-ups: (built 2026-11-01) vault's cardguard acts only for the owner in a private chat. It is not on the
+  VPS yet: the doubled-rows deploy syncs it and restarts the vault (no `/new`). After that restart, the first TTL sweep logs how
   many `/rincian` deletes Telegram accepted (`ttl sweep: Telegram deleted N of M`). After a week, front's cost per day
   from its `state.db` against the USD 40 limit.
 - (done 2026-11-01) M2 gate checks: all four closed with evidence (`docs/assumptions.md`).
