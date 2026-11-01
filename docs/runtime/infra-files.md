@@ -27,7 +27,7 @@ preflight:
 # Sync repo to VPS and apply compose + host timers. Plaintext secrets and the local project map are never synced.
 deploy:
 	rsync -az --delete --exclude .git --exclude .claude --exclude 'secrets/*.dec*' --exclude graphify-out --exclude CLAUDE.md ./ $(VPS_USER)@$(VPS_HOST):$(REMOTE_DIR)/
-	$(SSH) 'cd $(REMOTE_DIR) && sudo bash scripts/install-timers.sh && $(COMPOSE) up -d --build'
+	$(SSH) 'cd $(REMOTE_DIR) && sudo bash scripts/install-timers.sh && sudo bash scripts/data-dirs.sh && $(COMPOSE) up -d --build'
 
 status:
 	$(SSH) 'cd $(REMOTE_DIR) && $(COMPOSE) ps && df -h / && free -m && docker system df'
@@ -67,6 +67,7 @@ restore:
 test:
 	python3 -I -m unittest discover -s tests -v
 	cd services/control && python3 -I -m unittest discover -s tests -v
+	cd services/change-proposals && $${VAULT_PY:-python3} -I -m unittest discover -s tests -v   # needs mcp, as the vault-tools server tests
 	cd services/ingest-gmail && python3 -I -m unittest discover -s tests -v
 	cd services/vault-tools && $${VAULT_PY:-python3} -I -m unittest discover -s tests -v   # VAULT_PY=venv python to include server tests
 
@@ -465,6 +466,25 @@ Persistent=true
 Unit=pa-uploads.service
 [Install]
 WantedBy=timers.target
+```
+
+## services/change-proposals/Dockerfile
+
+
+
+```dockerfile
+# Build context is services/ (compose): control.py comes along so the proposal rules are control's own.
+FROM python:3.12-slim
+RUN useradd --system --uid 10001 app
+WORKDIR /app
+COPY change-proposals/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY control/control.py change-proposals/proposals.py ./
+USER 10001
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD python -c "import socket; socket.create_connection(('127.0.0.1', 8000), 3)"
+# no -I: isolated mode would drop /app from sys.path (proposals imports control); only our own code lives there
+CMD ["python", "proposals.py"]
 ```
 
 ## services/control/Dockerfile
