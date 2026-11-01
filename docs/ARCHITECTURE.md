@@ -18,13 +18,17 @@ Only proxies join `egress`; a container with no proxy variable has no route out.
 |---|---|---|---|
 | `ingest` | ingest-gmail | vault-tools (read-only) | statement drop, same zone |
 | `proposals-inbox` | change-proposals (net-front) | control (net-ctl), which empties it | the only path from a model-facing zone to control |
-| `control-state` | control only | the applier, later (`approved/`) | decisions; never mounted by a model-facing container |
+| `control-state` | control only | the applier (`approved/`, and `control.db` read-only) | decisions; never mounted by a model-facing container |
+| `applier/outcome` | the applier (root host unit) | control (read-only) | what became of an approval, told to the owner once |
 
 ## Approvals (M3)
-front (Hermes, Haiku) -> `submit` on change-proposals -> `proposals-inbox/<time>-<random>.json` -> control re-validates
-and posts it to the owner with one-time Setujui/Tolak buttons -> the tap is recorded in `control-state` (`decided/`, and
-`approved/` when approved). Applying an approved change is the applier's job, not built yet (contract in
-`docs/SECURITY.md`). Control commands: `/status` (counts), `/usulan` (re-post waiting proposals with their buttons), `/ping`.
+front (Hermes, Haiku) -> `submit` on change-proposals -> `proposals-inbox/<time>-<random>.json` -> control re-validates,
+posts the diff it computes itself against the installed files (read-only mounts of `services/hermes/front/` and
+`config/squid/`), then the card with one-time Setujui/Tolak buttons -> the tap is recorded in `control-state`
+(`decided/`, and `approved/` when approved) -> the applier (`services/applier`, a root host unit; built 2026-11-01, not
+installed) applies an approved front change and writes `applier/outcome/<id>.json`, which control reports once.
+Contract in `docs/SECURITY.md`. Control commands: `/status` (counts, with the applier's outcomes), `/usulan` (re-post
+waiting proposals with their buttons), `/ping`.
 
 ## Deviations from the original brief (see plan file)
 - Kanban replaced by a `card-bus` MCP (Hermes docs do not cover Kanban across containers).

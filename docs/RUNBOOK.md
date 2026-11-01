@@ -21,8 +21,9 @@ KVM, Ubuntu 24.04.4, sshd drop-in `/etc/ssh/sshd_config.d/00-hardening.conf` (no
 ## Control bot (M3, live since 2026-11-01)
 - `@danoecontrol_bot`, owner only: `/status` (waiting, approved, rejected, invalid counts), `/usulan` (posts the waiting
   proposals again with their buttons), `/ping`. A proposal card shows the agent's summary, permission change, files,
-  risk and rollback; Setujui/Tolak work once. Approved means recorded in `control-state/approved/`, not applied: the
-  applier is not built yet (contract in `docs/SECURITY.md`).
+  risk and rollback; Setujui/Tolak work once. Approved means recorded in `control-state/approved/`; nothing is applied
+  until the applier is installed (section Applier), and the card says which. From the next `make deploy` on, control
+  posts the diff it computed itself before every card.
 - Folders: `sudo bash scripts/data-dirs.sh` (also run by `make deploy`) before the first start.
 - Deploy only control: rsync as `make deploy` does, then
   `sudo docker compose -f compose/docker-compose.yml --env-file config/stack.env up -d --build --wait control`.
@@ -53,6 +54,39 @@ on 1 Nov; 1 and 6 are the owner's):
   `/memory approve <id>` keeps one, `/memory reject <id>` drops it.
 - After a change to `services/hermes/front/`: rsync as `make deploy` does, then the step 5 command with `front` only.
 - Stop: the same compose command with `--profile front stop front change-proposals`.
+
+## Applier (M3, built 2026-11-01, not installed)
+`services/applier` applies a front change the owner approved in control (contract in `docs/SECURITY.md`). Its units are
+in `services/applier/systemd/`, not `host/`, so `make deploy` never enables them.
+- Install, only after the owner's go-ahead at the M3 gate:
+  1. `make deploy`: it carries the applier, control with its diff and new mounts, and the data folders
+     (`scripts/data-dirs.sh` creates `applier/` and `applier/outcome/`).
+  2. On the VPS: `cd /opt/personal-agent && sudo bash services/applier/install.sh`. The host check runs first, changes
+     nothing and stops at the first FAIL; then the install time is recorded, `pa-applier.path` and `pa-applier.timer`
+     are enabled and one run skips the approvals from before (the test #1). A FAIL on `tests/test_zones.py` with
+     `No module named 'yaml'`: `sudo apt install python3-yaml` (present on 2026-11-01: PyYAML 6.0.1).
+  3. From then on the card says the applier applies exactly the diff above it. After an applied change to front's
+     `config.yaml` or `SOUL.md`, `/new` to `@danoefront_agent` (control's message says so).
+- Look: `journalctl -u pa-applier.service -n 50 --no-pager`; `sudo ls /opt/personal-agent-data/applier/applied
+  /opt/personal-agent-data/applier/failed /opt/personal-agent-data/applier/skipped`. A record holds hashes and reasons;
+  `backup/` holds the old files (root only; do not print).
+- Deploying while it is installed: when `make deploy` refuses with "applied on the VPS but not in this checkout", run
+  `make applied-pull` (one commit per applied change), push, then `make deploy` again. A deploy that stopped halfway
+  leaves the hold: `bash scripts/deploy-guard.sh end ubuntu@<vps>` (the applier ignores a hold older than 30 minutes).
+- "pengembaliannya juga gagal ... perlu manusia" (rollback_failed): `sudo cat
+  /opt/personal-agent-data/applier/failed/<id>.json` lists each file's `sha256_before` and `sha256_after`; compare them
+  with `sudo sha256sum /opt/personal-agent/<path>`. From `/opt/personal-agent`, with
+  `C="sudo docker compose -f compose/docker-compose.yml --env-file config/stack.env --profile front"`:
+  - equal to before: the old files are back; start the service: `$C up -d --no-deps --force-recreate --wait <service>`
+    (`front` or `squid-front`, from the record);
+  - equal to after: put the old files back, then the same command:
+    `sudo python3 -I -c 'import base64, json, sys; [open("/opt/personal-agent/" + f["path"], "wb").write(base64.b64decode(f["b64"])) for f in json.load(open(sys.argv[1]))["files"]]' /opt/personal-agent-data/applier/backup/<id>.json`;
+  - neither: the file was changed after the apply started; compare it with the repo and decide by hand.
+  The applier never tries an id again once it has a record.
+- Uninstall: `sudo systemctl disable --now pa-applier.path pa-applier.timer`, `sudo rm
+  /etc/systemd/system/pa-applier.service /etc/systemd/system/pa-applier.path /etc/systemd/system/pa-applier.timer`,
+  `sudo systemctl daemon-reload`, then `sudo rm /opt/personal-agent-data/applier/outcome/applier.json`: control says
+  again that nothing is applied automatically. The records stay.
 
 ## Restore
 Always restore to a scratch directory, verify the ledger, then copy deliberately.

@@ -349,8 +349,9 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   from a separate Anthropic workspace with its own USD 40 limit; with the vault's key front would spend the finance
   bot's budget, so the render script refuses that key. Front runs since 11:34 WIB (section "Front live" below).
 - Deferred, with reasons:
-  - The applier (writes, commits, deploys and health-checks an approved change): needs a deploy key from the owner, a
-    git checkout on the VPS (today an rsync target), a running front and the owner's review at the M3 gate. Contract in
+  - (built 2026-11-01 without a deploy key or git on the VPS, section "The applier" below; not installed) The applier
+    (writes, commits, deploys and health-checks an approved change): needs a deploy key from the owner, a git checkout
+    on the VPS (today an rsync target), a running front and the owner's review at the M3 gate. Contract in
     `docs/SECURITY.md`.
   - (built 2026-11-01, section "Front live" below) A card-number guard for front: vault's cardguard stores numbers in
     vault-tools, which front cannot reach, so front's `cardblock` drops the message instead.
@@ -419,6 +420,31 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   (`docs/SECURITY.md`).
 - Tests: 584 (`make test` now also runs both Hermes plugin suites).
 
+## The applier, built and not installed (M3, 2026-11-01 afternoon, owner: "Lanjut sampe selesai")
+- Control v3 (6648796, not deployed): before the card, the diff of each file against the installed one, computed by
+  control from read-only mounts of `services/hermes/front/` and `config/squid/` (never the agent's text) and stored with
+  the proposal as `review` (the installed files' hashes; shown whole or why not). The card says what a tap will do:
+  applied exactly as shown, not applied automatically and why, or that applying is not automatic yet. The applier's
+  outcomes are told once and counted in `/status`. A v2 `control.db` migrates in place; a proposal from before the
+  migration is never applied.
+- Zone rules (bddb5ec), found missing while building the applier, that every front change now passes first: front's
+  config may set only listed keys (a `model.base_url` would have sent every chat and the Anthropic key elsewhere while
+  `provider` still said anthropic); both profiles Anthropic Haiku or Sonnet only, with no env reference or URL outside
+  the MCP entry; every squid conf plain lines only (a `url_rewrite_program` or `include` line would run a program in
+  the proxy) and front denying private ranges first.
+- The applier (eb73863): `services/applier`, contract in `docs/SECURITY.md`. Front only, exactly the diff the owner
+  saw, the zone rules and `squid -k parse` before writing, the old files back on any failed check, outcomes through
+  control. Its units and `install.sh` are written, not run. No deploy key: the VPS never writes to GitHub; `make deploy`
+  holds the applier and refuses while the VPS has an applied change this checkout lacks, and `make applied-pull` brings
+  those in, one commit each (591ca94).
+- Checked on the VPS, read-only: python3 3.12.3 with PyYAML 6.0.1 (the zone rules run there), flock, Compose 5.6.1,
+  systemd 255; the files inside front and squid-front hash as the host's; in the running squid image a broken
+  `http_access` line exits 0 and only prints `aclParseAccessLine`, so the applier reads the output, not the exit code.
+- Nothing deployed or installed today. The M3 gate is the owner's (open question 17); until then Setujui only records
+  the approval.
+- Tests: 639 across all suites, none skipped (applier 22 with a fake docker; its zone-rule test runs the real
+  `tests/test_zones.py` against named mutations of the front files).
+
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
 2. Closing the pot gap without the children's needs: games (owner's own), apps not marked `wajib`, or talking to the friend.
@@ -441,6 +467,19 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 14. `payee_secrets` holds a card entry ending 1111 that no card uses (likely an early cardguard test): remove with the owner.
 15. Transport over its October budget (1.420.000 of 1.000.000 with the parking): raise the budget or keep it as a warning.
 16. (done 2026-11-01: front runs since 11:34 WIB with the `cardblock` guard, section "Front live" above)
+17. The M3 gate: install the applier (section "The applier" above, contract in `docs/SECURITY.md`)? Yes means
+    `make deploy` (control's diff and mounts, the data folders) and then `sudo bash services/applier/install.sh` on the
+    VPS (`docs/RUNBOOK.md`, Applier). From then on a Setujui on a front change applies it.
+18. M4 comms, nothing built (the repo holds net-comms and squid-comms, which allows Anthropic and the Google APIs):
+    - What it may do: read and label mail, write drafts, or also send; calendar read only, or create events too.
+      Google has no scope for drafts without sending (`gmail.modify` and `gmail.compose` both send), so the broker
+      that holds the token, not the scope, keeps comms from sending: it offers only the operations the owner picks.
+    - Google consent on the owner's laptop, like the ingest token: a new OAuth client with `gmail.modify`
+      (`docs/GMAIL_OAUTH.md`), plus `calendar.readonly` or `calendar.events` if calendar is wanted. In Testing mode
+      this refresh token also expires every 7 days.
+    - Its own bot: BotFather (Allow Groups off), then `make secret-set NAME=telegram_comms_token`.
+    - Which Anthropic key pays its USD 10: a third workspace with its own limit, as front has.
+    - card-bus (the Kanban replacement in `docs/ARCHITECTURE.md`, for one zone to hand work to another): still wanted?
 
 ## Next steps
 - Owner: send `/new` once after the 1 Nov 10:27 deploy (Deploy 2 above; it also covers the earlier 1 Nov deploys).
@@ -484,7 +523,8 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   many `/rincian` deletes Telegram accepted (`ttl sweep: Telegram deleted N of M`). After a week, front's cost per day
   from its `state.db` against the USD 40 limit.
 - (done 2026-11-01) M2 gate checks: all four closed with evidence (`docs/assumptions.md`).
-- Remaining plan: the M3 applier, M4 comms.
+- Remaining plan: the M3 gate (open question 17: the applier is built and tested, installing it is the owner's call),
+  then M4 comms once the owner has answered open question 18.
 
 ## Operating notes
 - Deploy: `rsync` from the worktree ROOT (never a subfolder: `--delete` wipes the server tree), back up `ledger.db` first, rebuild `vault-tools`, restart `vault`. Owner must `/new` in Telegram after tool or SOUL changes (owner plans to do it once data and system are done).
