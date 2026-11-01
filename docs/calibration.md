@@ -33,13 +33,17 @@ the model or the data drifted.
 - `ops/calibration/dry_run.py` on a copy of the live ledger: every statement must re-read as `cocok`; read the audit and the
   plan for the coming 1st.
 
-## 5. Deploy (from the worktree root)
-1. `rsync -az --delete --exclude .git --exclude .claude ./ ubuntu@43.157.242.194:/opt/personal-agent/`
-2. Ledger backup with the SQLite backup API (consistent under WAL), e.g.
+## 5. Deploy (from the worktree root, committed and pushed)
+1. Ledger backup with the SQLite backup API (consistent under WAL), before vault-tools is rebuilt (it migrates the
+   schema when it starts), e.g.
    `sudo docker exec personal-agent-vault-tools-1 python -c "import sqlite3; s=sqlite3.connect('/data/ledger.db'); d=sqlite3.connect('/data/ledger.db.bak-<name>'); s.backup(d)"`
-3. `cd /opt/personal-agent && sudo docker compose -f compose/docker-compose.yml --env-file config/stack.env up -d --build vault-tools`
-4. Data changes as a script piped into `docker exec -i personal-agent-vault-tools-1 python -`, each change asserted after.
-5. Config, SOUL or plugin changed: `... restart vault`; the owner sends `/new` in Telegram.
+2. `make deploy`: the deploy guard, the rsync (it leaves `.git`, `.claude`, decrypted secrets, `graphify-out`,
+   `CLAUDE.md` and `__pycache__` here), timers, data folders and `up -d --build`. Never a bare `rsync --delete`: it
+   would undo a front change the applier made on the owner's Setujui. When the guard refuses, `make applied-pull`,
+   push, then deploy again.
+3. Data changes as a script piped into `docker exec -i personal-agent-vault-tools-1 python -`, each change asserted after.
+4. vault-tools rebuilt, or config, SOUL or plugin changed: `... restart vault` while the bot is idle; the owner sends
+   `/new` in Telegram.
 
 ## 6. Test economically (each one-shot costs about USD 0.5-1)
 - At most two: `sudo docker exec personal-agent-vault-1 hermes chat --oneshot -q "UJI KALIBRASI (jangan mencatat atau mengubah apa pun). ..."`.

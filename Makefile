@@ -14,11 +14,12 @@ help:
 preflight:
 	$(SSH) 'bash -s' < scripts/preflight.sh
 
-# Sync repo to VPS and apply compose + host timers. Plaintext secrets and the local project map are never synced. The
-# guard holds the applier meanwhile and refuses while it has applied a change this checkout lacks (make applied-pull).
+# Sync repo to VPS and apply compose + host timers. Plaintext secrets, the local project map and the Python caches of
+# local test runs are never synced. The guard holds the applier meanwhile and refuses while it has applied a change
+# this checkout lacks (make applied-pull).
 deploy:
 	bash scripts/deploy-guard.sh start $(VPS_USER)@$(VPS_HOST)
-	rsync -az --delete --exclude .git --exclude .claude --exclude 'secrets/*.dec*' --exclude graphify-out --exclude CLAUDE.md ./ $(VPS_USER)@$(VPS_HOST):$(REMOTE_DIR)/
+	rsync -az --delete --exclude .git --exclude .claude --exclude 'secrets/*.dec*' --exclude graphify-out --exclude CLAUDE.md --exclude __pycache__ ./ $(VPS_USER)@$(VPS_HOST):$(REMOTE_DIR)/
 	$(SSH) 'cd $(REMOTE_DIR) && sudo bash scripts/install-timers.sh && sudo bash scripts/data-dirs.sh && $(COMPOSE) up -d --build'
 	bash scripts/deploy-guard.sh end $(VPS_USER)@$(VPS_HOST)
 
