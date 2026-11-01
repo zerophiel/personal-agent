@@ -79,8 +79,9 @@ class Proposals(unittest.TestCase):
         tg = FakeTelegram()
         control.Control(tg, 42, Path(self.tmp.name) / "state", self.inbox).tick()
         self.assertEqual(self.files(), [])
-        self.assertIn("Usulan perubahan #1 (zona front, jenis egress_domain)", tg.sent[0]["text"])
-        self.assertIn("reply_markup", tg.sent[0])
+        self.assertTrue(tg.sent[0]["text"].startswith("Diff usulan #1"))                  # control's diff, then the card
+        self.assertIn("Usulan perubahan #1 (zona front, jenis egress_domain)", tg.sent[1]["text"])
+        self.assertIn("reply_markup", tg.sent[1])
 
     def test_what_control_would_refuse_is_never_written(self):
         for bad, why in ((good(files=[{"path": "scripts/install-timers.sh", "content": "x"}]), "hanya boleh mengubah"),
