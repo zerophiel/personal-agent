@@ -10,7 +10,7 @@ import sqlite3
 from collections import defaultdict
 
 from .money import format_idr
-from .mutations import normalize, set_category_rule
+from .mutations import CARD_BILL, INTERNAL, card_paid, normalize, own_cards, set_category_rule
 
 # (category, regex on the normalized descriptor). First match wins, so order matters.
 DEBIT_RULES: list[tuple[str, str]] = [
@@ -61,11 +61,19 @@ _INTEREST = re.compile(r"\binterest\b|\bbunga\b")
 _CARD_WORDS = re.compile(r"kartu kredit|credit card|\bbca card\b|\bcard\b")
 _POCKET_MOVE = re.compile(r"pocket.*(movement|money in|money out|main pocket|between pockets)|movement between|main pocket|"
                           r"top ?up poket|pindahkan poket|\bpoket \d+")
+_POCKET_INTEREST = re.compile(r"\bpocket interest\b")
 
 
-def suggest_category(normalized: str, amount: int, owners: list[str], own_last4: list[str] = ()) -> str | None:
+def suggest_category(normalized: str, amount: int, owners: list[str], own_last4: list[str] = (), cards=(),
+                     raw: str = "") -> str | None:
+    """`own_last4`: the owner's own (non-pool) accounts; `cards`: mutations.own_cards; `raw`: the descriptor before
+    normalizing, whose long numbers can still end in a card's last4."""
     if _FEE.search(normalized):
         return "biaya-bank"                             # a fee line that mentions a payee is still just a fee
+    if card_paid(raw or normalized, cards):
+        return CARD_BILL if amount < 0 else None        # the card's bill, even in the owner's name: a card's spending reaches the bank only as this
+    if _POCKET_INTEREST.search(normalized) and amount > 0:
+        return "bunga"                                  # "Main Pocket Interest" is interest paid into a pocket, not a move between pockets
     if _POCKET_MOVE.search(normalized):
         return "transfer_internal"                      # checked before any keyword rule: a pocket NAME ("Gaji Pak Darja") is not the event
     if _INTEREST.search(normalized) and amount > 0:
@@ -85,7 +93,8 @@ def suggest_category(normalized: str, amount: int, owners: list[str], own_last4:
 def groups(conn) -> dict[str, dict]:
     """Uncategorized rows grouped by normalized descriptor: count, total in/out, and the suggestion."""
     owners = owner_names(conn)
-    own_last4 = [r[0] for r in conn.execute("SELECT last4 FROM accounts WHERE last4 IS NOT NULL AND kind != 'pool' UNION SELECT last4 FROM cards")]   # own accounts and own cards
+    own_last4 = [r[0] for r in conn.execute("SELECT last4 FROM accounts WHERE last4 IS NOT NULL AND kind != 'pool'")]
+    cards = own_cards(conn)                             # a transfer to one of them is its bill, not a move between own accounts
     out: dict[str, dict] = defaultdict(lambda: {"n": 0, "out": 0, "in": 0, "cats": defaultdict(int)})
     words = [(r["keyword"], r["category"]) for r in conn.execute("SELECT keyword, category FROM category_keywords")]
     for r in conn.execute("SELECT merchant, amount FROM transactions WHERE source IN ('mutation','receipt')"
@@ -94,7 +103,10 @@ def groups(conn) -> dict[str, dict]:
         g = out[key]
         g["n"] += 1
         g["out" if r["amount"] < 0 else "in"] += abs(r["amount"])
-        cat = next((c for kw, c in words if kw in key), None) or suggest_category(key, r["amount"], owners, own_last4)
+        by_word = next((c for kw, c in words if kw in key), None)
+        if by_word == INTERNAL and card_paid(r["merchant"], cards):
+            by_word = None                              # an own-move word (a name) never makes a card's bill an own move
+        cat = by_word or suggest_category(key, r["amount"], owners, own_last4, cards, r["merchant"])
         if cat:
             g["cats"][cat] += 1
     for g in out.values():
@@ -119,10 +131,15 @@ def apply_suggestions(conn, patterns: list[str] | None = None) -> str:
     gs = groups(conn)
     wanted = {normalize(p) for p in patterns} if patterns else None
     done = rows = 0
+    refused = []
     for key, g in gs.items():
         if not g["suggestion"] or (wanted is not None and key not in wanted):
             continue
-        set_category_rule(conn, key, g["suggestion"])
+        try:
+            set_category_rule(conn, key, g["suggestion"])
+        except ValueError as e:                         # a group that holds a card's bill among own moves: the owner decides
+            refused.append(f"'{key}': {e}")
+            continue
         done += 1
         rows += g["n"]
-    return f"{done} kelompok dikategorikan ({rows} transaksi)"
+    return f"{done} kelompok dikategorikan ({rows} transaksi)" + "".join(f"; dilewati {r}" for r in refused)

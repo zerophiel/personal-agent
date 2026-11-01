@@ -233,18 +233,87 @@ class Suggestions(unittest.TestCase):
             mu.set_category_keyword(conn, "ab", "x")
 
     def test_card_payments_hospitals_and_church_collections(self):
-        mine = ["5855", "5915", "5685"]
+        """Regression (2026-11-01): a transfer to an own card's number is that card's bill. Read as a move between own
+        accounts, four September repayments dropped out of the month's expenses."""
+        cards = [("mega-5855", "5855", ("mega",)), ("hsbc-5915", "5915", ("hsbc",)), ("dbs-5685", "5685", ("dbs",))]
+        owners = ["nama pemilik"]
         cases = [
-            ("transfer bi fast ke mega ****5855", -1, "transfer_internal"),
-            ("transfer ke bank lain bank hsbc ****5915", -1, "transfer_internal"),
-            ("transfer bi fast ke dbs ****5685", -1, "transfer_internal"),
+            ("transfer bi fast ke mega ****5855", -1, "wajib:kartu"),
+            ("transfer ke bank lain bank hsbc ****5915", -1, "wajib:kartu"),
+            ("transfer bi fast ke dbs ****5685", -1, "wajib:kartu"),
+            ("transfer ke bank lain bank hsbc ****5915 nama pemilik", -1, "wajib:kartu"),   # the cardholder's name: still the bill
+            ("biaya transaksi bank pembayaran hsbc ****5915", -1, "biaya-bank"),          # that payment's fee stays a fee
+            ("transfer bi fast ke bca ****5855", -1, None),                                # the same four digits at another bank
+            ("transfer bi fast ke mega ****5855", 1, None),                                # money back from a card: the owner says
             ("transfer bi fast ke bca ****1234", -1, None),
             ("transaksi debit qr siloam hos", -1, "kesehatan"),
             ("pembayaran qr ke pgdp kosambibaru kolekt", -1, "donasi"),
             ("pembayaran qr ke pgdp katedral kolekte", -1, "donasi"),
         ]
         for desc, sign, want in cases:
-            self.assertEqual(sg.suggest_category(desc, sign * 1000, ["danuarta wiratama"], mine), want, desc)
+            self.assertEqual(sg.suggest_category(desc, sign * 1000, owners, cards=cards), want, desc)
+        self.assertEqual(sg.suggest_category("transfer bi fast ke mega #", -1000, owners, cards=cards,
+                                             raw="Transfer BI Fast ke MEGA 12345855"), "wajib:kartu")   # a full number ending in it
+
+    def test_own_cards_come_from_the_registered_cards_and_count_as_expenses(self):
+        conn = connect(":memory:")
+        conn.execute("INSERT INTO accounts(alias,bank,kind,last4) VALUES ('m','Mandiri','main','4100')")
+        conn.execute("INSERT INTO cards(alias,bank,last4,statement_day,due_day,credit_limit) VALUES ('dbs-5685','DBS','5685',5,25,10000000)")
+        tx(conn, 1, "2026-09-30", "Transfer BI Fast ke DBS ****5685", -1_000_000)
+        tx(conn, 1, "2026-09-30", "Main Pocket Interest", 7_000)
+        tx(conn, 1, "2026-09-30", "Transfer BI Fast ke Mandiri ****4100", -50_000)
+        conn.commit()
+        s = {k: g["suggestion"] for k, g in sg.groups(conn).items()}
+        self.assertEqual(s, {"transfer bi fast ke dbs ****5685": "wajib:kartu", "main pocket interest": "bunga",
+                             "transfer bi fast ke mandiri ****4100": "transfer_internal"})
+        self.assertEqual(sg.apply_suggestions(conn), "3 kelompok dikategorikan (3 transaksi)")
+        c = mu.cashflow(conn, "2026-09")
+        self.assertEqual((c["income"], c["expenses"]), (7_000, 1_000_000))          # the bill counts, the own move does not
+
+    def test_a_card_bill_cannot_be_marked_a_move_between_own_accounts(self):
+        conn = connect(":memory:")
+        conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('m','Mandiri','main')")
+        conn.execute("INSERT INTO cards(alias,bank,last4,statement_day,due_day,credit_limit) VALUES ('mega-5855','Mega','5855',5,25,10000000)")
+        tx(conn, 1, "2026-09-30", "Transfer BI Fast ke MEGA ****5855", -2_000_000)
+        tx(conn, 1, "2026-09-30", "Transfer BI Fast ke BCA ****5855", -100_000)       # someone else's account, same four digits
+        conn.commit()
+        with self.assertRaises(ValueError) as e:
+            mu.set_category_rule(conn, "Transfer BI Fast ke MEGA ****5855", "transfer_internal")
+        self.assertIn("wajib:kartu", str(e.exception))
+        with self.assertRaises(ValueError):
+            mu.set_category(conn, 1, "transfer_internal")
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM category_rules").fetchone()[0], 0)     # nothing stored
+        self.assertIn("1 transaksi", mu.set_category_rule(conn, "Transfer BI Fast ke MEGA ****5855", "wajib:kartu"))
+        self.assertEqual(mu.set_category(conn, 2, "transfer_internal"), "transaksi 2 -> transfer_internal")
+        # a group of own moves in the owner's name that holds one card number: applying all skips it, nothing breaks
+        sg.add_owner_name(conn, "Nama Pemilik")
+        for n in ("11112222", "33334444", "12345855"):
+            tx(conn, 1, "2026-10-01", f"Transfer BI Fast ke MEGA {n} NAMA PEMILIK", -10_000)
+        conn.commit()
+        out = sg.apply_suggestions(conn)
+        self.assertTrue(out.startswith("0 kelompok dikategorikan (0 transaksi); dilewati 'transfer bi fast ke mega # nama"), out)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM transactions WHERE status='unverified'").fetchone()[0], 3)
+
+    def test_a_stored_own_move_rule_or_word_never_verifies_a_card_bill(self):
+        """A rule keyed without the number ('#') or a word such as the owner's name also matches the card's repayment."""
+        conn = connect(":memory:")
+        conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('mandiri-utama','Mandiri','main')")
+        conn.execute("INSERT INTO cards(alias,bank,last4,statement_day,due_day,credit_limit) VALUES ('mega-5855','Mega','5855',5,25,10000000)")
+        conn.execute("INSERT INTO category_rules VALUES ('transfer bi fast ke mega # nama pemilik','transfer_internal')")
+        conn.commit()
+        rows = [{"date": "2026-10-02", "description": "Transfer BI Fast ke MEGA 11112222 NAMA PEMILIK", "amount": -10_000},
+                {"date": "2026-10-03", "description": "Transfer BI Fast ke MEGA 12345855 NAMA PEMILIK", "amount": -2_000_000}]
+        mu.record_mutations(conn, "mandiri-utama", "c" * 64, "2026-10-01", "2026-10-31", None, None, rows)
+        got = [tuple(r) for r in conn.execute("SELECT amount, category, status FROM transactions ORDER BY txn_date")]
+        self.assertEqual(got, [(-10_000, "transfer_internal", "verified"), (-2_000_000, None, "unverified")])
+        bill = {"transfer bi fast ke mega # nama pemilik": "wajib:kartu"}
+        self.assertEqual({k: g["suggestion"] for k, g in sg.groups(conn).items()}, bill)
+        tx(conn, 1, "2026-10-04", "Transfer ke NAMA PEMILIK Jago", -20_000)
+        conn.commit()
+        self.assertEqual(mu.set_category_keyword(conn, "nama pemilik", "transfer_internal"),
+                         "kata kunci 'nama pemilik' -> transfer_internal; 1 transaksi dikategorikan; "
+                         "1 pembayaran kartu dilewati: kategorikan 'wajib:kartu'")
+        self.assertEqual({k: g["suggestion"] for k, g in sg.groups(conn).items()}, bill)      # the word does not override it
 
     def test_a_pocket_name_is_not_the_event(self):
         """Regression: a pocket called "Gaji Pak Darja" made pocket moves look like salary and interest like income."""
@@ -254,6 +323,8 @@ class Suggestions(unittest.TestCase):
             ("gaji pak darja: interest", 1, "bunga"),
             ("gaji pak darja: tax on interest", -1, "biaya-bank"),
             ("gaji pak darja: outgoing transfer fee", -1, "biaya-bank"),
+            ("main pocket interest", 1, "bunga"),                    # Jago: interest paid into the main pocket, not a move
+            ("main pocket tax on interest", -1, "biaya-bank"),
         ]
         for desc, sign, want in cases:
             self.assertEqual(sg.suggest_category(desc, sign * 1000, ["danuarta wiratama"]), want, desc)

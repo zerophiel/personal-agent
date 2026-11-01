@@ -42,6 +42,37 @@ def normalize(desc: str) -> str:
     return " ".join(_REF.sub("#", desc.lower()).split())[:100]
 
 
+CARD_BILL = "wajib:kartu"
+
+
+def own_cards(conn) -> list[tuple[str, str, tuple[str, ...]]]:
+    """(alias, last4, words of the bank's name) for each of the owner's cards."""
+    return [(r["alias"], r["last4"], tuple(w for w in re.split(r"[^a-z]+", r["bank"].lower()) if len(w) >= 3))
+            for r in conn.execute("SELECT alias, last4, bank FROM cards")]
+
+
+def card_paid(desc: str, cards) -> str | None:
+    """The alias of the owner's card a descriptor moves money to or from: the card's number (masked as ****NNNN, or a
+    long number ending in its last4) and its bank's name are both in the text. Without the bank's name a third party's
+    account that happens to end in the same four digits would read as a card bill."""
+    low = desc.lower()
+    ends = {m[-4:] for m in re.findall(r"\d{8,}", low)} | set(re.findall(r"[*x]{2,}(\d{4})\b", low))
+    return next((alias for alias, last4, words in cards if last4 in ends and any(w in low for w in words)), None)
+
+
+def _not_a_card_bill(conn, descs, category: str) -> None:
+    """A card repayment is the card's bill, never a move between own accounts: a card's spending reaches the bank
+    cashflow only as its repayment, so 'transfer_internal' would drop it from the month's expenses."""
+    if category != INTERNAL:
+        return
+    cards = own_cards(conn)
+    for d in descs:
+        alias = card_paid(d, cards)
+        if alias:
+            raise ValueError(f"ini pembayaran kartu {alias}, bukan pindah dana antar rekening sendiri: "
+                             f"pakai kategori '{CARD_BILL}'")
+
+
 ROUNDING_TOLERANCE = 3     # Rp: statements print cents, the rows are whole Rupiah; a diff this small is rounding
 
 
@@ -156,10 +187,13 @@ def record_mutations(conn: sqlite3.Connection, account_alias: str, file_hash: st
     reworded = _reworded(conn, acct["id"], keyed)
     new, debits = 0, []
     rules = {p: c for p, c in conn.execute("SELECT pattern, category FROM category_rules")}
+    cards = own_cards(conn)
     for i, (d, desc, amount, norm, key) in enumerate(keyed):
         if i in reworded:
             continue
         category = rules.get(norm)
+        if category == INTERNAL and card_paid(desc, cards):
+            category = None                             # a card's bill under an own-move rule ('#' hides the number): the owner decides
         cur = conn.execute(
             "INSERT OR IGNORE INTO transactions(account_id,txn_date,merchant,amount,category,status,source,"
             "dedupe_key,file_hash) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -212,9 +246,11 @@ def set_category(conn, txn_id: int, category: str) -> str:
     cat = clean_text(category, 40).lower()
     if not cat:
         raise ValueError("category kosong")
-    n = conn.execute("UPDATE transactions SET category=?, status='verified' WHERE id=?", (cat, txn_id)).rowcount
-    if n == 0:
+    row = conn.execute("SELECT merchant FROM transactions WHERE id=?", (txn_id,)).fetchone()
+    if row is None:
         raise ValueError("transaksi tidak ditemukan")
+    _not_a_card_bill(conn, [row["merchant"]], cat)
+    conn.execute("UPDATE transactions SET category=?, status='verified' WHERE id=?", (cat, txn_id))
     conn.commit()
     return f"transaksi {txn_id} -> {cat}"
 
@@ -226,10 +262,15 @@ def set_category_keyword(conn, keyword: str, category: str) -> str:
     if len(kw) < 4 or not cat:
         raise ValueError("kata kunci minimal 4 huruf dan kategori wajib")
     conn.execute("INSERT INTO category_keywords VALUES (?,?) ON CONFLICT(keyword) DO UPDATE SET category=excluded.category", (kw, cat))
-    hit = conn.execute("UPDATE transactions SET category=?, status='verified' WHERE source IN ('mutation','receipt')"
-                       " AND category IS NULL AND merged_into IS NULL AND lower(merchant) LIKE ?", (cat, f"%{kw}%")).rowcount
+    cards = own_cards(conn) if cat == INTERNAL else []
+    rows = conn.execute("SELECT id, merchant FROM transactions WHERE source IN ('mutation','receipt')"
+                        " AND category IS NULL AND merged_into IS NULL AND lower(merchant) LIKE ?", (f"%{kw}%",)).fetchall()
+    hit = [r["id"] for r in rows if not card_paid(r["merchant"], cards)]     # an own-move word (a name) skips the card bills
+    conn.executemany("UPDATE transactions SET category=?, status='verified' WHERE id=?", [(cat, i) for i in hit])
     conn.commit()
-    return f"kata kunci '{kw}' -> {cat}; {hit} transaksi dikategorikan"
+    skipped = len(rows) - len(hit)
+    return (f"kata kunci '{kw}' -> {cat}; {len(hit)} transaksi dikategorikan"
+            + (f"; {skipped} pembayaran kartu dilewati: kategorikan '{CARD_BILL}'" if skipped else ""))
 
 
 def set_category_rule(conn, merchant: str, category: str) -> str:
@@ -237,16 +278,16 @@ def set_category_rule(conn, merchant: str, category: str) -> str:
     pattern, cat = normalize(merchant), clean_text(category, 40).lower()
     if not pattern or not cat:
         raise ValueError("merchant dan category wajib")
+    rows = [r for r in conn.execute("SELECT id, merchant FROM transactions WHERE source IN ('mutation','receipt')"
+                                    " AND status='unverified' AND merged_into IS NULL").fetchall()
+            if normalize(r["merchant"]) == pattern]
+    _not_a_card_bill(conn, [pattern] + [r["merchant"] for r in rows], cat)
     conn.execute("INSERT INTO category_rules VALUES (?,?) ON CONFLICT(pattern) DO UPDATE SET category=excluded.category",
                  (pattern, cat))
-    hit = 0
-    for r in conn.execute("SELECT id, merchant FROM transactions WHERE source IN ('mutation','receipt')"
-                          " AND status='unverified' AND merged_into IS NULL").fetchall():
-        if normalize(r["merchant"]) == pattern:
-            conn.execute("UPDATE transactions SET category=?, status='verified' WHERE id=?", (cat, r["id"]))
-            hit += 1
+    for r in rows:
+        conn.execute("UPDATE transactions SET category=?, status='verified' WHERE id=?", (cat, r["id"]))
     conn.commit()
-    return f"aturan '{pattern}' -> {cat}; {hit} transaksi diperbarui"
+    return f"aturan '{pattern}' -> {cat}; {len(rows)} transaksi diperbarui"
 
 
 def list_uncategorized(conn, limit: int = 30) -> list[str]:

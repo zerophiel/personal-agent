@@ -634,7 +634,8 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
     @mcp.tool()
     @locked
     def set_category(txn_id: int, category: str) -> str:
-        """Tetapkan kategori satu transaksi (dianggap terverifikasi). Kategori 'transfer_internal' = antar rekening sendiri."""
+        """Tetapkan kategori satu transaksi (dianggap terverifikasi). Kategori 'transfer_internal' = antar rekening sendiri;
+        pembayaran kartu kredit, juga lewat transfer ke nomor kartu sendiri, = 'wajib:kartu'."""
         return mutations.set_category(conn, txn_id, category)
 
     @mcp.tool()
