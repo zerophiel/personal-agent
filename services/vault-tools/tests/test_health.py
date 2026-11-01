@@ -476,6 +476,52 @@ class LivingMoneyPace(unittest.TestCase):
         self.assertEqual(tools.get_threshold(conn, "living_leftover"), 4_718_116)
 
 
+class PlanInForce(unittest.TestCase):
+    """Regression 2026-11-02 (found rehearsing the 30 Nov payday): the daily money, a balance correcting the month and the
+    open transfers read the NEWEST stored plan. A plan asked for the coming payday, and every plan call from 7 days after
+    a payday (the daily 06:30 Notion sync among them), stored a plan for 30 Nov: the October month went silent."""
+
+    def world(self):
+        conn = planned()
+        conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('jago-harian','Jago','main')")
+        tools.upsert_expense(conn, "les", "les-guru", 500_000, 1)     # a transfer of the 30 Oct plan, not marked done
+        tools.generate_payday_plan(conn, TODAY, payday=date(2026, 10, 30))
+        spend(conn, 100_000)
+        return conn
+
+    def test_a_plan_asked_for_the_coming_payday_leaves_the_month_alone(self):
+        conn = self.world()
+        day = date(2026, 11, 5)          # the day of the purchase, inside the payday's week
+        before = hl.spending_pace(conn, day)
+        tools.generate_payday_plan(conn, day, payday=date(2026, 11, 30))       # "rencana gajian 30 Nov gimana?"
+        p = hl.spending_pace(conn, day)
+        self.assertEqual((p["payday"], p["spent"], p["allowance"]), ("2026-10-30", 100_000, before["allowance"]))
+        msg = tools.record_account_balance(conn, day, "mandiri-utama", 2_000_000)
+        self.assertIn("Transfer gajian yang belum tercatat selesai: les-guru Rp 500.000", msg)
+        self.assertNotIn("Angka ini hanya benar bila", msg)
+
+    def test_plan_calls_a_week_after_the_payday_leave_the_month_alone(self):
+        conn = self.world()
+        tools.generate_payday_plan(conn, date(2026, 11, 7))     # the 06:30 sync on 7 Nov: current_payday is 30 Nov from then
+        p = hl.spending_pace(conn, TODAY)
+        self.assertEqual((p["payday"], p["spent"]), ("2026-10-30", 100_000))
+        self.assertEqual(tools.stored_plan(conn, date(2026, 11, 30))["payday"], "2026-11-30")     # the sync did store it
+        msg = tools.record_account_balance(conn, TODAY, "jago-harian", 9_000_000)
+        self.assertNotIn("Belum ada rencana gajian yang berjalan", msg)
+        p = hl.spending_pace(conn, TODAY)
+        self.assertEqual((p["payday"], p["remaining"]), ("2026-10-30", 9_000_000))
+        self.assertIsNotNone(p["reading"])
+        # on the payday the new month starts with the plan of that payday, never with the last one's
+        tools.generate_payday_plan(conn, date(2026, 11, 30))
+        self.assertEqual(hl.spending_pace(conn, date(2026, 11, 30))["payday"], "2026-11-30")
+
+    def test_without_a_plan_for_the_payday_there_is_no_month(self):
+        conn = self.world()
+        self.assertIsNone(hl.spending_pace(conn, date(2026, 11, 30)))      # the 30 Oct plan's month has ended
+        self.assertIsNone(hl.spending_pace(conn, date(2026, 10, 29)))      # before any stored payday
+        self.assertIsNone(tools.plan_in_force(conn, date(2026, 10, 29)))
+
+
 class Budgets(unittest.TestCase):
     def test_thresholds_and_exact_100_percent(self):
         for spent, status in ((790_000, "ok"), (800_000, "watch"), (1_000_000, "watch"), (1_000_001, "over")):

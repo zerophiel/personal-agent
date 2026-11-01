@@ -550,13 +550,13 @@ def spending_pace(conn, today: date) -> dict | None:
     unrecorded (a transfer bigger than the errand it paid for) adds to the month, unrecorded spending counts as spent.
     No per-day figure and no comparison with the days gone by: the daily money also pays monthly bills (electricity,
     phone, water), so it is not spent evenly."""
-    row = conn.execute("SELECT snapshot_json FROM plans ORDER BY id DESC LIMIT 1").fetchone()
-    if row is None:
+    from .tools import plan_in_force   # local import: tools -> (lazy) health
+    snap = plan_in_force(conn, today)
+    if snap is None:
         return None
-    snap = json.loads(row["snapshot_json"])
     payday, nxt = date.fromisoformat(snap["payday"]), date.fromisoformat(snap["next_payday"])
-    if not payday <= today < nxt:
-        return None                                   # the plan is for another window
+    if not today < nxt:
+        return None                                   # the plan is for another window (no plan stored for this payday yet)
     allowance, held = living_money(snap), snap.get("living_leftover") or 0
     before = (_th(conn, "living_leftover_spent", 0) or 0
               if held and _th(conn, "living_leftover_payday") == int(payday.strftime("%Y%m%d")) else 0)

@@ -1059,12 +1059,27 @@ def _reported(r) -> str:
     return f"{format_idr(r['balance'])}, dilaporkan {r['as_of']} pukul {r['at'][11:16]} WIB"
 
 
+def plan_in_force(conn, today: date) -> dict | None:
+    """The stored plan of the latest payday on or before `today` (its newest row): the plan whose month `today` is in.
+    Never just the newest row: a plan asked for a coming payday is stored too, and from PAYDAY_LOOKBACK_DAYS after a
+    payday every plan call plans the coming one (2026-11-02: the daily 06:30 Notion sync would have hidden the month's
+    plan from 7 Nov)."""
+    row = conn.execute("SELECT snapshot_json FROM plans WHERE payday <= ? ORDER BY payday DESC, id DESC LIMIT 1",
+                       (today.isoformat(),)).fetchone()
+    return json.loads(row["snapshot_json"]) if row else None
+
+
+def stored_plan(conn, payday: date) -> dict | None:
+    """The newest stored plan of `payday`."""
+    row = conn.execute("SELECT snapshot_json FROM plans WHERE payday=? ORDER BY id DESC LIMIT 1", (payday.isoformat(),)).fetchone()
+    return json.loads(row["snapshot_json"]) if row else None
+
+
 def _living_balance(conn, today: date, report_id: int) -> str:
     """A balance of the daily account becomes the month's anchor (health.living_anchor): the report, and the last
     transaction recorded at that moment, so what is recorded later is told apart from what the balance already shows."""
-    row = conn.execute("SELECT snapshot_json FROM plans ORDER BY id DESC LIMIT 1").fetchone()
-    snap = json.loads(row["snapshot_json"]) if row else None
-    if snap is None or not snap["payday"] <= today.isoformat() < snap["next_payday"]:
+    snap = plan_in_force(conn, today)
+    if snap is None or not today.isoformat() < snap["next_payday"]:
         return "Belum ada rencana gajian yang berjalan, jadi uang harian belum dikoreksi dengan saldo ini."
     lt = snap.get("living_transfer") or {}
     if lt.get("amount") and not conn.execute("SELECT 1 FROM plan_progress WHERE payday=? AND item=?",
@@ -1131,9 +1146,8 @@ def _open_transfers(conn, today: date, alias: str) -> list[tuple[str, int, int]]
     (none once a transfer has started): auto-debits apart (autodebit_check counts them) and those paid into `alias` itself
     (a payee with its bank and last digits: the emergency fund's dana-darurat is the jago-darurat account); None without a
     plan for the current payday."""
-    row = conn.execute("SELECT snapshot_json FROM plans ORDER BY id DESC LIMIT 1").fetchone()
-    snap = json.loads(row["snapshot_json"]) if row else None
-    if snap is None or snap["payday"] != current_payday(today).isoformat():
+    snap = stored_plan(conn, current_payday(today))
+    if snap is None:
         return None
     acct = conn.execute("SELECT bank, last4 FROM accounts WHERE alias=?", (alias,)).fetchone()
     own = {alias} | {r["alias"] for r in conn.execute("SELECT alias FROM payee_secrets WHERE kind='account' AND lower(bank)=lower(?)"

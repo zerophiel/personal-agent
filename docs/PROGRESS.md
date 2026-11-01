@@ -562,6 +562,23 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   on the VPS but not in this checkout": `make applied-pull`, push, deploy again (`docs/RUNBOOK.md`, Applier). After an
   applied change to front's `config.yaml` or `SOUL.md`: `/new` to `@danoefront_agent`.
 
+## The 30 Nov payday rehearsed; the plan in force is no longer the newest stored row (2026-11-02 night, owner: "Mulai dari sekarang sampai besok pagi jam 10 saya berikan kamu ijin otoritas penuh, jadi kerjakan project ini, semua keputusan saya percayakan ke kamu")
+- Rehearsal of the first payday with admin fees (`biaya_admin_mulai` 20261130) on copies of the live ledger with the
+  deployed code (same hash as the repo), the /rincian numbers from a stub vault: (A) the ledger as it is, planned on
+  30 Nov; (A2) A after a reported leftover; (B) the 30 Oct plan as the bot makes it today, without and with fees;
+  (C) each card's latest bill repeated a month later. All four: transfers + fees + cash kept = salary, `plan_errors`
+  empty, one fee per destination (a card's minimum and rest together), none for the auto-debits and the bank-app
+  menu, the living money's fee kept with it. B without fees equals the stored 30 Oct plan; with fees only the last
+  card's rest shrinks, by the fees, and the cash kept stays the living money. C shows the BCA bill due 28 Nov
+  (Saturday), before the 30 Nov payday, like 28 Oct: its minimum comes from the balance on hand.
+- Found (latent since the bot went live): three readers took the newest row of `plans` as the plan in force:
+  `spending_pace` (daily money and the purchase alerts), `_living_balance` (a daily-account balance correcting the
+  month) and `_open_transfers` (the auto-debit check of a reported balance). Any plan for another payday stored later
+  hid the plan in force: a plan asked for a coming payday (row 41, for 30 Nov, was one), and every plan call from 7
+  days after a payday, when `current_payday` turns to the coming one (`PAYDAY_LOOKBACK_DAYS`). `pa-notion.timer` plans
+  daily at 06:30 WIB, so on 7 Nov the daily money would have gone silent until 30 Nov ("Belum ada rencana gajian yang
+  berjalan" on a balance reading). The writer is right (one row per payday per change); only the readers change.
+
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
 2. Closing the pot gap without the children's needs: games (owner's own), apps not marked `wajib`, or talking to the friend.
