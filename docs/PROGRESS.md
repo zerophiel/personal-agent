@@ -520,7 +520,9 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   +5.603, expenses 41.029.662 -> 46.619.524 (+5.588.742 cards, +1.120 tax); October unchanged; living cost August
   4.771.710 -> 4.773.337, September 7.546.005 -> 7.547.125 (the tax; `living_reserve` stays the owner's 7.546.005);
   of the 411 uncategorized groups (643 rows, all months) no suggestion changes; the four fixed rules refuse
-  `transfer_internal`; no own-move rule left whose key also holds a card repayment. A content dry run against the VPS:
+  `transfer_internal`; no own-move rule left whose key also holds a card repayment; the audit is the same before and
+  after (0 bad, 0 warn, 3 info); no account shares its last four digits with a card. Through the MCP server the
+  refusal reaches the bot as the tool's error text, as `set_threshold`'s does. A content dry run against the VPS:
   only the four vault-tools files differ.
 - `deploy.sh` (on the owner's go-ahead): checkout clean and pushed, the idle check, `services/vault-tools` synced onto
   its twin and rebuilt, the fix, the vault restarted when idle, `verify.py`. Not deployed yet.
