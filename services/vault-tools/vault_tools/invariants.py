@@ -1,10 +1,10 @@
 """Self-checks on every payday plan and simulation: properties that hold for ANY input when the arithmetic is right.
 A violation can only be a bug, so the numbers are refused (CalculationError) instead of being shown to the owner.
 
-Plan: what is transferred plus the cash kept equals the salary; every amount is a positive whole rupiah; nothing is paid
-above a bill; the living money is never used for saving-type items (emergency fund, pot, card balance above the minimum,
-savings); with a leftover the owner reported, salary part + leftover = the living money; a shortfall is never reported
-for money that was paid.
+Plan: what is transferred plus the bank's admin fees plus the cash kept equals the salary; every amount is a positive whole
+rupiah; a fee belongs to one paid item (or the living money moved), once; nothing is paid above a bill; the living money is
+never used for saving-type items (emergency fund, pot, card balance above the minimum, savings); with a leftover the owner
+reported, salary part + leftover = the living money; a shortfall is never reported for money that was paid.
 Simulation: per cycle nothing is negative and no more than the bill is paid; the card balances add up over the whole run
 (open bills + new charges + gaps + interest - payments - payments from outside the salary = what is left); a pot never
 exceeds its target."""
@@ -25,13 +25,24 @@ def _whole(x) -> bool:
 def plan_errors(snap: dict, bills: dict[str, int] | None = None) -> list[str]:
     errs = []
     paid = sum(t["amount"] for t in snap["transfers"])
-    if paid + snap["cash_to_hold"] != snap["salary"]:
-        errs.append(f"transfer {paid} + kas {snap['cash_to_hold']} != gaji {snap['salary']}")
+    fees = snap.get("fees") or []      # plans stored before admin fees were counted have none
+    fee = sum(f["amount"] for f in fees)
+    if paid + fee + snap["cash_to_hold"] != snap["salary"]:
+        errs.append(f"transfer {paid} + biaya admin {fee} + kas {snap['cash_to_hold']} != gaji {snap['salary']}")
     if snap["cash_to_hold"] < 0:
         errs.append("kas ditahan negatif")
     for t in snap["transfers"]:
         if not _whole(t["amount"]) or t["amount"] <= 0:
             errs.append(f"transfer {t['to_alias']} tidak valid: {t['amount']!r}")
+    lt = snap.get("living_transfer") or {}
+    paid_to = {t["to_alias"] for t in snap["transfers"]} | ({lt.get("to_alias")} if lt.get("amount") else set())
+    for f in fees:
+        if not _whole(f["amount"]) or f["amount"] <= 0:
+            errs.append(f"biaya admin {f['to_alias']} tidak valid: {f['amount']!r}")
+        if f["to_alias"] not in paid_to:
+            errs.append(f"biaya admin {f['to_alias']} tanpa transfer")
+    if len({f["to_alias"] for f in fees}) != len(fees):
+        errs.append("biaya admin tercatat dua kali untuk satu tujuan")
     for u in snap["unfunded"]:
         if not _whole(u["amount"]) or u["amount"] <= 0:
             errs.append(f"belum terdanai {u['to_alias']} tidak valid: {u['amount']!r}")
@@ -58,7 +69,7 @@ def plan_errors(snap: dict, bills: dict[str, int] | None = None) -> list[str]:
 def simulation_errors(r: dict) -> list[str]:
     errs = []
     for row in r["rows"]:
-        for key in ("cash", "due", "paid", "balance", "interest", "ef", "pot", "free", "short", "new", "outside"):
+        for key in ("cash", "due", "paid", "balance", "interest", "ef", "pot", "free", "short", "new", "outside", "fees", "once"):
             if not _whole(row[key]) or row[key] < 0:
                 errs.append(f"{row['month']}: {key} tidak valid: {row[key]!r}")
         if row["paid"] > row["due"]:

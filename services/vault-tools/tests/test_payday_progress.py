@@ -329,7 +329,7 @@ class Migration(unittest.TestCase):
                                " DROP TABLE fund_reports; PRAGMA user_version = 12;")
             conn.close()
             conn = connect(path)
-            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 13)
+            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 14)
             got = [tuple(r) for r in conn.execute(
                 "SELECT s.statement_date, p.paid_on, p.amount FROM card_payments p JOIN statements s ON s.id = p.statement_id"
                 " ORDER BY s.statement_date, p.amount")]

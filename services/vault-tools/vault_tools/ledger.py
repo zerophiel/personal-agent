@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 WIB = timezone(timedelta(hours=7))
 
-SCHEMA_VERSION = 13  # 13: card_payments, debt_payments, plan_progress, fund_reports; 12: change_log, balance_reports, feature_requests.resolution; 11: subscriptions.ends/essential, sinking_funds.pace/due_payday; 10: card_lines, doc_files, statements.lines_status/lines_diff, sinking_funds.low_*; 9: card_installments, skipped_files; 8: statements.paid_amount; 7: cards.interest_bp_month; 6: transactions.merged_into, net_snapshots; 5: debts.pay_method/pay_to_alias/debit_account_alias; 2: cards.pay_method/pay_to_alias; 3: transaction dedupe, mutation_files, category_rules; 4: sinking_funds
+SCHEMA_VERSION = 14  # 14: one_off_bills; 13: card_payments, debt_payments, plan_progress, fund_reports; 12: change_log, balance_reports, feature_requests.resolution; 11: subscriptions.ends/essential, sinking_funds.pace/due_payday; 10: card_lines, doc_files, statements.lines_status/lines_diff, sinking_funds.low_*; 9: card_installments, skipped_files; 8: statements.paid_amount; 7: cards.interest_bp_month; 6: transactions.merged_into, net_snapshots; 5: debts.pay_method/pay_to_alias/debit_account_alias; 2: cards.pay_method/pay_to_alias; 3: transaction dedupe, mutation_files, category_rules; 4: sinking_funds
 
 
 def _money(col: str, nullable: bool = False) -> str:
@@ -118,6 +118,13 @@ CREATE TABLE IF NOT EXISTS plan_progress (   -- a transfer of a payday's plan th
   PRIMARY KEY (payday, item));
 CREATE TABLE IF NOT EXISTS fund_reports (   -- emergency fund / pot balances as the owner read them: a plan uses the last one BEFORE its payday
   id INTEGER PRIMARY KEY, fund TEXT NOT NULL, reported_on TEXT NOT NULL, {_money('balance')} NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS one_off_bills (   -- a bill paid once (arrears, a repair): planned by the payday it was recorded before
+  id INTEGER PRIMARY KEY, alias TEXT NOT NULL UNIQUE, name TEXT NOT NULL, {_money('amount')} NOT NULL CHECK (amount > 0),
+  due_date TEXT NOT NULL, method TEXT NOT NULL DEFAULT 'transfer' CHECK (method IN ('transfer','app_menu')),
+  pay_to_alias TEXT,                    -- payee alias of the number it is paid to (registered with /rekening or /va)
+  status TEXT NOT NULL DEFAULT 'terbuka' CHECK (status IN ('terbuka','lunas','batal')), paid_on TEXT, note TEXT,
+  recorded_on TEXT NOT NULL,            -- the server's day it was first recorded: which payday plans have it
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS subscriptions (
   alias TEXT PRIMARY KEY, name TEXT NOT NULL, {_money('amount')} NOT NULL,   -- IDR per month (USD ones: approximate)
   source TEXT NOT NULL,                 -- card or account alias it is charged to

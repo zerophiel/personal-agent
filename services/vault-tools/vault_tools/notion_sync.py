@@ -131,6 +131,9 @@ def render_plan(conn, today: date) -> tuple[str, list[dict]]:
         blocks += [heading("Pengingat")] + [bullet(r) for r in snap["reminders"]]
     if snap.get("advice"):
         blocks += [heading("Saran")] + [bullet(a) for a in snap["advice"]]
+    fees = tools.fee_parts(snap)
+    if fees:
+        blocks.append(para(f"Biaya admin bank (perkiraan) {format_idr(fees[0])}: {fees[1]}; dipotong bank di luar jumlah pembayaran."))
     blocks += [para(f"Kas ditahan {format_idr(snap['cash_to_hold'])}.")] + [para(f"Peringatan: {w}") for w in snap["warnings"]]
     return f"Rencana gajian {snap['payday']}", blocks
 

@@ -103,8 +103,13 @@ def build(conn, vault, snap: dict) -> str:
     unf = (snap.get("progress") or {}).get("unfunded") or [
         {"amount": u["amount"], "covered": 0} for u in snap.get("unfunded", [])]
     short, covered = sum(u["amount"] for u in unf), sum(u["covered"] for u in unf)
+    fees = snap.get("fees") or []      # the bank's admin fee per transfer, estimated (plans made before fees were counted: none)
+    fee = sum(f["amount"] for f in fees)
+    fee_left = sum(f["amount"] for f in fees if not (state.get(f["to_alias"]) or {}).get("done"))
     out.append(f"*🧾 Total transfer: {format_idr(total)}*"
                + (f"\n_Sudah tercatat dibayar {format_idr(paid)}; sisa yang belum {format_idr(total - paid)}_" if paid else "")
+               + (f"\n_Biaya admin bank perkiraan {format_idr(fee)}, dipotong per transfer di luar total ini"
+                  + (f"; untuk yang belum {format_idr(fee_left)}" if fee_left != fee else "") + "_" if fee else "")
                + (f"\n_Belum terdanai (tidak termasuk): {format_idr(short)}"
                   + (f"; {format_idr(covered)} di antaranya sudah dibayar dengan uang di luar gaji, sisa {format_idr(short - covered)}"
                      if covered else "") + "_" if short else ""))

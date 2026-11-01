@@ -166,6 +166,10 @@ def _rencana(conn, today: date) -> str:
     choices = [a for a in snap.get("advice", []) if a.startswith(("Opsi", "Jika tidak"))]
     if choices:
         out.append(f"💡 {b('Pilihan')}\n" + "\n".join(f"• {e(pretty(a, conn, banks))}" for a in choices))
+    fees = tools.fee_parts(snap)
+    if fees:
+        out.append(f"🏦 {b('Biaya admin bank (perkiraan)')}: {b(format_idr(fees[0]))}\n"
+                   f"<i>{e(fees[1])}; dipotong bank di luar jumlah di atas, sudah dihitung dalam rencana</i>")
     held = snap.get("living_leftover") or 0
     if held:
         foot = (f"💵 {b('Uang tunai harian')}: {b(format_idr(living_money(snap)))}\n    {e(format_idr(snap['cash_to_hold']))} dari gaji + "

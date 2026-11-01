@@ -44,7 +44,7 @@ MCP_TOOL_NAMES = ("upsert_card", "upsert_debt", "upsert_expense", "set_threshold
                   "record_card_installments", "card_installments_status", "pending_statements", "skip_statement_file",
                   "upsert_subscription", "subscriptions_status", "set_category_keyword", "link_card_payees", "ringkasan_data", "simulasi_skenario", "catat_usulan", "atur_jadwal_pot", "belanja_kartu",
                   "saldo_pot", "dana_darurat", "periksa_data", "sisa_uang_harian", "saldo_rekening", "daftar_belanja",
-                  "ubah_belanja", "hapus_belanja", "cicilan_dibayar", "transfer_selesai", "status_gajian")
+                  "ubah_belanja", "hapus_belanja", "cicilan_dibayar", "transfer_selesai", "status_gajian", "tagihan_sekali")
 
 
 class Installment(BaseModel):
@@ -225,8 +225,10 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
     @mcp.tool()
     @locked
     def set_threshold(key: str, value: int) -> str:
-        """Set ambang/angka tetap, mis. net_salary, cash_buffer, dsr_max_bp."""
-        if key in ("reread_open_until", "ingest_events_cursor", "emergency_saved") or key.startswith(("living_reserve_override", "living_leftover", "living_balance")):
+        """Set ambang/angka tetap, mis. net_salary, cash_buffer, dsr_max_bp. Biaya admin bank (perkiraan, dari pemilik):
+        biaya_admin_kartu (bayar kartu ke nomor kartu), biaya_admin_transfer (transfer lain), biaya_admin:<alias pos> untuk
+        satu pos (0 = tanpa biaya)."""
+        if key in ("reread_open_until", "ingest_events_cursor", "emergency_saved", "biaya_admin_mulai") or key.startswith(("living_reserve_override", "living_leftover", "living_balance")):
             raise ValueError("kunci ini diatur oleh sistem, bukan lewat chat")
         return tools.set_threshold(conn, key, value)
 
@@ -539,22 +541,39 @@ def create_app(db_path: str, master_key: bytes, mcp_token: str, internal_token: 
 
     @mcp.tool()
     @locked
-    def cicilan_dibayar(alias: str, jumlah: int, cara: str = "manual", jatuh_tempo: str | None = None) -> str:
+    def cicilan_dibayar(alias: str, jumlah: int, cara: str = "manual", jatuh_tempo: str | None = None, batal: bool = False) -> str:
         """Catat SATU angsuran utang (cicilan mobil, SPayLater, dll.) yang SUDAH dibayar: cara 'manual' bila pemilik
         membayar sendiri (sering lebih awal dari autodebet), 'autodebit' bila bank sudah memotongnya. jumlah = angsuran
         penuh. jatuh_tempo (YYYY-MM-DD) opsional: tanpa itu, manual = angsuran berikutnya yang belum tercatat, autodebit =
         yang terakhir jatuh tempo. Sisa angsuran dan sisa utang turun sendiri, dan rencana serta pengingat autodebet tidak
-        menghitungnya lagi. Bila pemilik sudah bilang caranya, jangan tanyakan lagi; jangan ubah tenor lewat upsert_debt."""
+        menghitungnya lagi. Bila pemilik sudah bilang caranya, jangan tanyakan lagi; jangan ubah tenor lewat upsert_debt.
+        batal=true: membatalkan catatan yang salah (jumlah = yang tercatat; tanpa jatuh_tempo: catatan terakhir), setelah
+        pemilik setuju; sisa angsuran dan sisa utang kembali seperti sebelumnya."""
+        if batal:
+            return tools.undo_debt_payment(conn, today(), alias, jumlah, jatuh_tempo)
         return tools.record_debt_payment(conn, today(), alias, jumlah, cara, jatuh_tempo)
 
     @mcp.tool()
     @locked
     def transfer_selesai(tujuan: list[str] | None = None, semua: bool = False, batal: bool = False) -> str:
         """Tandai transfer rencana gajian yang SUDAH dilakukan pemilik, selain kartu dan cicilan: pengeluaran tetap
-        (sekolah, les, IPL), dana darurat, pot, uang harian. tujuan = alias seperti di status_gajian; semua=true untuk
-        semua yang belum; batal=true menghapus tanda. Kartu dicatat dengan record_card_payment, cicilan dengan
-        cicilan_dibayar."""
+        (sekolah, les, IPL), dana darurat, pot, uang harian, tagihan sekali bayar (jadi lunas). tujuan = alias seperti di
+        status_gajian; semua=true untuk semua yang belum; batal=true menghapus tanda. Kartu dicatat dengan
+        record_card_payment, cicilan dengan cicilan_dibayar."""
         return tools.mark_transfers_done(conn, today(), [t for t in tujuan or [] if t] or None, semua, batal)
+
+    @mcp.tool()
+    @locked
+    def tagihan_sekali(aksi: str, alias: str | None = None, nama: str | None = None, jumlah: int | None = None,
+                       jatuh_tempo: str | None = None, bayar_ke: str | None = None, cara: str | None = None,
+                       tanggal: str | None = None, catatan: str | None = None) -> str:
+        """Tagihan yang dibayar SEKALI, di luar langganan dan pengeluaran tetap (mis. tunggakan, perbaikan). aksi:
+        'catat' (alias, nama, jumlah, jatuh_tempo YYYY-MM-DD, bayar_ke = alias tujuan yang sudah didaftarkan, cara
+        transfer|app_menu; alias yang sama dan masih terbuka = ubah), 'lunas' (tanggal bayar bila bukan hari ini), 'buka'
+        (batalkan tanda lunas/batal), 'batal' (tidak jadi dibayar), 'daftar'. Jawabannya menyebut rencana gajian mana
+        yang memuatnya; sampaikan apa adanya. Yang SUDAH dibayar saat diceritakan bukan tagihan: catat sebagai belanja
+        (record_expense, kategori sekali:<nama>)."""
+        return tools.one_off_bills(conn, today(), aksi, alias, nama, jumlah, jatuh_tempo, bayar_ke, cara, tanggal, catatan)
 
     @mcp.tool()
     @locked

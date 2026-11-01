@@ -6,15 +6,15 @@ import calendar
 import json
 import os
 import sqlite3
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import date, datetime, timedelta, timezone
 
 import holidays as _holidays
 
-from . import names
+from . import changelog, names, one_off
 from .money import check_idr, format_idr
 from .health import LIVING_ACCOUNT, cash_spent, spending_pace
-from .payday import Obligation, Plan, build_plan, last_working_day, living_money, next_payday
+from .payday import Obligation, Plan, build_plan, last_working_day, living_money, next_payday, window_payday
 
 
 def _cuti_bersama() -> frozenset[date]:
@@ -322,6 +322,10 @@ def upsert_expense(conn, alias: str, payee_alias: str, amount: int, due_day: int
 
 def set_threshold(conn, key: str, value: int) -> str:
     check_idr(value)
+    if key == "biaya_admin_mulai":
+        date.fromisoformat(_ymd(value))      # a day, YYYYMMDD
+    elif key.startswith("biaya_admin") and not 0 <= value <= ADMIN_FEE_MAX:     # a fee plan items are paid with
+        raise ValueError(f"biaya admin: 0 sampai {format_idr(ADMIN_FEE_MAX)} per pembayaran (perkiraan dari pemilik)")
     conn.execute("INSERT INTO thresholds(key,value) VALUES (?,?)"
                  " ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
     conn.commit()
@@ -841,6 +845,62 @@ def sinking_status(conn, today: date, alias: str | None = None) -> str:
     return "\n".join(out)
 
 
+# ---- the bank's admin fees: paid with each payment from the salary account ------------------------------------------
+# Usulan #4 (31 Oct 2026): every payment from the salary account costs a fee the plans did not count (Rp 7.500 per card
+# payment, Rp 6.500 per other transfer; the 30 Oct balances showed the 7.500), so the account ran short of what the plan
+# said. The owner sets the amounts (estimated); the plan pays each fee with its payment.
+
+ADMIN_FEE_MAX = 100_000
+
+
+def fees_on(conn, payday: date) -> bool:
+    """Admin fees count from the payday biaya_admin_mulai (YYYYMMDD): a plan made before keeps the numbers it was paid by."""
+    start = get_threshold(conn, "biaya_admin_mulai")
+    return start is None or int(payday.strftime("%Y%m%d")) >= start
+
+
+def admin_fee(conn, alias: str, method: str, pay_to: str | None) -> tuple[int, str]:
+    """(fee, kind) of paying plan item `alias`: a transfer to a card number costs biaya_admin_kartu, any other transfer
+    biaya_admin_transfer, a bank-app menu or an auto-debit nothing; biaya_admin:<alias> sets one item's fee (0: none)."""
+    card = bool(pay_to) and conn.execute("SELECT 1 FROM payee_secrets WHERE alias=? AND kind='card'", (pay_to,)).fetchone() is not None
+    kind = "kartu" if card else "transfer"
+    own = get_threshold(conn, f"biaya_admin:{alias}")
+    if own is not None:
+        return own, kind
+    if method != "transfer":
+        return 0, kind
+    return get_threshold(conn, "biaya_admin_kartu" if card else "biaya_admin_transfer", 0) or 0, kind
+
+
+def _with_fee(conn, o: Obligation) -> Obligation:
+    fee, kind = admin_fee(conn, o.payee_alias, o.method, o.pay_to)
+    return replace(o, fee=fee, fee_kind=kind) if fee else o
+
+
+def living_fee(conn, payday: date) -> int:
+    """The fee of moving the living money to the daily account (none without its number: the money stays put)."""
+    daily = _payee(conn, LIVING_PAYEE)
+    return admin_fee(conn, LIVING_PAYEE, "transfer", daily)[0] if daily and fees_on(conn, payday) else 0
+
+
+def fee_estimate(conn) -> int:
+    """The admin fees of a whole payday, for cycles the simulation has no plan for: one per fixed cost, instalment paid by
+    transfer, card with a bill now, pot and the emergency fund, and the living money."""
+    total = sum(admin_fee(conn, r["payee_alias"], "transfer", r["payee_alias"])[0]
+                for r in conn.execute("SELECT DISTINCT payee_alias FROM fixed_expenses"))
+    total += sum(admin_fee(conn, r["alias"], r["pay_method"] or "transfer", r["pay_to_alias"])[0]
+                 for r in conn.execute("SELECT alias, pay_method, pay_to_alias FROM debts") if r["pay_method"] != "autodebit")
+    total += sum(admin_fee(conn, r["alias"], r["pay_method"], r["pay_to_alias"])[0]
+                 for r in conn.execute("SELECT c.alias, c.pay_method, c.pay_to_alias FROM cards c JOIN statements s ON s.card_id = c.id"
+                                       " WHERE s.total_due > 0 AND s.id = (SELECT id FROM statements WHERE card_id = c.id"
+                                       " ORDER BY statement_date DESC, id DESC LIMIT 1)"))
+    total += sum(admin_fee(conn, r["alias"], "transfer", r["pool_pay_to"])[0] for r in conn.execute("SELECT alias, pool_pay_to FROM sinking_funds"))
+    if get_threshold(conn, "emergency_target"):
+        total += admin_fee(conn, EMERGENCY_PAYEE, "transfer", emergency_destination(conn))[0]
+    daily = _payee(conn, LIVING_PAYEE)
+    return total + (admin_fee(conn, LIVING_PAYEE, "transfer", daily)[0] if daily else 0)
+
+
 # ---- the ledger as it stood before a payday --------------------------------------------------------------------------
 # A payday's plan is made from the ledger as it stood BEFORE that payday. What the owner pays out of that salary (card bills,
 # instalments paid ahead of time, deposits) is the plan being carried out: it shows as progress against the same plan, never
@@ -908,6 +968,11 @@ def collect_obligations(conn, payday: date, nxt: date, holidays=()) -> list[Obli
     for r in conn.execute("SELECT payee_alias, amount, due_day FROM fixed_expenses"):
         for d in due_dates_in_window(r["due_day"], payday, nxt):
             obs.append(Obligation("fixed", r["payee_alias"], d, r["amount"], pay_to=r["payee_alias"]))
+    for b in one_off.for_plan(conn, payday, nxt):     # bills paid once, recorded before this payday
+        obs.append(Obligation("oneoff", b["alias"], date.fromisoformat(b["due_date"]), b["amount"], method=b["method"],
+                              pay_to=b["pay_to_alias"]))
+    if fees_on(conn, payday):    # savings have no destination number (set aside by the owner): no fee is assumed
+        obs = [o if o.kind == "saving" else _with_fee(conn, o) for o in obs]
     return obs
 
 
@@ -1045,13 +1110,15 @@ def record_account_balance(conn, today: date, alias: str, balance: int) -> str:
         if todo is None:
             out += " Angka ini hanya benar bila semua transfer gajian sudah dilakukan; bila belum, laporkan lagi setelah transfer."
         elif todo:   # named and counted, so the bot does not take them off itself (salary money sits in more than one account)
-            total = sum(v for _, v in todo)
+            fee = sum(f for _, _, f in todo)
+            total = sum(v for _, v, _ in todo) + fee
 
             def after(need: int) -> str:
                 free = balance - need
                 return (f"sesudahnya yang bisa dipakai {format_idr(free - total)}" if free >= total else
                         f"saldonya KURANG {format_idr(total - free)} untuk itu")
-            out += (" Transfer gajian yang belum tercatat selesai: " + "; ".join(f"{a} {format_idr(v)}" for a, v in todo)
+            out += (" Transfer gajian yang belum tercatat selesai: " + "; ".join(f"{a} {format_idr(v)}" for a, v, _ in todo)
+                    + (f"; ditambah biaya admin perkiraan {format_idr(fee)}" if fee else "")
                     + (f". Bila dibayar dari rekening ini: bila autodebet hari ini BELUM terpotong, {after(check['need'])}; bila "
                        f"SUDAH terpotong, {after(check['need_if_debited'])}." if check["due_today"] else
                        f". Bila dibayar dari rekening ini, {after(check['need'])}.")
@@ -1059,10 +1126,11 @@ def record_account_balance(conn, today: date, alias: str, balance: int) -> str:
     return out
 
 
-def _open_transfers(conn, today: date, alias: str) -> list[tuple[str, int]] | None:
-    """The current payday plan's transfers not recorded as done that could leave `alias`: auto-debits apart (autodebit_check
-    counts them) and those paid into `alias` itself (a payee with its bank and last digits: the emergency fund's dana-darurat
-    is the jago-darurat account); None without a plan for the current payday."""
+def _open_transfers(conn, today: date, alias: str) -> list[tuple[str, int, int]] | None:
+    """The current payday plan's transfers not recorded as done that could leave `alias`, with the admin fee still to come
+    (none once a transfer has started): auto-debits apart (autodebit_check counts them) and those paid into `alias` itself
+    (a payee with its bank and last digits: the emergency fund's dana-darurat is the jago-darurat account); None without a
+    plan for the current payday."""
     row = conn.execute("SELECT snapshot_json FROM plans ORDER BY id DESC LIMIT 1").fetchone()
     snap = json.loads(row["snapshot_json"]) if row else None
     if snap is None or snap["payday"] != current_payday(today).isoformat():
@@ -1071,7 +1139,7 @@ def _open_transfers(conn, today: date, alias: str) -> list[tuple[str, int]] | No
     own = {alias} | {r["alias"] for r in conn.execute("SELECT alias FROM payee_secrets WHERE kind='account' AND lower(bank)=lower(?)"
                                                       " AND last4=?", (acct["bank"], acct["last4"]))}
     into = own | {t["to_alias"] for t in snap["transfers"] if t.get("pay_to") in own}
-    return [(it["to"], it["planned"] - it["done"]) for it in payday_progress(conn, snap)["items"]
+    return [(it["to"], it["planned"] - it["done"], 0 if it["done"] else it["fee"]) for it in payday_progress(conn, snap)["items"]
             if it["method"] != "autodebit" and it["to"] not in into and it["planned"] > it["done"]]
 
 
@@ -1083,6 +1151,9 @@ def plan_to_dict(plan: Plan) -> dict:
     d["transfers"] = [conv(t) for t in d["transfers"]]
     d["unfunded"] = [conv(u) for u in d["unfunded"]]
     d["warnings"] = list(plan.warnings)
+    d["fees"] = [conv(f) for f in d["fees"]]
+    if not d["fees"]:     # a plan without admin fees keeps the snapshot it always had (one stored row per change)
+        del d["fees"]
     return d
 
 
@@ -1099,7 +1170,8 @@ def payday_plan(conn, payday: date, hol, salary: int | None = None) -> tuple[Pla
         reserve = health.estimate_living_reserve(conn, payday, salary)
         reserve_source = "estimasi dari transaksi yang sudah diverifikasi" if reserve else "belum diset"
     obs = collect_obligations(conn, payday, nxt, hol)
-    plan = build_plan(payday, salary, obs, hol, buffer=get_threshold(conn, "cash_buffer", 0), reserve=reserve)
+    plan = build_plan(payday, salary, obs, hol, buffer=get_threshold(conn, "cash_buffer", 0), reserve=reserve,
+                      reserve_fee=living_fee(conn, payday), reserve_to=LIVING_PAYEE)
     return plan, obs, reserve_source
 
 
@@ -1137,6 +1209,19 @@ def generate_payday_plan(conn, today: date, payday: date | None = None,
             f"sebelum gajian {payday.isoformat()}. Bayar minimal {format_idr(min_left)} (penuh {format_idr(owed)}) "
             f"dari saldo yang ada sekarang"
             + (" agar tidak kena denda; sisanya bisa setelah gajian." if owed > min_left else "."))
+    for b in one_off.outside_plan(conn, payday, nxt):     # recorded once the salary came: the plan stays as the owner pays it
+        snap["reminders"].append(
+            f"TAGIHAN SEKALI BAYAR {b['alias']} {format_idr(b['amount'])} jatuh tempo {b['due_date']}: dicatat setelah gajian "
+            f"{payday.isoformat()}, jadi tidak ada di rencana ini. Bila harus dibayar sebelum gajian {nxt.isoformat()}: dari saldo "
+            "yang ada (pemilik yang memutuskan dari mana), lalu tagihan_sekali aksi=lunas; bila belum dibayar sampai gajian itu, "
+            "masuk rencananya lebih dulu.")
+    if today < payday:      # a coming plan pays a bill due before its payday on the payday itself: late, unless paid before
+        for b in one_off.for_plan(conn, payday, nxt):
+            if b["status"] == "terbuka" and b["due_date"] < payday.isoformat():
+                snap["reminders"].append(
+                    f"TAGIHAN SEKALI BAYAR {b['alias']} {format_idr(b['amount'])} jatuh tempo {b['due_date']}, SEBELUM gajian "
+                    f"{payday.isoformat()}: rencana ini membayarnya di hari gajian. Bila harus dibayar sebelum itu: dari saldo yang "
+                    "ada (pemilik yang memutuskan dari mana), lalu tagihan_sekali aksi=lunas.")
     # auto-debits from one account add up: the account must hold all of them (plus what the bank holds back as a minimum
     # balance) before the FIRST one, and keep it until the last one has gone; one figure per account, computed here.
     # An instalment recorded as paid (by hand ahead of time, or the debit already went through) is not debited again.
@@ -1266,29 +1351,35 @@ def generate_payday_plan(conn, today: date, payday: date | None = None,
 
 def payday_progress(conn, snap: dict) -> dict:
     """What has been done of the plan in `snap`, read from the ledger, never from the chat. Cards: payments recorded since the
-    payday towards the bills the plan covers; instalments: those recorded as paid; everything else (fixed costs, deposits,
-    the living money): marked done by the owner (transfer_selesai). A card paid beyond its planned amount is listed apart:
-    it covers what the plan could not fund and never makes room for anything else."""
+    payday towards the bills the plan covers; instalments: those recorded as paid; one-off bills: marked paid (lunas);
+    everything else (fixed costs, deposits, the living money): marked done by the owner (transfer_selesai). A card paid
+    beyond its planned amount is listed apart: it covers what the plan could not fund and never makes room for anything
+    else. Each item carries the admin fee its payment costs (`fee`)."""
     payday, nxt = snap["payday"], snap["next_payday"]
     bills = {b["alias"]: b for b in card_bills(conn, date.fromisoformat(payday))}
     debts = {r["alias"] for r in conn.execute("SELECT alias FROM debts")}
+    once = {r["alias"]: r for r in conn.execute("SELECT alias, status, paid_on FROM one_off_bills")}
     paid_debts = debts_paid(conn)
     marks = {r["item"]: r for r in conn.execute("SELECT * FROM plan_progress WHERE payday=?", (payday,))}
     items: dict[str, dict] = {}
 
     def item(alias: str, kind: str, method: str | None, due: str | None) -> dict:
         it = items.setdefault(alias, {"to": alias, "kind": kind, "method": method or "transfer", "planned": 0, "done": 0,
-                                      "on": None, "how": None, "due": due})
+                                      "on": None, "how": None, "due": due, "fee": 0})
         if due and (it["due"] is None or due < it["due"]):
             it["due"] = due
         return it
 
     for t in snap["transfers"]:
         a = t["to_alias"]
-        item(a, "kartu" if a in bills else "cicilan" if a in debts else "transfer", t.get("method"), t.get("due"))["planned"] += t["amount"]
+        kind = "kartu" if a in bills else "cicilan" if a in debts else "tagihan sekali" if a in once else "transfer"
+        item(a, kind, t.get("method"), t.get("due"))["planned"] += t["amount"]
     lt = snap.get("living_transfer")
     if lt and lt.get("amount"):
         item(lt["to_alias"], "uang harian", "transfer", lt.get("date"))["planned"] += lt["amount"]
+    for f in snap.get("fees") or []:      # the admin fee each payment costs (none in plans made before fees were counted)
+        if f["to_alias"] in items:
+            items[f["to_alias"]]["fee"] = f["amount"]
     beyond: dict[str, int] = {}
     for a, it in items.items():
         if it["kind"] == "kartu":
@@ -1301,6 +1392,9 @@ def payday_progress(conn, snap: dict) -> dict:
             if got:
                 it["done"] = min(it["planned"], sum(p["amount"] for p in got))
                 it["on"], it["how"] = max(p["paid_on"] for p in got), got[-1]["how"]
+        elif it["kind"] == "tagihan sekali":
+            if once[a]["status"] == "lunas":
+                it["done"], it["on"] = it["planned"], once[a]["paid_on"]
         elif a in marks:
             it["done"], it["on"] = min(it["planned"], marks[a]["amount"]), marks[a]["done_on"]
     for a, b in bills.items():      # a card the plan did not pay at all, paid anyway
@@ -1370,6 +1464,26 @@ def _unfunded_total(snap: dict) -> str | None:
     return "JUMLAH (dihitung kode, jangan menjumlah sendiri): " + "; ".join(parts)
 
 
+def fee_parts(snap: dict) -> tuple[int, str] | None:
+    """The plan's admin fees: their total and the count per kind ("4× bayar kartu Rp 30.000; 9× transfer Rp 58.500");
+    None for a plan without (made before fees were counted)."""
+    fees = snap.get("fees") or []
+    if not fees:
+        return None
+    kinds: dict[str, list[int]] = {}
+    for f in fees:
+        kinds.setdefault(f["kind"], []).append(f["amount"])
+    return (sum(f["amount"] for f in fees),
+            "; ".join(f"{len(v)}× {'bayar kartu' if k == 'kartu' else 'transfer'} {format_idr(sum(v))}" for k, v in sorted(kinds.items())))
+
+
+def _fee_line(snap: dict) -> str | None:
+    """The plan's admin fees added up by the code, so the bot never adds them (or forgets them) itself."""
+    parts = fee_parts(snap)
+    return parts and (f"BIAYA ADMIN perkiraan {format_idr(parts[0])} ({parts[1]}): dipotong bank dari rekening gaji di luar jumlah "
+                      "transfer, sudah dihitung dalam rencana ini (jangan menjumlah sendiri)")
+
+
 def _progress_name(it: dict) -> str:
     if it["kind"] == "cicilan":
         how = {"manual": "dibayar manual", "autodebit": "lewat autodebet"}.get(it["how"] or "", "dibayar")
@@ -1395,6 +1509,7 @@ def summarize_plan(snap: dict) -> str:
     lt = snap.get("living_transfer")
     if lt and lt["amount"]:
         lines.append(f"- {lt['date']} {lt['to_alias']}: {format_idr(lt['amount'])} (uang harian ke rekening harian)")
+    lines += [x for x in [_fee_line(snap)] if x]
     held = snap.get("living_leftover") or 0
     lines.append(f"Kas ditahan: {format_idr(snap['cash_to_hold'])}"
                  + (f"; uang harian bulan ini {format_idr(living_money(snap))} = {format_idr(snap['cash_to_hold'])} dari gaji + "
@@ -1457,6 +1572,9 @@ def record_debt_payment(conn, today: date, alias: str, amount: int, how: str = "
     conn.execute("INSERT INTO debt_payments(debt_alias, due_date, amount, paid_on, how, created_at) VALUES (?,?,?,?,?,?)",
                  (alias, when.isoformat(), amount, today.isoformat(), how, datetime.now(WIB).isoformat(timespec="seconds")))
     conn.execute("UPDATE debts SET tenor_left = tenor_left - 1, outstanding = MAX(0, outstanding - ?) WHERE alias=?", (amount, alias))
+    # the debt as it was, so a wrong record can be undone exactly (cicilan_dibayar batal=true), the clipped balance too
+    changelog.log(conn, "debts", alias, "ubah", dict(d), dict(conn.execute("SELECT * FROM debts WHERE alias=?", (alias,)).fetchone()),
+                  _paid_reason(when.isoformat()))
     conn.commit()
     r = conn.execute("SELECT tenor_left, outstanding FROM debts WHERE alias=?", (alias,)).fetchone()
     note = (" Autodebet untuk jatuh tempo itu tidak dihitung lagi; pastikan ke pemilik bahwa bank tidak akan memotong dua kali."
@@ -1466,13 +1584,50 @@ def record_debt_payment(conn, today: date, alias: str, amount: int, how: str = "
             f"sisa utang {format_idr(r['outstanding'])}.{note}")
 
 
+def _paid_reason(due: str) -> str:
+    return f"cicilan_dibayar jatuh tempo {due}"
+
+
+def undo_debt_payment(conn, today: date, alias: str, amount: int, due: str | None = None) -> str:
+    """cicilan_dibayar batal=true: an instalment recorded as paid that was not. The record goes (kept in change_log) and
+    the debt gets back what that record took: one instalment and the balance cut then (as logged; records made before the
+    log existed took the amount itself). `amount` must be the recorded one, a guard against undoing the wrong record."""
+    check_idr(amount)
+    due = due or None
+    rows = conn.execute("SELECT * FROM debt_payments WHERE debt_alias=?" + (" AND due_date=?" if due else "")
+                        + " ORDER BY id DESC", (alias, due) if due else (alias,)).fetchall()
+    if not rows:
+        raise ValueError(f"tidak ada angsuran {alias}" + (f" jatuh tempo {due}" if due else "") + " yang tercatat dibayar")
+    p = rows[0]                      # without a due date: the record made last
+    if p["amount"] != amount:
+        raise ValueError(f"angsuran {alias} jatuh tempo {p['due_date']} tercatat {format_idr(p['amount'])}, bukan "
+                         f"{format_idr(amount)}; periksa lagi sebelum membatalkan")
+    log = conn.execute("SELECT before_json, after_json FROM change_log WHERE tbl='debts' AND row_key=? AND reason=?"
+                       " ORDER BY id DESC LIMIT 1", (alias, _paid_reason(p["due_date"]))).fetchone()
+    cut = p["amount"]
+    if log:
+        before, after = json.loads(log["before_json"]), json.loads(log["after_json"])
+        cut = before["outstanding"] - after["outstanding"]
+    d = conn.execute("SELECT * FROM debts WHERE alias=?", (alias,)).fetchone()
+    conn.execute("DELETE FROM debt_payments WHERE id=?", (p["id"],))
+    conn.execute("UPDATE debts SET tenor_left = tenor_left + 1, outstanding = outstanding + ? WHERE alias=?", (cut, alias))
+    r = conn.execute("SELECT * FROM debts WHERE alias=?", (alias,)).fetchone()
+    changelog.log(conn, "debt_payments", p["id"], "hapus", dict(p), None, "cicilan_dibayar batal")
+    changelog.log(conn, "debts", alias, "ubah", dict(d), dict(r), f"batal {_paid_reason(p['due_date'])}")
+    conn.commit()
+    note = " Autodebet untuk jatuh tempo itu dihitung lagi." if d["pay_method"] == "autodebit" else ""
+    return (f"{alias}: catatan angsuran jatuh tempo {p['due_date']} ({format_idr(p['amount'])}, dicatat dibayar {p['paid_on']}) "
+            f"dibatalkan. Sisa {r['tenor_left']} angsuran, sisa utang {format_idr(r['outstanding'])}.{note}")
+
+
 def mark_transfers_done(conn, today: date, items: list[str] | None = None, all_open: bool = False, undo: bool = False) -> str:
     """transfer_selesai: the owner made (or, with undo, did not make) transfers of the current payday's plan that are not card
-    bills or instalments: fixed costs, deposits, the living money. Recorded per destination, so nobody asks again."""
+    bills or instalments: fixed costs, deposits, the living money, one-off bills (marked paid). Recorded per destination, so
+    nobody asks again."""
     snap = generate_payday_plan(conn, today)
     payday = snap["payday"]
     prog = snap["progress"]
-    own = {it["to"]: it for it in prog["items"] if it["kind"] in ("transfer", "uang harian")}
+    own = {it["to"]: it for it in prog["items"] if it["kind"] in ("transfer", "uang harian", "tagihan sekali")}
     names = {r["alias"]: r["payee_alias"] for r in conn.execute("SELECT alias, payee_alias FROM fixed_expenses")}
     if all_open == bool(items):
         raise ValueError("isi tujuan (alias dari status_gajian) ATAU semua=true, salah satu")
@@ -1491,7 +1646,13 @@ def mark_transfers_done(conn, today: date, items: list[str] | None = None, all_o
             chosen.append(a)
     stamp = datetime.now(WIB).isoformat(timespec="seconds")
     for a in chosen:
-        if undo:
+        if own[a]["kind"] == "tagihan sekali":       # the bill itself is paid: it leaves every later plan
+            bill = conn.execute("SELECT status FROM one_off_bills WHERE alias=?", (a,)).fetchone()
+            if undo and bill["status"] == "lunas":
+                one_off.reopen(conn, a)
+            elif not undo and bill["status"] == "terbuka":
+                one_off.settle(conn, today, a)
+        elif undo:
             conn.execute("DELETE FROM plan_progress WHERE payday=? AND item=?", (payday, a))
         else:
             conn.execute("INSERT INTO plan_progress(payday, item, amount, done_on, created_at) VALUES (?,?,?,?,?)"
@@ -1506,12 +1667,67 @@ def mark_transfers_done(conn, today: date, items: list[str] | None = None, all_o
             + (f" Transfer lain yang belum ditandai: {', '.join(left)}." if left else ""))
 
 
+def one_off_bills(conn, today: date, action: str, alias: str | None = None, name: str | None = None, amount: int | None = None,
+                  due: str | None = None, pay_to: str | None = None, method: str | None = None, paid_on: str | None = None,
+                  note: str | None = None) -> str:
+    """tagihan_sekali: record, pay, reopen, cancel or list the bills paid once; every answer says which plan has the bill."""
+    hol = id_holidays(today.year) | id_holidays(today.year + 1)
+    payday = current_payday(today, hol)
+    action = (action or "").strip().lower()
+
+    def where(b) -> str:
+        """one_off.for_plan's rule in words: an open bill is in every plan from the first payday after the day it was recorded
+        whose window reaches its due date."""
+        made, when = date.fromisoformat(b["recorded_on"]), date.fromisoformat(b["due_date"])
+        h = hol | id_holidays(made.year) | id_holidays(when.year)
+        first = one_off.first_plan(b, h)
+        if first <= today:
+            return f"ada di rencana gajian {payday.isoformat()} (status_gajian)"
+        if when < first:     # recorded once the salary of its own window came: that plan was made without it
+            return (f"dicatat setelah gajian {window_payday(made, h).isoformat()}, jadi tidak ada di rencana yang sedang berjalan: "
+                    f"bila harus dibayar sebelum gajian {first.isoformat()}, dari saldo yang ada (pemilik yang memutuskan dari mana), "
+                    f"lalu aksi=lunas; bila belum dibayar sampai gajian itu, masuk rencananya lebih dulu")
+        return f"masuk rencana gajian {first.isoformat()}"
+
+    if action == "daftar":
+        rows = one_off.listing(conn, today)
+        return ("TAGIHAN SEKALI BAYAR:\n" + "\n".join(
+            f"- {one_off.describe(r)}" + (f"; {where(r)}" if r["status"] == "terbuka" else "") for r in rows)) if rows else \
+            "Tidak ada tagihan sekali bayar yang terbuka atau ditutup dalam 60 hari terakhir."
+    if not alias:
+        raise ValueError("isi alias tagihan (lihat aksi=daftar)")
+    if action == "catat":
+        if amount is None or not due:
+            raise ValueError("catat butuh jumlah dan jatuh_tempo (YYYY-MM-DD)")
+        b = one_off.record(conn, today, alias, name, amount, due, pay_to, method, note)
+        hint = ("" if b["pay_to_alias"] or b["method"] == "app_menu" else
+                " Nomor tujuannya belum didaftarkan: pemilik mengirim /rekening atau /va (nomornya tidak lewat chat), lalu catat lagi "
+                "dengan bayar_ke.")
+        return f"Tagihan sekali bayar tercatat: {one_off.describe(b)}; {where(b)}.{hint}"
+    if action == "lunas":
+        b = one_off.settle(conn, today, alias, paid_on or None)
+        paid = date.fromisoformat(b["paid_on"])      # the plan running that day: a bill paid late is still that plan's
+        h = hol | id_holidays(paid.year)
+        pp = window_payday(paid, h)
+        planned = any(r["alias"] == alias for r in one_off.for_plan(conn, pp, next_payday(pp, h)))
+        return (f"{alias} tercatat LUNAS {b['paid_on']}. "
+                + (f"Progres rencana gajian {pp.isoformat()} ikut tercatat." if planned else
+                   "Dibayar di luar rencana gajian: tidak masuk rencana mana pun lagi."))
+    if action == "buka":
+        b = one_off.reopen(conn, alias)
+        return f"{alias} terbuka lagi: {one_off.describe(b)}; {where(b)}."
+    if action == "batal":
+        one_off.cancel(conn, alias, note)
+        return f"{alias} dibatalkan (tidak jadi dibayar): keluar dari semua rencana gajian."
+    raise ValueError("aksi: catat, lunas, buka, batal, atau daftar")
+
+
 def _kind_text(it: dict) -> str:
     if it["kind"] == "kartu":
         return "kartu" + (", menu aplikasi" if it["method"] == "app_menu" else "")
     if it["kind"] == "cicilan":
         return "cicilan" + (f", autodebet {it['due']}" if it["method"] == "autodebit" else f", jatuh tempo {it['due']}")
-    return it["kind"] + (f", jatuh tempo {it['due']}" if it["kind"] == "transfer" and it["due"] else "")
+    return it["kind"] + (f", jatuh tempo {it['due']}" if it["kind"] in ("transfer", "tagihan sekali") and it["due"] else "")
 
 
 def payday_status(conn, today: date) -> str:
@@ -1540,6 +1756,10 @@ def payday_status(conn, today: date) -> str:
         else:
             nxt_step = "setelah ditransfer: transfer_selesai"
         L.append(f"⏳ {it['to']} {format_idr(it['planned'])} [{_kind_text(it)}] ({nxt_step})")
+    pending = sum(it["fee"] for it in todo)
+    if pending:
+        L.append(f"BIAYA ADMIN perkiraan untuk yang belum: {format_idr(pending)}, dipotong bank di luar jumlah transfer (sudah "
+                 "dihitung dalam rencana; saldo rekening gaji perlu cukup untuk transfer + biaya ini)")
     if prog["beyond"]:
         L.append("DIBAYAR DI LUAR RENCANA (uang di luar gaji ini; tidak menambah ruang untuk pos lain):")
         L += [f"+ {a} {format_idr(v)}" for a, v in sorted(prog["beyond"].items())]
@@ -1556,7 +1776,8 @@ def payday_status(conn, today: date) -> str:
             L.append(f"- {a}: {bill_status(c['owed'], c['min_left'], c['rate'], c['due'])}")
     if paid_off:
         L.append("- LUNAS: " + ", ".join(paid_off))
-    L += [f"* {r}" for r in snap["reminders"] if r.startswith(("AUTODEBET", "SALDO", "INFO", "SUDAH LEWAT", "MENDESAK"))]
+    L += [f"* {r}" for r in snap["reminders"] if r.startswith(("AUTODEBET", "SALDO", "INFO", "SUDAH LEWAT", "MENDESAK",
+                                                                "TAGIHAN SEKALI"))]
     known = []
     left = living_leftover(conn, date.fromisoformat(payday))
     if left:

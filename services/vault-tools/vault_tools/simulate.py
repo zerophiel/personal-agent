@@ -10,7 +10,9 @@ card STATEMENTS, so nothing is counted twice:
 - each later cycle's statements = what was carried (+ interest) + that month's new charges: card instalments and
   subscriptions, plus card spending ON TOP of the living money (`belanja_kartu`). Card spending inside the living money is
   paid from it and nets out.
-Cash per cycle = salary - fixed costs - loan instalments - living money. It goes, in order, to the emergency fund, a set pot
+Cash per cycle = salary - fixed costs - loan instalments - living money - the bank's admin fees (cycle 1: its plan's; a later
+cycle: one per fixed cost, card, pot and transfer, fee_estimate) - bills paid once (in the cycle whose plan first has them, with
+their fee). It goes, in order, to the emergency fund, a set pot
 deposit (pattern 'rata'), the card statements (highest interest first), then the pot (pattern 'sisa': what is left, or at
 most a set amount while a deferral or a low start applies; the rest stays free). A cycle
 that cannot cover its bills leaves the rest on the cards, with interest. Interest is charged only on what is carried; a
@@ -19,12 +21,13 @@ from __future__ import annotations
 
 from datetime import date
 
-from . import card_installments, invariants, subscriptions
+from . import card_installments, invariants, one_off, subscriptions
 from .money import format_idr
+from .payday import next_payday
 from .roadmap import add_months
-from .tools import (DEFAULT_CARD_INTEREST_BP, SINKING_BUFFER_DAYS, _low_cycles, _round_up, bp_of_idr, card_bills, card_rate,
-                    current_payday, debts_paid, emergency_status, get_threshold, id_holidays, payday_plan, reserve_for,
-                    sinking_paydays_left, sinking_saved)
+from .tools import (DEFAULT_CARD_INTEREST_BP, SINKING_BUFFER_DAYS, _low_cycles, _round_up, admin_fee, bp_of_idr, card_bills,
+                    card_rate, current_payday, debts_paid, emergency_status, fee_estimate, fees_on, get_threshold, id_holidays,
+                    payday_plan, reserve_for, sinking_paydays_left, sinking_saved)
 
 NEW_CHARGES = "tagihan-baru"     # the next statements' new charges: paid before any older carried balance
 
@@ -101,13 +104,22 @@ def simulate(conn, today: date, *, belanja_kartu: int = 0, tunda_pot: int = 0, e
     rate[NEW_CHARGES] = max(list(rate.values()) + [default_rate])
     start_balance = sum(bal.values())
     beyond = {}
+    plan = payday_plan(conn, payday, hol)[0] if any(paid_since.values()) or fees_on(conn, payday) else None
     if any(paid_since.values()):
         # what the owner paid on a card beyond the plan's amount for it came from money outside the salary (30 Oct 2026: the
         # rest of CIMB, from an account balance): it clears that much of the card, and the salary still goes as planned
         planned: dict[str, int] = {}
-        for t in payday_plan(conn, payday, hol)[0].transfers:
+        for t in plan.transfers:
             planned[t.to_alias] = planned.get(t.to_alias, 0) + t.amount
         beyond = {a: v - planned.get(a, 0) for a, v in paid_since.items() if v > planned.get(a, 0)}
+    first_fees = sum(f.amount for f in plan.fees) if plan else 0
+    later_fees, cycle_payday = fee_estimate(conn), payday
+    # bills paid once: cycle 1 pays those its plan has (its fees are in first_fees); a later cycle the open ones whose first
+    # plan it is, each with its fee
+    in_first = one_off.for_plan(conn, payday, next_payday(payday, hol))
+    first_once = sum(b["amount"] for b in in_first)
+    later_once = [(one_off.first_plan(b, hol), b) for b in conn.execute("SELECT * FROM one_off_bills WHERE status = 'terbuka'")
+                  if b["alias"] not in {x["alias"] for x in in_first}]
     first_month = date(payday.year, payday.month, 1)
     ef_saved = ef["saved"] if ef else 0
     rows, interest_total, paid_off = [], 0, None
@@ -119,7 +131,16 @@ def simulate(conn, today: date, *, belanja_kartu: int = 0, tunda_pot: int = 0, e
             if d["left"] > 0 and month.strftime("%Y-%m") not in d["ahead"]:
                 d["left"] -= 1
                 loans += d["installment"]
-        cash = salary - fixed - loans - (first if k == 1 else normal) + (ekstra_sekarang if k == 1 else 0)
+        if k > 1:
+            cycle_payday = next_payday(cycle_payday, hol)
+        fees = first_fees if k == 1 else later_fees if fees_on(conn, cycle_payday) else 0
+        once = first_once
+        if k > 1:
+            due_now = [b for p, b in later_once if p == cycle_payday]
+            once = sum(b["amount"] for b in due_now)
+            if fees_on(conn, cycle_payday):
+                fees += sum(admin_fee(conn, b["alias"], b["method"], b["pay_to_alias"])[0] for b in due_now)
+        cash = salary - fixed - loans - fees - once - (first if k == 1 else normal) + (ekstra_sekarang if k == 1 else 0)
         new = 0
         if k > 1:                                                 # the statements of this cycle: what was carried + new charges
             new = (subscriptions.active_total(conn, stmt.strftime("%Y-%m"))
@@ -192,7 +213,7 @@ def simulate(conn, today: date, *, belanja_kartu: int = 0, tunda_pot: int = 0, e
         rows.append({"k": k, "month": month.strftime("%Y-%m"), "cash": cash + ef_dep + pot + paid, "due": due, "paid": paid,
                      "balance": total, "interest": month_interest, "ef": ef_dep, "pot": pot,
                      "pot_total": sum(f["saved"] for f in funds), "free": cash, "short": short, "new": max(0, new), "loans": loans,
-                     "outside": outside})
+                     "outside": outside, "fees": fees, "once": once})
     out_funds = [{"alias": f["alias"], "target": f["target"], "due": f["due"], "pace": f["pace"], "paydays": f["left"],
                   "start": f["start"], "at_due": f["at_due"], "gap": (f["target"] - f["at_due"]) if f["at_due"] is not None else None,
                   "deposits": f["deposits"]} for f in funds]
