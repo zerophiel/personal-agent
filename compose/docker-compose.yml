@@ -134,6 +134,7 @@ services:
     profiles: ["front"]
     command: ["gateway", "run"]
     restart: unless-stopped
+    stop_grace_period: 60s   # as vault: Hermes drains its sessions on SIGTERM
     # the image boots as root (s6: uid remap, chown of /opt/data), then runs Hermes as uid 10000; these are all it needs
     # (tested 2026-11-01: `gateway run` with these caps, pids_limit and memory stayed up as uid 10000 with 26 processes
     # and stopped cleanly), the rest of Docker's default set is dropped
@@ -148,9 +149,10 @@ services:
         required: false                           # so compose still parses before the owner's front secrets exist
     volumes:
       - /opt/personal-agent-data/hermes-front:/opt/data
-      # read-only overlays: the agent cannot edit its own config or persona
+      # read-only overlays: the agent cannot edit its own config, persona or plugin
       - ../services/hermes/front/config.yaml:/opt/data/config.yaml:ro
       - ../services/hermes/front/SOUL.md:/opt/data/SOUL.md:ro
+      - ../services/hermes/front/plugins/cardblock:/opt/data/plugins/cardblock:ro
     networks: [net-front]
     mem_limit: 2g
     oom_score_adj: 300

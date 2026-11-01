@@ -57,7 +57,9 @@ class Compose(unittest.TestCase):
         m = mounts(front)
         self.assertIn("../services/hermes/front/config.yaml:/opt/data/config.yaml:ro", m)
         self.assertIn("../services/hermes/front/SOUL.md:/opt/data/SOUL.md:ro", m)
+        self.assertIn("../services/hermes/front/plugins/cardblock:/opt/data/plugins/cardblock:ro", m)
         self.assertFalse([x for x in m if "vault" in x or "secrets" in x or "ingest" in x])
+        self.assertEqual(front["stop_grace_period"], self.s["vault"]["stop_grace_period"])
         self.assertNotIn("secrets", front)
         self.assertEqual([e["path"] for e in front["env_file"]], ["/opt/personal-agent-data/front.env"])
 
@@ -84,11 +86,20 @@ class HermesProfiles(unittest.TestCase):
         self.assertEqual(srv["headers"]["Authorization"], "Bearer ${env:CHANGE_PROPOSALS_MCP_TOKEN}")
         self.assertLessEqual({"browser", "skills", "x_search"}, set(cfg["agent"]["disabled_toolsets"]))
         self.assertEqual(cfg["memory"]["nudge_interval"], 0)                       # no background review runs
+        self.assertEqual(cfg["plugins"]["enabled"], ["cardblock"])                 # card numbers dropped before the model
         with open(os.path.join(ROOT, "services/hermes/front/SOUL.md"), encoding="utf-8") as f:
             soul = f.read()
         self.assertIn("@danoevault_agent", soul)
         self.assertIn("`submit`", soul)
         self.assertNotRegex(soul, r"\d{5,}")                                       # no numbers of the owner's
+
+    def test_every_enabled_plugin_is_in_the_repo_and_mounted_read_only(self):
+        services = load("compose/docker-compose.yml")["services"]
+        for zone in ("vault", "front"):
+            for name in load(f"services/hermes/{zone}/config.yaml")["plugins"]["enabled"]:
+                src = f"services/hermes/{zone}/plugins/{name}"
+                self.assertIn(f"../{src}:/opt/data/plugins/{name}:ro", mounts(services[zone]), zone)
+                self.assertTrue(os.path.isfile(os.path.join(ROOT, src, "__init__.py")), src)
 
 
 if __name__ == "__main__":

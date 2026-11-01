@@ -38,9 +38,8 @@ It starts only with `--profile front`; `make deploy` never starts or stops it. O
    (with the vault's key front would spend the finance bot's budget; `render-front-env.sh` refuses the vault key).
 3. `make secret-set NAME=telegram_front_token` and `make secret-set NAME=anthropic_front_key` (prompted on the VPS).
 4. On the VPS: `sudo bash scripts/data-dirs.sh` (done 2026-11-01), then `sudo bash scripts/render-front-env.sh`.
-   Decide first: front's SOUL refuses to repeat or keep card and account numbers, but nothing removes one before the
-   model sees it (vault's cardguard needs vault-tools, which front cannot reach). A rewrite-only guard for front is
-   a small plugin, built before this step if the owner wants it.
+   The `cardblock` plugin (built 2026-11-01) drops any message holding a card-like number before the model sees it,
+   deletes it in Telegram and tells the owner (`docs/SECURITY.md`, front zone).
 5. Start: `sudo docker compose -f compose/docker-compose.yml --env-file config/stack.env --profile front up -d --build
    --wait change-proposals front`.
 6. Send `/start` to `@danoefront_agent`, then ask it to send a harmless test proposal: a card appears in the control bot.

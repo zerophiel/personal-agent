@@ -61,6 +61,10 @@ sessions:
 
 unauthorized_dm_behavior: ignore
 
+plugins:
+  enabled:
+    - cardblock   # drops a message holding a card-like number before the model sees it (plugins/cardblock)
+
 gateway:
   platforms:
     telegram:

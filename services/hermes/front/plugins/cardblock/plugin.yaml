@@ -1,0 +1,3 @@
+name: cardblock
+version: "0.1"
+description: Drop inbound Telegram messages holding a card number before dispatch; the owner gets a notice (front).

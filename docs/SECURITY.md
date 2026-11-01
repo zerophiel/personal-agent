@@ -58,5 +58,13 @@ in `skills.external_dirs` and turned the `skills` toolset on (compose is never i
   Search text leaves the VPS.
 - Web text is untrusted. A prompt in a page could make front fetch a URL that carries chat text, which is why finance
   and secrets stay out of front (SOUL.md), and why a change still needs the owner's tap in control.
-- Card and account numbers: SOUL.md tells front never to repeat or keep one, but no plugin removes them before the
-  model sees them yet; whether to build one before the first start is the owner's call (RUNBOOK "Front zone").
+- Card numbers: the `cardblock` plugin (`services/hermes/front/plugins/cardblock`, mounted read-only) drops every
+  inbound message whose text holds a Luhn-valid 13-19 digit run before Hermes dispatches it, so neither the model nor
+  the session store sees it; photo captions and the text documents Hermes inlines are checked too. The owner's raw
+  message is deleted and a fixed notice sent; anyone else's is dropped without a reply (Hermes runs this hook before its
+  sender check). An error drops the message as well. The detection is vault cardguard's, kept equal by a test.
+  Left to SOUL.md: a photo of a card, account and VA numbers, PINs, OTPs and passwords. Luhn also flags some IMEIs and
+  reference numbers; the notice asks the owner to send the message again without the digit run.
+- Vault's cardguard checks no sender: Telegram's intake filter (TELEGRAM_ALLOWED_USERS with `unauthorized_dm_behavior:
+  ignore`) drops a stranger before the hook, but `pair` or `decline` would let a stranger's `/rincian` reach it. Keep
+  `ignore`; an owner check in cardguard is a follow-up (docs/PROGRESS.md).

@@ -56,6 +56,8 @@ restore:
 
 test:
 	python3 -I -m unittest discover -s tests -v
+	cd services/hermes/vault && python3 -I -m unittest discover -s tests -v   # the cardguard plugin
+	cd services/hermes/front && python3 -I -m unittest discover -s tests -v   # the cardblock plugin
 	cd services/control && python3 -I -m unittest discover -s tests -v
 	cd services/change-proposals && $${VAULT_PY:-python3} -I -m unittest discover -s tests -v   # needs mcp, as the vault-tools server tests
 	cd services/ingest-gmail && python3 -I -m unittest discover -s tests -v
