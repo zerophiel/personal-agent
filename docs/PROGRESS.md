@@ -459,10 +459,10 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   duplikat") and told the owner "186,8 juta keluar"; without the 17 it is 103.973.941 (64.930.593 of it still
   uncategorized), unverified 117 -> 100. Nothing was stored from them: no plan, snapshot, fund or payment record after
   the file, and the daily pace counts from the payday only. The other 28 files agree with the ledger (|diff| <= 2).
-- Fix, built and not deployed: `record_mutations` first lets every exact key claim its stored row, then lets a row
-  left over take a stored row of another file of the account with the same day and amount, the most similar wording
-  first, each once; a row the earlier file lacks stays new (`matched_by_date_amount` in the result). It also warns
-  BUKU TIDAK COCOK when the account's rows over the file's period no longer add up to its balance change
+- Fix (live since 2026-11-01 20:13 WIB, below): `record_mutations` first lets every exact key claim its stored row,
+  then lets a row left over take a stored row of another file of the account with the same day and amount, the most
+  similar wording first, each once; a row the earlier file lacks stays new (`matched_by_date_amount` in the result).
+  It also warns BUKU TIDAK COCOK when the account's rows over the file's period no longer add up to its balance change
   (`ledger_gap`), and `periksa_data` reports the same as a MASALAH (audit rule 8). Not matched still: a row the second
   document dates on another day; inside the overlap the ledger check flags it. Tests 644 (5 new).
 - Data fix `ops/datafix/2026-11-01-mandiri-dupes`: a backup, the 17 rows removed by id after checks (still the
@@ -472,14 +472,22 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   findings unchanged; the new code re-recording the e-statement's 65 rows stores 48 and matches 17.
 - Found with it: vault's cardguard owner check (e9c1bc4, 14:54 WIB) never reached the VPS. The plugin there hashes
   to a473d4d's, so the earlier note in Next steps that it "loads at the next vault restart" (corrected there) was
-  wrong: a restart alone would have reloaded the old one. A content dry run of the whole repo against the VPS: besides M3 (control v3, the applier,
-  compose, scripts) and docs, only this fix and cardguard with its test differ.
+  wrong: a restart alone would have reloaded the old one. A content dry run of the whole repo against the VPS: besides
+  M3 (control v3, the applier, compose, scripts) and docs, only this fix and cardguard with its test differ.
 - `deploy.sh` syncs two folders onto their twins: `services/vault-tools` (rebuilt) and `services/hermes/vault` (only
   cardguard and its test differ). Then it restarts the vault when idle, which loads cardguard and reconnects Hermes
   to the new tool server, and checks that the plugin in the container is the repo's. Pre-checked read-only in the
   vault container with the new module: the allowlist holds exactly the owner, `_is_owner` is true for the owner's
-  DM only (not a group, not another id), card detection unchanged. Control stays v2, nothing of M3 ships, no `/new`.
-  Waiting for the owner (open question 19).
+  DM only (not a group, not another id), card detection unchanged. Control stays v2, nothing of M3 ships.
+- Deployed on the owner's "Gas", 2026-11-01 20:12:34-20:13:29 WIB: the bot idle (last message 18:25); vault-tools
+  rebuilt and healthy; backup `ledger.db.bak-pre-mandiri-dupes` (1987 transactions); the 17 rows removed (gaps 0 and
+  -1, 18 `change_log` rows, the file's rows and new_rows 48); the vault restarted 20:13:22 WIB. Then, read-only: 0 of
+  30 mutation files off the ledger; October 253 rows, income 44.795.915, expenses 103.973.941, net -59.178.026,
+  uncategorized 64.930.593, unverified 100; audit 0 bad, 0 warn, 3 info, no mutation finding; the cardguard in the
+  container is the repo's, agent.log says "cardguard: command menu restored" and has no empty-allowlist line; MCP 57
+  tools; no error since the restart. The tools need no `/new`, but the vault session still holds the 186,8 juta reply,
+  so the owner sends `/new` once. Live-bot snapshot 20:16 WIB: only the M3 gate's files differ (Makefile, compose,
+  data-dirs, control v3, the applier, tests).
 
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
@@ -516,14 +524,14 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
     - Its own bot: BotFather (Allow Groups off), then `make secret-set NAME=telegram_comms_token`.
     - Which Anthropic key pays its USD 10: a third workspace with its own limit, as front has.
     - card-bus (the Kanban replacement in `docs/ARCHITECTURE.md`, for one zone to hand work to another): still wanted?
-19. The doubled Mandiri rows (section "Two overlapping bank files" above): go for
-    `ops/datafix/2026-11-01-mandiri-dupes/deploy.sh`? Until it runs, October's cashflow and living-cost month carry the
-    17 rows, and another bank's October e-statement (BCA's file covers 1-28 Oct) would double the same way. It also
-    brings vault's cardguard owner check (e9c1bc4), which never reached the VPS.
+19. (done 2026-11-01 20:13 WIB: the 17 doubled Mandiri rows removed and the overlap matching live, with vault's
+    cardguard owner check; section "Two overlapping bank files" above)
 
 ## Next steps
-- Owner: go for the doubled-rows fix (open question 19); no other bank e-statement before it.
-- After it: the bot categorizes October with the owner (100 rows unverified; 30 of them from 27-31 Oct: the salary,
+- (done 2026-11-01 20:13 WIB) The doubled-rows fix. Owner: `/new` once to vault, whose session still holds the 186,8
+  juta reply. Bank files over an already recorded period are fine again: same-day same-amount rows match, and BUKU
+  TIDAK COCOK flags a row the second file dates otherwise.
+- Next: the bot categorizes October with the owner (100 rows unverified; 30 of them from 27-31 Oct: the salary,
   seven moves to the owner's own accounts, which count as spending until marked `transfer_internal`, eight card and
   instalment payments by VA, two other transfers, fees, interest).
 - (done 2026-11-01 18:21 WIB) Owner sent `/new` after the 1 Nov 10:27 deploy (Deploy 2 above).
@@ -559,10 +567,9 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   `services/hermes/front/tests/test_cardblock.py`) was dropped and deleted, nothing stored, the next question answered.
 - (owner reports done 2026-11-01) BotFather -> Allow Groups off for `@danoevault_agent`, `@danoecontrol_bot` and
   `@danoefront_agent`; not checkable from here without the bot tokens.
-- Front follow-ups: (built 2026-11-01) vault's cardguard acts only for the owner in a private chat. It is not on the
-  VPS yet: the doubled-rows deploy syncs it and restarts the vault (no `/new`). After that restart, the first TTL sweep logs how
-  many `/rincian` deletes Telegram accepted (`ttl sweep: Telegram deleted N of M`). After a week, front's cost per day
-  from its `state.db` against the USD 40 limit.
+- Front follow-ups: (live 2026-11-01 20:13 WIB) vault's cardguard acts only for the owner in a private chat. The
+  first TTL sweep that finds an expired `/rincian` message logs how many deletes Telegram accepted (`ttl sweep:
+  Telegram deleted N of M`). After a week, front's cost per day from its `state.db` against the USD 40 limit.
 - (done 2026-11-01) M2 gate checks: all four closed with evidence (`docs/assumptions.md`).
 - Remaining plan: the M3 gate (open question 17: the applier is built and tested, installing it is the owner's call),
   then M4 comms once the owner has answered open question 18.

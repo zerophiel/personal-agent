@@ -107,6 +107,7 @@ in `skills.external_dirs` and turned the `skills` toolset on (compose is never i
   already drops a stranger before the hook; the check keeps `/rincian` the owner's if that setting ever changes to
   `pair` or `decline`. Hermes gives every Telegram message, media included, `user_id = str(user.id)`; on 2026-11-01 all
   30 of vault's Telegram sessions carried the allowlisted id. An empty allowlist drops every command and is logged at
-  boot. Not on the VPS yet (checked 2026-11-01 by hash: the VPS runs a473d4d's cardguard, which acts for any private
-  chat that passes the intake filter); `ops/datafix/2026-11-01-mandiri-dupes/deploy.sh` syncs it and restarts the
-  vault, waiting for the owner (docs/PROGRESS.md).
+  boot. Live since 2026-11-01 20:13 WIB: `ops/datafix/2026-11-01-mandiri-dupes/deploy.sh` synced it and restarted the
+  vault (the plugin in the container hashes as the repo's; agent.log has no empty-allowlist line and says the command
+  menu was restored). Until then the VPS ran a473d4d's cardguard, which acts for any private chat that passes the
+  intake filter.

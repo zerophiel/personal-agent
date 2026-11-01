@@ -23,9 +23,10 @@
 - `skip` plus a direct Bot API reply writes nothing to the session store: closed by #11. The 24-hour auto-delete runs:
   8 `/rincian` sends in the vault logs, 0 rows left in the TTL file and 0 failed sweeps. A sweep drops a row whether or
   not Telegram accepted the delete, so this shows the sweep ran, not that each delete worked; `sweep_ttl` now logs how
-  many deletes Telegram accepted (counts only), so the first sweep after that code reaches the vault settles it. It
-  had not by 2026-11-01 evening: the VPS runs a473d4d's cardguard (by hash), and the doubled-rows deploy
-  (`ops/datafix/2026-11-01-mandiri-dupes/deploy.sh`) syncs it and restarts the vault.
+  many deletes Telegram accepted (counts only), so the first sweep after that code reaches the vault settles it. The
+  code reached the vault on 2026-11-01 20:13 WIB with the doubled-rows deploy
+  (`ops/datafix/2026-11-01-mandiri-dupes/deploy.sh`; before it the VPS ran a473d4d's cardguard, by hash), so the first
+  sweep that finds an expired `/rincian` message logs `ttl sweep: Telegram deleted N of M`.
 - DNS-over-HTTPS fallback cannot bypass the proxy: a direct TCP connection to both of Hermes' seed Telegram IPs fails
   with ENETUNREACH from all five zone containers (vault, front, vault-tools, control, change-proposals), external names
   do not resolve in them (`getaddrinfo` fails), and squid-vault denied the DoH queries themselves (`dns.google`,
