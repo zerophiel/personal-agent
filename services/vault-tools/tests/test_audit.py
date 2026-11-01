@@ -10,6 +10,7 @@ from test_roadmap import full_world  # noqa: E402
 
 from vault_tools import audit, reports, tools  # noqa: E402
 from vault_tools import card_installments as ci  # noqa: E402
+from vault_tools import mutations as mu  # noqa: E402
 from vault_tools import subscriptions as sub  # noqa: E402
 
 TODAY = date(2026, 11, 1)
@@ -49,6 +50,22 @@ class Audit(unittest.TestCase):
         tools.set_pot_balance(conn, "hutang-teman", 0, TODAY)
         self.assertEqual(audit.run(conn, TODAY), [])
         self.assertIn("semua sumber cocok", audit.format_audit([]))
+
+    def test_a_bank_row_stored_twice_across_two_files(self):
+        conn = world()
+        mu.record_mutations(conn, "mandiri-utama", "a" * 64, "2026-10-01", "2026-10-31", 1_000_000, 940_000,
+                            [{"date": "2026-10-05", "description": "QRIS KOPI", "amount": -50_000},
+                             {"date": "2026-10-15", "description": "BIAYA TRF", "amount": -10_000}])
+        self.assertEqual([t for t in found(conn) if t.startswith("Mutasi")], [])
+        # what the 1 Nov e-statement did before the fix: another file's copy of a row, worded differently
+        conn.execute("INSERT INTO transactions(account_id,txn_date,merchant,amount,status,source,dedupe_key,file_hash)"
+                     " SELECT account_id, txn_date, 'QR KOPI', amount, 'unverified', 'mutation', 'b', ? FROM transactions"
+                     " WHERE merchant='QRIS KOPI'", ("b" * 64,))
+        bad = [t for t in found(conn, "bad") if t.startswith("Mutasi")]
+        self.assertEqual(len(bad), 1)
+        self.assertIn("mandiri-utama 2026-10-01 s.d. 2026-10-31", bad[0])
+        self.assertIn("berjumlah -Rp 110.000", bad[0])
+        self.assertIn("selisih Rp 50.000", bad[0])
 
     def test_statement_totals_and_lines(self):
         conn = world()

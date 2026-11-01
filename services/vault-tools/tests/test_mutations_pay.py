@@ -157,6 +157,53 @@ class Mutations(unittest.TestCase):
         self.assertEqual((r["new_rows"], r["already_known"]), (1, 3))
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0], 4)
 
+    def test_an_overlapping_document_worded_differently_adds_only_its_new_rows(self):
+        # 1 Nov: the app export of 1-26 Oct, then the month's e-statement, whose rows came back worded differently
+        conn = acct_db()
+        a = rows(("2026-10-05", "QRIS KOPI KENANGAN 123456", -50_000), ("2026-10-15", "BIAYA TRF BIFAST", -2_500),
+                 ("2026-10-15", "BIAYA TRF BIFAST", -2_500), ("2026-10-15", "TRF BIFAST KE BCA", -9_500_000))
+        mu.record_mutations(conn, "bca-main", H1, "2026-10-01", "2026-10-26", 10_000_000, 445_000, a)
+        b = rows(("2026-10-05", "QR KOPI KENANGAN", -50_000), ("2026-10-15", "BI FAST FEE", -2_500), ("2026-10-15", "BI FAST FEE", -2_500),
+                 ("2026-10-15", "BI FAST FEE", -2_500), ("2026-10-15", "TRANSFER BI FAST KE BCA", -9_500_000),
+                 ("2026-10-30", "GAJI PT MAJU", 40_000_000))
+        r = mu.record_mutations(conn, "bca-main", H2, "2026-10-01", "2026-10-31", 10_000_000, 40_442_500, b)
+        # the coffee, two of the three fees and the transfer are A's rows; the third fee and the salary are new
+        self.assertEqual((r["new_rows"], r["already_known"], r["matched_by_date_amount"], r["reconciled"]), (2, 4, 4, True))
+        self.assertNotIn("warning", r)
+        self.assertEqual(conn.execute("SELECT COUNT(*), SUM(amount) FROM transactions").fetchone()[:], (6, 30_442_500))
+        self.assertEqual(mu.record_mutations(conn, "bca-main", H2, "2026-10-01", "2026-10-31", 10_000_000, 40_442_500, b,
+                                             replace=True)["new_rows"], 2)       # re-recorded: the same two rows again
+
+    def test_a_row_of_the_same_day_and_amount_the_earlier_file_lacks_stays_new(self):
+        conn = acct_db()
+        mu.record_mutations(conn, "bca-main", H1, "2026-10-01", "2026-10-26", None, None, rows(("2026-10-26", "QRIS KOPI KENANGAN", -50_000)))
+        # the e-statement goes further into the 26th: parking of the same amount came later that day, listed first
+        r = mu.record_mutations(conn, "bca-main", H2, "2026-10-01", "2026-10-31", None, None,
+                                rows(("2026-10-26", "PARKIR GEDUNG", -50_000), ("2026-10-26", "QR KOPI KENANGAN", -50_000)))
+        self.assertEqual((r["new_rows"], r["matched_by_date_amount"]), (1, 1))
+        self.assertEqual([m for (m,) in conn.execute("SELECT merchant FROM transactions ORDER BY id")],
+                         ["QRIS KOPI KENANGAN", "PARKIR GEDUNG"])     # the closest wording took the stored row
+
+    def test_an_exact_key_claims_its_row_before_a_date_and_amount_match(self):
+        conn = acct_db()
+        mu.record_mutations(conn, "bca-main", H1, "2026-10-01", "2026-10-26", None, None, rows(("2026-10-26", "QRIS KOPI", -50_000)))
+        r = mu.record_mutations(conn, "bca-main", H2, "2026-10-01", "2026-10-31", None, None,
+                                rows(("2026-10-26", "PARKIR GEDUNG", -50_000), ("2026-10-26", "QRIS KOPI", -50_000)))
+        self.assertEqual((r["new_rows"], r["already_known"]), (1, 1))
+        self.assertNotIn("matched_by_date_amount", r)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0], 2)
+
+    def test_the_ledger_check_sees_what_a_file_cannot(self):
+        # the later file balances on its own, but the ledger holds a row in its period that it does not have
+        conn = acct_db()
+        mu.record_mutations(conn, "bca-main", H1, "2026-10-01", "2026-10-26", None, None,
+                            rows(("2026-10-05", "QRIS KOPI", -50_000), ("2026-10-06", "SALAH BACA", -70_000)))
+        r = mu.record_mutations(conn, "bca-main", H2, "2026-10-01", "2026-10-31", 1_000_000, 950_000, rows(("2026-10-05", "QRIS KOPI", -50_000)))
+        self.assertTrue(r["reconciled"])
+        self.assertIn("BUKU TIDAK COCOK", r["warning"])
+        self.assertIn("selisih -70000", r["warning"])
+        self.assertEqual(mu.ledger_gap(conn, 1, "2026-10-01", "2026-10-31", 1_000_000, 950_000), (-120_000, -70_000))
+
     def test_bad_input(self):
         conn = acct_db()
         for kw in ({"account_alias": "ghost"}, {"file_hash": "short"}, {"period_end": "2026-08-01"}):

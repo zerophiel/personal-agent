@@ -13,6 +13,7 @@ import sqlite3
 import statistics
 from collections import defaultdict
 from datetime import date, datetime, timezone
+from difflib import SequenceMatcher
 
 from . import changelog
 from .money import check_idr, format_idr
@@ -44,6 +45,42 @@ def normalize(desc: str) -> str:
 ROUNDING_TOLERANCE = 3     # Rp: statements print cents, the rows are whole Rupiah; a diff this small is rounding
 
 
+def ledger_gap(conn, account_id: int, start: str, end: str, opening: int, closing: int) -> tuple[int, int]:
+    """(the account's mutation rows over start..end, whichever file brought them; that sum minus the file's balance
+    change). A file can balance on its own while the ledger holds one of its rows twice, read from another document."""
+    held = conn.execute("SELECT COALESCE(SUM(amount),0) FROM transactions WHERE account_id=? AND source='mutation'"
+                        " AND txn_date BETWEEN ? AND ?", (account_id, start, end)).fetchone()[0]
+    return held, held - (closing - opening)
+
+
+def _reworded(conn, account_id: int, keyed: list[tuple]) -> set[int]:
+    """Indexes of rows another file of this account already holds in other words. The same bank row read from two
+    documents (an app export, then the month's e-statement) can come back worded differently, so its key misses. First
+    every exact key claims its stored row; then a row left over takes a stored row of the same day and amount that no key
+    claimed, the most similar wording first, each stored row once. A row the earlier file lacks (the later one goes further
+    into that day) stays new."""
+    lo, hi = min(k[0] for k in keyed), max(k[0] for k in keyed)
+    held = conn.execute("SELECT id, txn_date, amount, merchant, dedupe_key FROM transactions WHERE account_id=?"
+                        " AND source='mutation' AND txn_date BETWEEN ? AND ?", (account_id, lo, hi)).fetchall()
+    keys, held_keys = {k[4] for k in keyed}, {h["dedupe_key"] for h in held}
+    free: dict[tuple, list] = defaultdict(list)
+    for h in held:
+        if h["dedupe_key"] not in keys:
+            free[(h["txn_date"], h["amount"])].append((h["id"], normalize(h["merchant"])))
+    left: dict[tuple, list] = defaultdict(list)
+    for i, (d, _, amount, norm, key) in enumerate(keyed):
+        if key not in held_keys and (d, amount) in free:
+            left[(d, amount)].append((i, norm))
+    out: set[int] = set()
+    for group, rows in left.items():
+        taken = set()
+        for _, hid, i in sorted((-SequenceMatcher(None, norm, m).ratio(), hid, i) for i, norm in rows for hid, m in free[group]):
+            if i not in out and hid not in taken:
+                out.add(i)
+                taken.add(hid)
+    return out
+
+
 def _purge_file(conn, file_hash: str) -> int:
     """Remove what an earlier (incomplete) recording of this file stored. Returns rows that had a category."""
     ids = [r[0] for r in conn.execute("SELECT id FROM transactions WHERE file_hash=?", (file_hash,))]
@@ -63,10 +100,11 @@ def record_mutations(conn: sqlite3.Connection, account_alias: str, file_hash: st
                      period_end: str, opening_balance: int | None, closing_balance: int | None,
                      rows: list[dict], replace: bool = False) -> dict:
     """rows: [{date, description, amount (signed), balance?}]. Idempotent: re-sending a file or an
-    overlapping period adds only rows not seen before. `replace=True` re-records a file that was stored
-    incompletely (its earlier rows are removed first). Two checks decide `reconciled`: opening + rows = closing
-    (within Rp 3 of rounding) and, when ingest_statement counted the document's dated lines, that no rows are
-    missing: balances alone miss credit/debit pairs that cancel each other out."""
+    overlapping period adds only rows not seen before, also when another document worded them differently (_reworded).
+    `replace=True` re-records a file that was stored incompletely (its earlier rows are removed first). Two checks
+    decide `reconciled`: opening + rows = closing (within Rp 3 of rounding) and, when ingest_statement counted the
+    document's dated lines, that no rows are missing: balances alone miss credit/debit pairs that cancel each other out.
+    A third, over the ledger (ledger_gap), warns when the account's rows in the period no longer add up to the file."""
     if len(file_hash) != 64:
         raise ValueError("file_hash must be the sha256 from ingest_statement")
     if not 0 < len(rows) <= MAX_ROWS:
@@ -109,14 +147,19 @@ def record_mutations(conn: sqlite3.Connection, account_alias: str, file_hash: st
     reconciled = balanced and missing == 0
 
     counts: dict[tuple, int] = defaultdict(int)
-    new, debits = 0, []
-    rules = {p: c for p, c in conn.execute("SELECT pattern, category FROM category_rules")}
+    keyed = []
     for d, desc, amount in parsed:
         key_base = (d, amount, normalize(desc))
         counts[key_base] += 1       # n-th identical row of the day within this file
         raw = f"{acct['id']}|{d}|{amount}|{key_base[2]}|{counts[key_base]}"
-        key = hashlib.sha256(raw.encode()).hexdigest()
-        category = rules.get(key_base[2])
+        keyed.append((d, desc, amount, key_base[2], hashlib.sha256(raw.encode()).hexdigest()))
+    reworded = _reworded(conn, acct["id"], keyed)
+    new, debits = 0, []
+    rules = {p: c for p, c in conn.execute("SELECT pattern, category FROM category_rules")}
+    for i, (d, desc, amount, norm, key) in enumerate(keyed):
+        if i in reworded:
+            continue
+        category = rules.get(norm)
         cur = conn.execute(
             "INSERT OR IGNORE INTO transactions(account_id,txn_date,merchant,amount,category,status,source,"
             "dedupe_key,file_hash) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -136,14 +179,24 @@ def record_mutations(conn: sqlite3.Connection, account_alias: str, file_hash: st
     conn.commit()
     out = {"status": "replaced" if lost_categories is not None else "stored", "rows": len(parsed), "new_rows": new,
            "already_known": len(parsed) - new, "reconciled": reconciled}
+    if reworded:
+        out["matched_by_date_amount"] = len(reworded)     # already stored from another file in other words: not added
     if lost_categories:
         out["lost_categories"] = lost_categories     # manual categories on the old rows of this file are gone
     warnings = []
     if not balanced:
         warnings.append(f"REKONSILIASI TIDAK COCOK: saldo akhir tercetak {closing_balance}, hasil hitung "
                         f"{opening_balance + total}, selisih {diff}. Ada baris yang mungkin hilang atau salah baca.")
-    elif diff:
-        out["note"] = f"selisih Rp {diff} dianggap pembulatan sen"
+    else:
+        if diff:
+            out["note"] = f"selisih Rp {diff} dianggap pembulatan sen"
+        if opening_balance is not None and closing_balance is not None:
+            held, gap = ledger_gap(conn, acct["id"], period_start, period_end, opening_balance, closing_balance)
+            if abs(gap) > ROUNDING_TOLERANCE:
+                warnings.append(f"BUKU TIDAK COCOK: semua baris rekening ini {period_start} s.d. {period_end} di buku "
+                                f"berjumlah {held}, perubahan saldo berkas ini {closing_balance - opening_balance}, selisih "
+                                f"{gap}. Ada baris ganda atau hilang dari berkas lain yang periodenya bertumpuk: laporkan ke "
+                                "pemilik, jangan dikoreksi sendiri.")
     if missing:
         warnings.append(f"BARIS KURANG: dokumen memuat {expected} baris bertanggal, hanya {len(parsed)} yang dikirim "
                         f"(kurang {missing}). Baca ulang SEMUA bagian dan kirim ulang lengkap dengan replace=true.")

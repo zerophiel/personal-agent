@@ -7,12 +7,15 @@ quietly flowing into a plan. No model judgement: each finding is a fixed rule ov
 - a subscription whose recorded monthly amount differs from what the cards actually charged, or that was not charged;
 - a charge that repeats every month but is not recorded as a subscription;
 - a card instalment that no longer appears on the card's latest statement;
-- a pot whose balance has not been reported for a while (the projection then runs on an old figure)."""
+- a pot whose balance has not been reported for a while (the projection then runs on an old figure);
+- a bank account whose rows over a mutation file's period, from every file, do not add up to that file's balance change
+  (a row stored twice from two overlapping documents, or lost between them)."""
 from __future__ import annotations
 
 import re
 from datetime import date, timedelta
 
+from . import mutations
 from .money import format_idr
 
 STATEMENT_EVERY_DAYS = 35      # a card prints a statement about every 30 days; later than this, the newest one is missing
@@ -141,12 +144,22 @@ def run(conn, today: date) -> list[tuple[str, str]]:
         if age > POT_STALE_DAYS:
             out.append(("info", f"Saldo pot {f['alias']} terakhir diperbarui {f['saved_asof']} ({age} hari lalu). Laporkan saldo di aplikasi bank "
                                 "(saldo_pot) supaya proyeksi memakai angka nyata."))
+    # 8. bank mutation files that balance on their own: the account's rows over the period, whichever file brought them
+    for f in conn.execute("SELECT a.alias, m.* FROM mutation_files m JOIN accounts a ON a.id = m.account_id WHERE m.reconciled = 1"
+                          " AND m.opening_balance IS NOT NULL AND m.closing_balance IS NOT NULL AND m.period_end >= ?"
+                          " ORDER BY a.alias, m.period_start, m.period_end", ((today - timedelta(days=200)).isoformat(),)):
+        held, gap = mutations.ledger_gap(conn, f["account_id"], f["period_start"], f["period_end"], f["opening_balance"],
+                                         f["closing_balance"])
+        if abs(gap) > mutations.ROUNDING_TOLERANCE:
+            out.append(("bad", f"Mutasi {f['alias']} {f['period_start']} s.d. {f['period_end']}: baris di buku berjumlah {format_idr(held)}, "
+                               f"padahal saldo berkas berubah {format_idr(f['closing_balance'] - f['opening_balance'])} (selisih "
+                               f"{format_idr(abs(gap))}). Ada baris ganda atau hilang dari berkas yang periodenya bertumpuk; laporkan ke pemilik."))
     return out
 
 
 def format_audit(findings: list[tuple[str, str]]) -> str:
     if not findings:
-        return "PERIKSA DATA: semua sumber cocok (tagihan, baris tagihan, pembayaran, langganan, cicilan, pot)."
+        return "PERIKSA DATA: semua sumber cocok (tagihan, baris tagihan, pembayaran, langganan, cicilan, pot, mutasi)."
     mark = {"bad": "MASALAH", "warn": "PERHATIAN", "info": "INFO"}
     order = {"bad": 0, "warn": 1, "info": 2}
     lines = [f"PERIKSA DATA: {sum(1 for s, _ in findings if s == 'bad')} masalah, {sum(1 for s, _ in findings if s == 'warn')} perhatian, "
