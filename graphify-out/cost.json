@@ -12,8 +12,15 @@
       "input_tokens": 211415,
       "output_tokens": 0,
       "files": 120
+    },
+    {
+      "date": "2026-11-01T01:34:24.885467+00:00",
+      "input_tokens": 16148467,
+      "output_tokens": 2990217,
+      "files": 19,
+      "note": "deep --update of the 19 docs changed since 31 Oct: a standard-depth pass (3 agents, discarded as thinner than the previous extraction), 8 deep agents (the usage limit stopped 7; group 7's output was not used) and 2 agents redoing group 7 (PROGRESS; calibration and payday). 13 agents; tokens summed per turn from their transcripts, input counts cache reads and writes"
     }
   ],
-  "total_input_tokens": 1136872,
-  "total_output_tokens": 0
+  "total_input_tokens": 17285339,
+  "total_output_tokens": 2990217
 }

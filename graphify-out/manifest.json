@@ -613,9 +613,9 @@
   },
   "docs/PROGRESS.md": {
     "mtime": 1793476149.197467,
-    "seen": 1793480755.54521,
+    "seen": 1793496374.184088,
     "ast_hash": "ae2e482a24920feea28d1000a24074b9",
-    "semantic_hash": ""
+    "semantic_hash": "ae2e482a24920feea28d1000a24074b9"
   },
   "docs/RUNBOOK.md": {
     "mtime": 1793476149.0734673,
@@ -637,15 +637,15 @@
   },
   "docs/calibration.md": {
     "mtime": 1793472923.861605,
-    "seen": 1793480755.5452118,
+    "seen": 1793496374.1840906,
     "ast_hash": "cb3eee217f009314309566c2af998b7f",
-    "semantic_hash": ""
+    "semantic_hash": "cb3eee217f009314309566c2af998b7f"
   },
   "docs/payday.md": {
     "mtime": 1793470515.7305248,
-    "seen": 1793480755.5452125,
+    "seen": 1793496374.1840913,
     "ast_hash": "d0ae1f7e23900a1647691ce9852d887e",
-    "semantic_hash": ""
+    "semantic_hash": "d0ae1f7e23900a1647691ce9852d887e"
   },
   "docs/runtime/README.md": {
     "mtime": 1793476230.359294,
