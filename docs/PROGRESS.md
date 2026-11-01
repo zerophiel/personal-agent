@@ -358,6 +358,37 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 - Tests: 530 across all suites; new `tests/test_zones.py` (one network per service, only control mounts the decisions,
   front's mounts and toolsets, groups dropped and no Opus or Fable in any zone).
 
+## Admin fees, bills paid once, undoing an instalment (Deploy 2, 2026-11-01, owner: "lanjut sampai selesai"; "Tunggakan coway 540 sudah lunas dari tanggal 30")
+- Admin fees (/usulan #4, the owner's estimates): Rp 7.500 per card payment (a transfer to a card number), Rp 6.500 per other
+  transfer; the Mandiri card (bank-app menu) and the auto-debits cost nothing. The plan pays each fee with its payment, once
+  per destination, only when something is paid, keeps the living money's fee with the reserve and lists the fees apart:
+  transfers + fees + cash = salary (`docs/payday.md`). They count from the 30 Nov payday (`biaya_admin_mulai` 20261130):
+  plan #62 (30 Oct), already carried out, keeps its numbers, so the les Mandarin transfer still open this cycle carries a
+  fee of about 6.500 that no plan holds. status_gajian, `saldo_rekening`, /rincian, the report and Notion show the code's
+  total. The simulation: the plan's fees in cycle 1, then `fee_estimate`, 102.500 a cycle on the live ledger (six fixed
+  costs, the pot, the emergency fund and the living money at 6.500; five card payments at 7.500 and Jenius at 6.500).
+  Conservative: every card with a bill now counts every month, the emergency fund after its target too.
+- The fees moved the projection, not the allocation: plan #63 (30 Oct, the same transfers and cash as #62) says pot
+  hutang-teman 132.662.546 of 135.000.000 by 2028-01-31, 2.337.454 short (799.954 before the fees). A 30 Nov preview from
+  today's data has 66.000 of fees (the November card bills are not in yet).
+- Bills paid once (/usulan #6): `tagihan_sekali` (catat, daftar, lunas, buka, batal), in the plans after the day it was
+  recorded (`docs/payday.md`). `transfer_selesai` marks one paid. A bill already paid when mentioned is an expense.
+- `cicilan_dibayar batal=true` undoes an instalment recorded by mistake: the debt gets back exactly what that record took
+  (from the change log; for a record from before the log, its amount), tenor + 1, and an auto-debit is counted again.
+- The vault service has `stop_grace_period: 60s`: Docker's default 10 s killed Hermes mid-drain ("exited UNCLEANLY").
+- Data fix (`ops/datafix/2026-11-01-deploy2/`): the three fee keys, `biaya_admin_mulai` first; the Coway arrears of 540.000,
+  paid 30 Oct from the Mandiri balance (the owner to the bot, 30 Oct 15:54 and 16:00, and in the Claude Code session on
+  1 Nov), recorded as expense #2447 (receipt, mandiri-utama, `sekali:coway-tunggakan` like the 13 Oct rows): it merges into
+  its Mandiri row when the October e-statement is stored, if the bank shows one debit of 540.000; usulan #4 and #6
+  `selesai`; the plan made again only after a copy showed the allocation unchanged.
+- Schema 14 (`one_off_bills`). Commits e0bc2e4, d1c7c46. 573 tests across all suites (460 vault-tools); the 200 random
+  ledgers have fees and bills paid once. Dry run on a copy of the live ledger with the new code: the same report as live.
+- Deployed 2026-11-01 10:25-10:27 WIB with `deploy.sh`: bot idle; backup `ledger.db.bak-pre-deploy2` (integrity ok,
+  schema 13, 1.920 transactions, 62 plans); rsync; compose ok; vault-tools rebuilt (healthy); data fix; vault recreated
+  (stop timeout 60); SOUL.md and the cardguard plugin hash as the repo; Hermes listed 57 tools at 10:27:03
+  (`tagihan_sekali`, `cicilan_dibayar` with `batal`); no errors in either log. CHECK report OK: plan #63 = #62 in money,
+  only les-mandarin-manuel 800.000 open.
+
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
 2. Closing the pot gap without the children's needs: games (owner's own), apps not marked `wajib`, or talking to the friend.
@@ -372,8 +403,7 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 8. (fixed 2026-10-30: own records merge only into a debit of their own bank, see above)
 9. (fixed 2026-10-30: a record made after its statement merges at once; a re-sent screenshot of a merged purchase is flagged)
 10. (fixed 2026-10-30: merged records can be corrected, deleted or let go with `lepas`; cash records never merge; see above)
-11. Coway Rp 540.000 in arrears (2 months, owner 30 Oct 15:54): not in any plan yet (/usulan #6). Paid already, or from
-    which money before 30 Nov?
+11. (answered 2026-11-01: the Coway arrears of 540.000 were paid 30 Oct from the Mandiri balance; expense #2447, Deploy 2)
 12. The bot told the owner 'Jago "fixed-expenses" …9703' was registered: it is not (`accounts` has the alias, `payee_secrets`
     has no number for it). Only if the bot should name it as a destination: `/rekening fixed-expenses Jago <nomor>`. The
     owner pasted that account's full number in the chat on 30 Oct 16:02; it is in Hermes `state.db`.
@@ -383,22 +413,21 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 16. Front zone: when to start it (two secrets, RUNBOOK "Front zone"), and whether it gets a card-number guard first.
 
 ## Next steps
-- Owner: send `/new` once after the 1 Nov 01:53 deploy (the recalibration section above; it also covers the 00:37 and
-  01:24 ones).
+- Owner: send `/new` once after the 1 Nov 10:27 deploy (Deploy 2 above; it also covers the earlier 1 Nov deploys).
 - (done 2026-11-01, the recalibration section above) The number guard's four flags on 30-31 Oct were the bot's own
   arithmetic or its own reading of a photo. At each calibration, read the replies it flagged since the last one ("Cek
   angka" in Hermes `state.db`): each is a number no tool gave, and the fix is a tool that gives it.
-- Vault restarts often log "Previous gateway life exited UNCLEANLY" (8 times, latest the 1 Nov 00:36 restart; 2
-  `drain_timeout`): compose sets no `stop_grace_period`, so Docker kills Hermes after 10 s. For deploy 2, with the owner:
-  a longer grace (for example 60 s) on the vault service.
+- (done 2026-11-01, Deploy 2) Vault restarts often logged "Previous gateway life exited UNCLEANLY" (8 times up to the
+  1 Nov 00:36 restart): the vault service now has `stop_grace_period: 60s`. At the next restarts, check it is gone.
 - (done 2026-10-31 14:04) Owner sent `/new` after the 30 Oct evening deploy. Still open: les Mandarin once paid
   (`transfer_selesai`), and the Mandiri October e-statement sent 30 Oct 16:14: it is still in /ingest/telegram (90-day
   retention); the bot read it twice with `ingest_statement` but the session reset at 16:17 before `record_mutations`, so
   the owner only asks the bot to record that file, no re-send.
-- Before the 30 Nov payday (deploy 2): admin fees as an estimated essential cost (/usulan #4: 7.500 per card payment,
-  6.500 per transfer); one-off bills such as the Coway arrears (/usulan #6); an undo for `cicilan_dibayar`; the
-  `format_autodebit_check` sentence when nothing is debited. After a week: compare cached tokens per turn and compactions
-  per day with the 60K week.
+- (done 2026-11-01, Deploy 2 above) Admin fees, bills paid once, the `cicilan_dibayar` undo; the `format_autodebit_check`
+  sentence was fixed in the recalibration. Still open: after a week, compare cached tokens per turn and compactions per
+  day with the 60K week.
+- After the Mandiri October e-statement is stored: Coway #2447 must be merged into its 540.000 debit of 30 Oct. If the
+  bank shows the fee inside that debit (one row of another amount), it is not: fix #2447 with the owner (`ubah_belanja`).
 - (done 2026-10-30 morning) Owner sent `/new` once before the payday session (deploy: `lepas`/`tunai` on `ubah_belanja`,
   `tunai` on `record_expense`, SOUL). The bot now asks where a purchase was paid from when the screenshot does not show it.
 - Done 2026-10-30 (session from 10:02 WIB, edit 10:04 WIB): owner sent `/new` and had the bot fix PHO STREET #2440 (Jenius ->

@@ -1,4 +1,4 @@
--- Live ledger schema (sqlite_master of /data/ledger.db), user_version 13, collected 2026-11-01T02:50:30+07:00 by ops/runtime-map/collect.py.
+-- Live ledger schema (sqlite_master of /data/ledger.db), user_version 14, collected 2026-11-01T10:29:25+07:00 by ops/runtime-map/collect.py.
 -- Source of truth for changes: services/vault-tools/vault_tools/ledger.py (DDL + _migrate). Money columns are INTEGER Rupiah.
 
 CREATE TABLE accounts (
@@ -135,6 +135,14 @@ CREATE TABLE plan_progress (   -- a transfer of a payday's plan the owner said i
 
 CREATE TABLE fund_reports (   -- emergency fund / pot balances as the owner read them: a plan uses the last one BEFORE its payday
   id INTEGER PRIMARY KEY, fund TEXT NOT NULL, reported_on TEXT NOT NULL, balance INTEGER CHECK (typeof(balance)='integer') NOT NULL, created_at TEXT NOT NULL);
+
+CREATE TABLE one_off_bills (   -- a bill paid once (arrears, a repair): planned by the payday it was recorded before
+  id INTEGER PRIMARY KEY, alias TEXT NOT NULL UNIQUE, name TEXT NOT NULL, amount INTEGER CHECK (typeof(amount)='integer') NOT NULL CHECK (amount > 0),
+  due_date TEXT NOT NULL, method TEXT NOT NULL DEFAULT 'transfer' CHECK (method IN ('transfer','app_menu')),
+  pay_to_alias TEXT,                    -- payee alias of the number it is paid to (registered with /rekening or /va)
+  status TEXT NOT NULL DEFAULT 'terbuka' CHECK (status IN ('terbuka','lunas','batal')), paid_on TEXT, note TEXT,
+  recorded_on TEXT NOT NULL,            -- the server's day it was first recorded: which payday plans have it
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 
 CREATE INDEX idx_txn_date ON transactions(txn_date);
 
