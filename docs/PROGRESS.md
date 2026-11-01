@@ -1,6 +1,6 @@
 # Progress and resume point (finance / vault)
 
-Last updated: 2026-10-30. Branch `worktree-m1-skeleton`, draft PR #1. 384 vault-tools tests pass.
+Last updated: 2026-11-02. Branch `worktree-m1-skeleton`, draft PR #1. 663 tests pass (480 in vault-tools).
 No secrets or personal amounts are recorded here; the numbers live in the ledger on the VPS.
 
 ## Done
@@ -24,7 +24,7 @@ Biggest avoidable costs: game/digital top-ups (PlayStation, Steam, Apple non-One
 Fixed this session: the current bill is the latest by statement date; the same card+statement date is one bill (duplicates from email + Telegram).
 
 ## Payday 30 Oct 2026: scenario A (owner approved 2026-10-28)
-Owner paid BCA 1.538.834 on 28 Oct from Mandiri (recorded); the living cash he still holds counts toward this payday's living money (since 2026-10-30 stored as the owner's own figure `living_leftover`, see "Leftover living cash as a fact" below; the derived `living_reserve_override` is gone). Effect at the time: Jenius paid in full (6.361.689 + minimum on 10 Nov), HSBC +1.179.205, other cards minimum; card interest next month ~173k instead of ~309k; card balance ~10.6M, cleared ~Jul 2027 (was ~Oct 2027). SPayLater autodebit day 1 (270k x 5, Nov-Mar), car autodebit day 2; salary must land in Mandiri on 30 Oct. The plan's living transfer for this cycle is only the part taken from the salary; real daily cash is the full `living_reserve`.
+Owner paid BCA 1.538.834 on 28 Oct from Mandiri (recorded); the living cash the owner still holds counts toward this payday's living money (since 2026-10-30 stored as the owner's own figure `living_leftover`, see "Leftover living cash as a fact" below; the derived `living_reserve_override` is gone). Effect at the time: Jenius paid in full (6.361.689 + minimum on 10 Nov), HSBC +1.179.205, other cards minimum; card interest next month ~173k instead of ~309k; card balance ~10.6M, cleared ~Jul 2027 (was ~Oct 2027). SPayLater autodebit day 1 (270k x 5, Nov-Mar), car autodebit day 2; salary must land in Mandiri on 30 Oct. The plan's living transfer for this cycle is only the part taken from the salary; real daily cash is the full `living_reserve`.
 Roadmap now subtracts confirmed subscriptions and grows the card-clearing capacity as installments, the pot and the car end.
 
 ## Telegram bot (vault) 2026-10-28
@@ -90,7 +90,7 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 
 ## Leftover living cash as a fact; subscription notes kept (2026-10-30)
 - Bug: `sisa_uang_harian` stored a derived top-up (`living_reserve_override` = living money - leftover). When the owner later
-  changed `living_reserve` (7.500.000 -> 7.546.005) the 30 Oct plan #53 said "move 4.940.162", a figure he never had;
+  changed `living_reserve` (7.500.000 -> 7.546.005) the 30 Oct plan #53 said "move 4.940.162", a figure the owner never had;
   following it would have left Mandiri 46.005 short of the auto-debits (SPayLater 1 Nov + car 2 Nov + 100.000 the bank holds).
 - Fix: the owner's figure is stored (`living_leftover`, `_payday`, `_at`; blocked in `set_threshold`); the salary part
   (`living_reserve` - leftover) is computed when the plan is made; invariant: salary part + leftover = living money, amount to
@@ -578,6 +578,56 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   days after a payday, when `current_payday` turns to the coming one (`PAYDAY_LOOKBACK_DAYS`). `pa-notion.timer` plans
   daily at 06:30 WIB, so on 7 Nov the daily money would have gone silent until 30 Nov ("Belum ada rencana gajian yang
   berjalan" on a balance reading). The writer is right (one row per payday per change); only the readers change.
+- Fixed (d597836): `plan_in_force(conn, today)` is the latest payday's plan on or before today, `stored_plan(conn,
+  payday)` one payday's newest. `spending_pace` and `_living_balance` read the plan in force, and only while today is
+  before its next payday; `_open_transfers` reads the plan of `current_payday(today)`. On a copy of the live ledger:
+  the 2 Nov pace is the same before and after a 30 Nov plan is stored, 7 and 10 Nov keep the 30 Oct plan, and 30 Nov
+  reads its own. Live since 2 Nov 01:23 WIB (section "Deployed 2 Nov 01:23 WIB" below).
+
+## Payday transfers wait for their category before they count as daily money (2026-11-02 night, decided under the owner's delegation; reversible)
+- Found on 2 Nov: the 30 Oct payday's transfers and fees out of the salary account, uploaded on 1 Nov without
+  categories (October's categorizing is still to come), counted as day-to-day spending. The month read as almost all
+  spent: 'watch' at 89% in `ringkasan_data`, `health_check`, `/anggaran` (a large "selisih saldo") and every purchase
+  alert. The figure left was right only because the daily account's reading anchors it. Matching such rows to plan
+  items cannot work: each card's two items are paid as one transfer, and several rows differ from the plan by a fee.
+- Rule (`UNSORTED_ELSEWHERE`, health.py, commit a7db18b): a `mutation` row with no category, on an account of another
+  bank than `LIVING_ACCOUNT`'s, with no receipt merged into it, waits for its category and is reported, not counted.
+  A row of any Jago account still counts (Jago files every pocket under one account), and without a daily account
+  every row counts, as before. Once categorized, a row counts as spending or stays out as an obligation.
+- Where it shows: "BELUM DIHITUNG: N mutasi keluar ..." in `ringkasan_data`, "belum dihitung: ..." in `/anggaran`, an
+  info finding in `health_check`.
+- Live since 2 Nov 01:23 WIB. The read-only live check with the deployed code shows 30% used ('ok'), the same figure
+  left, and 23 rows waiting for a category. To undo: drop the fragment from `_spent_by_category` and `_by_balance`.
+
+## transfer_selesai asks which payday's plan from a week after a payday (2026-11-02 night, under the owner's delegation)
+- Found with the rehearsal: from `PAYDAY_LOOKBACK_DAYS` after a payday, `transfer_selesai` marked the coming payday's
+  plan. A transfer of the month paid but not marked (a lesson fee of the 30 Oct plan, paid 30 Oct) would have been
+  marked in the 30 Nov plan, and `semua=true` would have marked all of the 30 Nov plan weeks before its salary.
+- Rule (commit eeec197): from then on two plans are open, the month's (`plan_in_force`) and the coming one. A
+  destination open in both (marked in both, for undo) is asked for: the tool names both paydays and due dates, and the
+  bot repeats with `gajian`. A destination open in one plan only goes there; a one-off bill is one bill in both.
+  `semua=true` without `gajian` is the month's plan; when nothing is open there, the answer says how to mark the
+  coming one. In a payday's week nothing changes.
+- On a copy of the live ledger, simulated 8 Nov: the lesson fee is asked for, `gajian='2026-10-30'` marks it in the 30
+  Oct plan, `semua=true` marks only that, and the 30 Nov plan stays unmarked. Live since 2 Nov 01:23 WIB; the MCP
+  catalog shows `gajian`.
+- Owner: `/new` to the vault bot once (a new tool parameter). The lesson fee of 30 Oct is still unmarked: tell the bot
+  it was paid on 30 Oct (before 7 Nov there is no question; after, answer "gajian 30 Oktober").
+
+## Deployed 2 Nov 01:23 WIB: the plan in force, the daily-money pace, transfer_selesai, q21 (under the owner's delegation)
+- Backup `ledger.db.bak-pre-plan-in-force` (01:22, integrity ok). Both bots idle (the vault's last log line was the
+  23:23 restart).
+- `make deploy`: vault-tools rebuilt and recreated at 01:23; control rebuilt from cache (its tag gets a new image id on
+  every build; the running container keeps its image); vault and front untouched (front's profile is not in `up`). The
+  30 deployed `vault_tools` files equal the repo, and the image has no Python caches.
+- q21's one-time part: `make deploy` does not build the `jobs` profile and `pa-ingest.service` runs without `--build`,
+  so the ingest-gmail image was rebuilt by hand (`--profile jobs build ingest-gmail`, 01:23, no caches inside). rsync
+  `--delete` keeps excluded paths, so the 19 `__pycache__` folders from earlier syncs were removed from
+  /opt/personal-agent once.
+- `restart vault` at 01:24 while idle: exited cleanly, Telegram connected, 57 MCP tools, 59 schemas, no error since.
+  Hermes sends its shutdown notice to the owner's Telegram on every restart.
+- Read-only live check with the deployed code: plan in force 2026-10-30, pace 30% used ('ok'), 23 rows waiting for a
+  category. `make runtime-map` after it (commit e41db72).
 
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
@@ -620,12 +670,19 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
     cardguard owner check; section "Two overlapping bank files" above)
 20. (done 2026-11-01 23:13 WIB on the owner's "Gas sekarang": the card-repayment fix is live; section "A card's
     repayment is its bill" above)
-21. `make deploy` ships local `__pycache__` folders (its rsync excludes `.git`, `.claude`, decrypted secrets,
-    `graphify-out` and `CLAUDE.md` only). After any local test run, vault-tools' build context differs, so a deploy
-    rebuilds and recreates it and the vault needs a restart while idle, as on 1 Nov 23:22 with no vault-tools change.
-    Add `--exclude __pycache__` to the rsync (a repo change; the bots' code stays the same)?
+21. (done 2026-11-02 01:23 WIB, decided under the owner's delegation: `--exclude __pycache__` in the rsync, a
+    `.dockerignore` for vault-tools and ingest-gmail, `tests/test_deploy.py`; the deploy rebuilt both images once and
+    removed the 19 stale folders on the VPS, section "Deployed 2 Nov 01:23 WIB" above) `make deploy` shipped local
+    `__pycache__` folders, so after any local test run a deploy rebuilt and recreated vault-tools.
+22. `health_check` says WASPADA because the salary account's balance fell two periods in a row. Its period-end
+    closings depend on how much of the salary was still there when each bank file ends, and the payday empties it by
+    design (October's closing comes after the 30 Oct transfers). Keep the warning, compare balances just before each
+    payday, or leave the salary account out of the trend? A manual calibration for the owner; nothing changed.
 
 ## Next steps
+- Owner, after the 2 Nov 01:23 WIB deploy: `/new` once to vault (`transfer_selesai` has `gajian`), and tell the
+  bot the 30 Oct lesson fee is paid. October's categorizing goes on; each categorized payday row leaves "belum
+  dihitung".
 - (done 2026-11-01 20:13 WIB) The doubled-rows fix. Owner: `/new` once to vault, whose session still holds the 186,8
   juta reply. Bank files over an already recorded period are fine again: same-day same-amount rows match, and BUKU
   TIDAK COCOK flags a row the second file dates otherwise.
@@ -643,7 +700,7 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   Telegram network errors at 23:01 and 23:04): the bot was idle, nothing to recover, no error since. The 23:23
   restart (M3) exited cleanly again. Keep watching.
 - (done 2026-10-31 14:04) Owner sent `/new` after the 30 Oct evening deploy. Still open: les Mandarin once paid
-  (`transfer_selesai`; the 30 Oct payday's progress has no such item yet). The Mandiri October e-statement was recorded
+  (`transfer_selesai`; paid 30 Oct, still unmarked on 2 Nov, see "transfer_selesai asks" above). The Mandiri October e-statement was recorded
   on 1 Nov 18:23 WIB (see "Two overlapping bank files" above).
 - (done 2026-11-01, Deploy 2 above) Admin fees, bills paid once, the `cicilan_dibayar` undo; the `format_autodebit_check`
   sentence was fixed in the recalibration. Still open: after a week, compare cached tokens per turn and compactions per
@@ -678,4 +735,6 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 
 ## Operating notes
 - Deploy: `rsync` from the worktree ROOT (never a subfolder: `--delete` wipes the server tree), back up `ledger.db` first, rebuild `vault-tools`, restart `vault`. Owner must `/new` in Telegram after tool or SOUL changes (owner plans to do it once data and system are done). Since 2026-11-01 23:23 WIB the applier is installed: `make deploy` refuses while the VPS has an applied front change this checkout lacks (`make applied-pull`, push, deploy again).
+- `make deploy` never builds the `jobs` profile and `pa-ingest.service` runs without `--build`: after an ingest-gmail
+  change, run `--profile jobs build ingest-gmail` on the VPS (as on 2 Nov 01:23 WIB).
 - Run the vault agent for batches via `hermes chat --oneshot`, ask for status only, and use a Monitor script for progress.
