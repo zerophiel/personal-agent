@@ -33,8 +33,15 @@
       "output_tokens": 189031,
       "files": 14,
       "note": "delta --update of the 14 docs changed since bd5ad48 (front live: PROGRESS, RUNBOOK, SECURITY, front SOUL; live-bot snapshot 11:45 WIB), 5 agents; community names audited after the re-cluster (25 renamed, 49 named)"
+    },
+    {
+      "date": "2026-11-01T09:50:10.283723+00:00",
+      "input_tokens": 3514146,
+      "output_tokens": 207944,
+      "files": 5,
+      "note": "delta --update of the 5 docs changed since 2188d82 (the applier, built and not installed: SECURITY contract, RUNBOOK install and rollback, ARCHITECTURE outcome folder, PROGRESS section and open questions 17-18, assumptions M2 gate checks), 2 agents; make graph for the 16 changed code files; community names audited after the re-cluster (77 named, 13 renamed)"
     }
   ],
-  "total_input_tokens": 25614839,
-  "total_output_tokens": 3463534
+  "total_input_tokens": 29128985,
+  "total_output_tokens": 3671478
 }

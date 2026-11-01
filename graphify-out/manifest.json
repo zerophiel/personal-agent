@@ -1,9 +1,9 @@
 {
   "compose/docker-compose.yml": {
-    "mtime": 1793507345.19974,
-    "seen": 1793509430.9949625,
-    "ast_hash": "a6b7c364844ef401634dc346b2af3110",
-    "semantic_hash": "a6b7c364844ef401634dc346b2af3110"
+    "mtime": 1793522364.4710915,
+    "seen": 1793526139.579198,
+    "ast_hash": "e0c82e1bfb8d9687b1c25810b16083b6",
+    "semantic_hash": "e0c82e1bfb8d9687b1c25810b16083b6"
   },
   "docs/runtime/ledger-schema.sql": {
     "mtime": 1793508316.7262309,
@@ -144,10 +144,10 @@
     "semantic_hash": "180fae2d302cc1066a259f2893a220f2"
   },
   "services/control/control.py": {
-    "mtime": 1793474051.5815537,
-    "seen": 1793480755.5451546,
-    "ast_hash": "3d8b4cf5c1368feb85fbbe9f4c3c37fc",
-    "semantic_hash": "3d8b4cf5c1368feb85fbbe9f4c3c37fc"
+    "mtime": 1793521794.1511223,
+    "seen": 1793526139.5792527,
+    "ast_hash": "853d5a5744352fda082f20d3aa7d211f",
+    "semantic_hash": "853d5a5744352fda082f20d3aa7d211f"
   },
   "services/control/tests/__init__.py": {
     "mtime": 1793068267.9938006,
@@ -156,10 +156,10 @@
     "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
   },
   "services/control/tests/test_control.py": {
-    "mtime": 1793474051.6215537,
-    "seen": 1793480755.5451558,
-    "ast_hash": "d88489a98291b203f16c5e1503c871c5",
-    "semantic_hash": "d88489a98291b203f16c5e1503c871c5"
+    "mtime": 1793521794.2111225,
+    "seen": 1793526139.579254,
+    "ast_hash": "9c5138a0bcd6b16160b99b3a5b9c1468",
+    "semantic_hash": "9c5138a0bcd6b16160b99b3a5b9c1468"
   },
   "services/hermes/vault/config.yaml": {
     "mtime": 1793475817.9334793,
@@ -168,10 +168,10 @@
     "semantic_hash": "e0dd5adf05101a2759fe427ce789b137"
   },
   "services/hermes/vault/plugins/cardguard/__init__.py": {
-    "mtime": 1793471763.913655,
-    "seen": 1793480755.545158,
-    "ast_hash": "bdeef8d103992fbdea14c07d11272fb0",
-    "semantic_hash": "bdeef8d103992fbdea14c07d11272fb0"
+    "mtime": 1793519508.227222,
+    "seen": 1793526139.579259,
+    "ast_hash": "f3c2bb0c78b39f3afc31750c8e8ca81c",
+    "semantic_hash": "f3c2bb0c78b39f3afc31750c8e8ca81c"
   },
   "services/hermes/vault/plugins/cardguard/plugin.yaml": {
     "mtime": 1793073846.2928567,
@@ -180,10 +180,10 @@
     "semantic_hash": "43794590b47ab67977d9b99af2b651e0"
   },
   "services/hermes/vault/tests/test_cardguard.py": {
-    "mtime": 1793471829.3614833,
-    "seen": 1793480755.545159,
-    "ast_hash": "082c783564bcad2bd361e5a34151ba59",
-    "semantic_hash": "082c783564bcad2bd361e5a34151ba59"
+    "mtime": 1793519583.8032167,
+    "seen": 1793526139.57926,
+    "ast_hash": "676b232cd904f383a36498c6945448bb",
+    "semantic_hash": "676b232cd904f383a36498c6945448bb"
   },
   "services/ingest-gmail/ingest_gmail/__init__.py": {
     "mtime": 1793082333.0261114,
@@ -600,10 +600,10 @@
     "semantic_hash": "1979cb313a9f66d5e1a1e24fdba3b522"
   },
   "docs/ARCHITECTURE.md": {
-    "mtime": 1793474440.8415415,
-    "seen": 1793480755.5452092,
-    "ast_hash": "6afa09aef2963bf8486bb582e2a8ddd4",
-    "semantic_hash": "6afa09aef2963bf8486bb582e2a8ddd4"
+    "mtime": 1793523565.163045,
+    "seen": 1793526139.5793107,
+    "ast_hash": "58fa42fddbfe71e161f991e93945ab60",
+    "semantic_hash": "58fa42fddbfe71e161f991e93945ab60"
   },
   "docs/GMAIL_OAUTH.md": {
     "mtime": 1793082153.7541428,
@@ -612,28 +612,28 @@
     "semantic_hash": "9a618bdc62e8f09780bb02bd79cc63e9"
   },
   "docs/PROGRESS.md": {
-    "mtime": 1793508272.4837,
-    "seen": 1793509430.9950507,
-    "ast_hash": "cd9c04e38fdeb70fe6a7d9f0fd76ebcd",
-    "semantic_hash": "cd9c04e38fdeb70fe6a7d9f0fd76ebcd"
+    "mtime": 1793523657.6710422,
+    "seen": 1793526139.5793111,
+    "ast_hash": "13caed8c0717a57d5e3cb2336659fb7c",
+    "semantic_hash": "13caed8c0717a57d5e3cb2336659fb7c"
   },
   "docs/RUNBOOK.md": {
-    "mtime": 1793508286.2436998,
-    "seen": 1793509430.9950516,
-    "ast_hash": "3b344aa7373bfa7910c682aaa1e6e42c",
-    "semantic_hash": "3b344aa7373bfa7910c682aaa1e6e42c"
+    "mtime": 1793523690.9030404,
+    "seen": 1793526139.5793118,
+    "ast_hash": "d2047f830264737d4c3a7e66bbd2a17f",
+    "semantic_hash": "d2047f830264737d4c3a7e66bbd2a17f"
   },
   "docs/SECURITY.md": {
-    "mtime": 1793508286.3316996,
-    "seen": 1793509430.995052,
-    "ast_hash": "9d34d546c5a8132dbf9f741c749b05be",
-    "semantic_hash": "9d34d546c5a8132dbf9f741c749b05be"
+    "mtime": 1793523690.8470404,
+    "seen": 1793526139.5793123,
+    "ast_hash": "19b1e738776aba9545630a5d5139d89c",
+    "semantic_hash": "19b1e738776aba9545630a5d5139d89c"
   },
   "docs/assumptions.md": {
-    "mtime": 1793089943.6966593,
-    "seen": 1793424620.1616905,
-    "ast_hash": "c0bdf971fabaccac3ee5aeeb5ef002b8",
-    "semantic_hash": "c0bdf971fabaccac3ee5aeeb5ef002b8"
+    "mtime": 1793519405.383225,
+    "seen": 1793526139.579313,
+    "ast_hash": "7cc58099cf5f07051523e8960e02dee4",
+    "semantic_hash": "7cc58099cf5f07051523e8960e02dee4"
   },
   "docs/calibration.md": {
     "mtime": 1793472923.861605,
@@ -780,10 +780,10 @@
     "semantic_hash": "4a95f87895b4dd465ab57197b8021c73"
   },
   "scripts/data-dirs.sh": {
-    "mtime": 1793474189.28155,
-    "seen": 1793480755.5451434,
-    "ast_hash": "c108cd7d360d134b2b5c16aebe1d0ecd",
-    "semantic_hash": "c108cd7d360d134b2b5c16aebe1d0ecd"
+    "mtime": 1793522364.5270915,
+    "seen": 1793526139.5792387,
+    "ast_hash": "d02c4e62eb974b5335016edc4340810d",
+    "semantic_hash": "d02c4e62eb974b5335016edc4340810d"
   },
   "scripts/render-front-env.sh": {
     "mtime": 1793474385.6095421,
@@ -798,10 +798,10 @@
     "semantic_hash": "e3433cd1c7d68f4be244c99335b15eeb"
   },
   "services/change-proposals/tests/test_proposals.py": {
-    "mtime": 1793474164.5055506,
-    "seen": 1793480755.545154,
-    "ast_hash": "3768b3b0881adfaa4e4ff3e009efaff6",
-    "semantic_hash": "3768b3b0881adfaa4e4ff3e009efaff6"
+    "mtime": 1793521841.295119,
+    "seen": 1793526139.579252,
+    "ast_hash": "d283851b8a8e3c3ddf46a93214459840",
+    "semantic_hash": "d283851b8a8e3c3ddf46a93214459840"
   },
   "services/hermes/front/config.yaml": {
     "mtime": 1793507345.0917401,
@@ -810,10 +810,10 @@
     "semantic_hash": "3b5b637f6be4468228a80bce1e6c9597"
   },
   "tests/test_zones.py": {
-    "mtime": 1793507345.34774,
-    "seen": 1793509430.99505,
-    "ast_hash": "fea4935d593d456c726f6de908606103",
-    "semantic_hash": "fea4935d593d456c726f6de908606103"
+    "mtime": 1793522392.6230931,
+    "seen": 1793526139.5793095,
+    "ast_hash": "f2e18aa3a0e97cf22d7cca9fdfe6dbf1",
+    "semantic_hash": "f2e18aa3a0e97cf22d7cca9fdfe6dbf1"
   },
   "services/change-proposals/requirements.txt": {
     "mtime": 1793474104.9135518,
@@ -876,9 +876,51 @@
     "semantic_hash": "2da9798e04c105190b0d42c0cecdb867"
   },
   "services/hermes/front/tests/test_cardblock.py": {
-    "mtime": 1793507302.467741,
-    "seen": 1793509430.995007,
-    "ast_hash": "a98ac4aeb7c1ecb76adb36ab0ce0e7f5",
-    "semantic_hash": "a98ac4aeb7c1ecb76adb36ab0ce0e7f5"
+    "mtime": 1793519558.9312234,
+    "seen": 1793526139.5792575,
+    "ast_hash": "a409d2dfbe39a0b4275a8c80127c8c94",
+    "semantic_hash": "a409d2dfbe39a0b4275a8c80127c8c94"
+  },
+  "scripts/applied-pull.py": {
+    "mtime": 1793522783.4070811,
+    "seen": 1793526139.5792372,
+    "ast_hash": "66ad50f24de1e8ff8ea4081070fe5483",
+    "semantic_hash": "66ad50f24de1e8ff8ea4081070fe5483"
+  },
+  "scripts/deploy-guard.sh": {
+    "mtime": 1793522646.9710846,
+    "seen": 1793526139.5792394,
+    "ast_hash": "513d8099930ce11f1a6ea0348534e628",
+    "semantic_hash": "513d8099930ce11f1a6ea0348534e628"
+  },
+  "services/applier/applier.py": {
+    "mtime": 1793523240.7190619,
+    "seen": 1793526139.5792491,
+    "ast_hash": "ad316ed9cf10864fda408339057c5687",
+    "semantic_hash": "ad316ed9cf10864fda408339057c5687"
+  },
+  "services/applier/install.sh": {
+    "mtime": 1793523133.427053,
+    "seen": 1793526139.5792499,
+    "ast_hash": "953d2270a03cb4c8f4450fba86e8116f",
+    "semantic_hash": "953d2270a03cb4c8f4450fba86e8116f"
+  },
+  "services/applier/tests/test_applier.py": {
+    "mtime": 1793523157.2030602,
+    "seen": 1793526139.5792503,
+    "ast_hash": "6c795a435119c2cf1321dd383187e5d4",
+    "semantic_hash": "6c795a435119c2cf1321dd383187e5d4"
+  },
+  "tests/test_applied_pull.py": {
+    "mtime": 1793523306.7813125,
+    "seen": 1793526139.5793047,
+    "ast_hash": "7896b0e7317e7f069494445e8d88fbe7",
+    "semantic_hash": "7896b0e7317e7f069494445e8d88fbe7"
+  },
+  "tests/test_deploy_guard.py": {
+    "mtime": 1793522819.8750799,
+    "seen": 1793526139.5793052,
+    "ast_hash": "79503f55e6bd57c4fe48c34ffd188bf2",
+    "semantic_hash": "79503f55e6bd57c4fe48c34ffd188bf2"
   }
 }
