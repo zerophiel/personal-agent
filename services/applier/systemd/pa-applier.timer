@@ -1,0 +1,8 @@
+[Unit]
+Description=Applier every 5 minutes (safety net for the path unit: an approval written during a run, a deploy hold)
+[Timer]
+OnCalendar=*:0/5
+Persistent=true
+Unit=pa-applier.service
+[Install]
+WantedBy=timers.target
