@@ -25,6 +25,7 @@ PROBES = {
 }
 SKIP_DIRS = {".git", ".claude", "graphify-out", "__pycache__"}
 RUNTIME_PREFIXES = ("compose/", "config/", "host/", "scripts/", "services/", "Makefile")
+UNIT_DIRS = ("host/", "services/applier/systemd/")   # make deploy installs host/; the applier's install.sh its own
 TOKEN = re.compile(r"\b\d{8,10}:[A-Za-z0-9_-]{30,}|sk-ant-[A-Za-z0-9_-]+|\bntn_[A-Za-z0-9]+|\bsecret_[A-Za-z0-9]{20,}"
                    r"|ya29\.[A-Za-z0-9_.-]+|\b1//[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{12,}|(?i:bearer)\s+[A-Za-z0-9._~+/=-]{12,}"
                    r"|-----BEGIN[^-]*-----")
@@ -381,13 +382,15 @@ def render_proxies(h, local):
 
 def render_timers(h, local):
     out = [header("Host timers and services (systemd)", "Units `pa-*` in /etc/systemd/system, installed from host/ by "
-                  "scripts/install-timers.sh. They run the scheduled jobs; no LLM is involved in any of them.", h)]
+                  "scripts/install-timers.sh, and the applier's from services/applier/systemd/ by its install.sh. They "
+                  "run the scheduled jobs; no LLM is involved in any of them.", h)]
     rows = []
     for u in h["units"]:
         k = dict((a, b) for a, b in u["keys"])
         sched = ", ".join(b for a, b in u["keys"] if a in ("OnCalendar", "OnUnitActiveSec", "OnBootSec", "PathChanged", "PathModified"))
+        src = next((d + u["name"] for d in UNIT_DIRS if d + u["name"] in local), None)
         rows.append((u["name"], k.get("Description"), sched, k.get("ExecStart"),
-                     "same" if local.get(f"host/{u['name']}") == u["sha256"] else "DIFFERENT" if f"host/{u['name']}" in local else "not in repo"))
+                     "not in repo" if src is None else "same" if local[src] == u["sha256"] else "DIFFERENT"))
     out.append(table(["unit", "description", "schedule / trigger", "runs", "vs repo"], rows))
     for u in h["units"]:
         out.append(f"## {u['name']}\n\n" + table(["key", "value"], u["keys"]))

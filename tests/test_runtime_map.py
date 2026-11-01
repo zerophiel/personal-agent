@@ -35,6 +35,18 @@ class Scrub(unittest.TestCase):
         self.assertIn("2 identical", out)
         self.assertIn("runtime files that differ: none", out)
 
+    def test_units_compare_with_host_and_the_applier_folder(self):
+        def unit(name, digest):
+            return {"name": name, "keys": [("Description", name)], "sha256": digest}
+        h = {"collected_at": "now", "units": [unit("pa-ingest.timer", "a" * 64), unit("pa-applier.path", "b" * 64),
+                                              unit("pa-applier.timer", "c" * 64), unit("pa-other.timer", "d" * 64)]}
+        local = {"host/pa-ingest.timer": "a" * 64, "services/applier/systemd/pa-applier.path": "b" * 64,
+                 "services/applier/systemd/pa-applier.timer": "e" * 64}
+        rows = {line.split("|")[1].strip(): line.split("|")[5].strip()
+                for line in rm.render_timers(h, local).splitlines() if line.startswith("| pa-")}
+        self.assertEqual(rows, {"pa-ingest.timer": "same", "pa-applier.path": "same", "pa-applier.timer": "DIFFERENT",
+                                "pa-other.timer": "not in repo"})
+
     def test_numbers_in_text_are_still_masked(self):
         _, h = digest_with_digit_run()
         got = rm.scrub(f"rekening 1234567890123, kartu 4111 1111 1111 1111, hash {h}")
