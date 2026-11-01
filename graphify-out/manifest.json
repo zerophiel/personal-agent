@@ -306,10 +306,10 @@
     "semantic_hash": "32b149317aee377039344829d329a9d3"
   },
   "services/vault-tools/tests/test_living.py": {
-    "mtime": 1793174456.340961,
-    "seen": 1793424620.1616592,
-    "ast_hash": "013c1d29cf0303f1a612d044e24fe013",
-    "semantic_hash": "013c1d29cf0303f1a612d044e24fe013"
+    "mtime": 1793547671.9620175,
+    "seen": 1793547888.8590217,
+    "ast_hash": "eeba18021b193653f72d66128a6fe161",
+    "semantic_hash": ""
   },
   "services/vault-tools/tests/test_mutations_pay.py": {
     "mtime": 1793534098.2065978,
@@ -468,10 +468,10 @@
     "semantic_hash": "06385cdfce9459f8ffce27c947c29975"
   },
   "services/vault-tools/vault_tools/mutations.py": {
-    "mtime": 1793534046.898601,
-    "seen": 1793541378.194089,
-    "ast_hash": "bc5e78c82764b8c168d6d9f87705bb16",
-    "semantic_hash": "bc5e78c82764b8c168d6d9f87705bb16"
+    "mtime": 1793547426.9940283,
+    "seen": 1793547888.8590379,
+    "ast_hash": "0f173d0afacd189b299f4edb4c109be7",
+    "semantic_hash": ""
   },
   "services/vault-tools/vault_tools/names.py": {
     "mtime": 1793084296.381734,
@@ -522,10 +522,10 @@
     "semantic_hash": "fe96a273927b59ab293bb0872554da69"
   },
   "services/vault-tools/vault_tools/server.py": {
-    "mtime": 1793501273.3387496,
-    "seen": 1793505699.7712927,
-    "ast_hash": "0ba28d0c6b0c10c9d906cfe516628ccb",
-    "semantic_hash": "0ba28d0c6b0c10c9d906cfe516628ccb"
+    "mtime": 1793547296.1020322,
+    "seen": 1793547888.8590438,
+    "ast_hash": "e62cc777fb81f4f29ca6884dd213d183",
+    "semantic_hash": ""
   },
   "services/vault-tools/vault_tools/simulate.py": {
     "mtime": 1793502047.0655878,
@@ -552,10 +552,10 @@
     "semantic_hash": "4b8cc9366ff8038cf39b857faf769535"
   },
   "services/vault-tools/vault_tools/suggest.py": {
-    "mtime": 1793153855.9426618,
-    "seen": 1793424620.1616843,
-    "ast_hash": "761e693d6c02424760a57c941573123b",
-    "semantic_hash": "761e693d6c02424760a57c941573123b"
+    "mtime": 1793547427.0980284,
+    "seen": 1793547888.859047,
+    "ast_hash": "046b86a2ba659829b868ccadf4d19296",
+    "semantic_hash": ""
   },
   "services/vault-tools/vault_tools/tools.py": {
     "mtime": 1793502215.343959,
@@ -940,5 +940,23 @@
     "seen": 1793541378.194023,
     "ast_hash": "0956749e7dca92aa64fb2a8d9da9bed6",
     "semantic_hash": "0956749e7dca92aa64fb2a8d9da9bed6"
+  },
+  "ops/datafix/2026-11-01-card-internal/deploy.sh": {
+    "mtime": 1793547823.8660107,
+    "seen": 1793547888.8589718,
+    "ast_hash": "9ddfddf4a873a26607e125d046dc7d51",
+    "semantic_hash": ""
+  },
+  "ops/datafix/2026-11-01-card-internal/fix_data.py": {
+    "mtime": 1793547954.149213,
+    "seen": 1793547965.6800766,
+    "ast_hash": "6b751516fe622ee57d0b283ec8db7cec",
+    "semantic_hash": ""
+  },
+  "ops/datafix/2026-11-01-card-internal/verify.py": {
+    "mtime": 1793547715.0220156,
+    "seen": 1793547888.8589742,
+    "ast_hash": "51ce9a103919173f025ec332011b7f6e",
+    "semantic_hash": ""
   }
 }
