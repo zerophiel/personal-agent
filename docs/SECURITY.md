@@ -111,3 +111,43 @@ in `skills.external_dirs` and turned the `skills` toolset on (compose is never i
   vault (the plugin in the container hashes as the repo's; agent.log has no empty-allowlist line and says the command
   menu was restored). Until then the VPS ran a473d4d's cardguard, which acts for any private chat that passes the
   intake filter.
+
+### Comms zone (M4, in the repo since 2026-11-02, not deployed)
+Nothing here runs yet: `make deploy` passes the main compose file alone, and the comms secrets do not exist (start in
+`docs/RUNBOOK.md`, "Comms zone"). The rules, checked by `tests/test_zones.py` and `services/comms-brokers/tests`:
+- Tools: the brokers' six (`search`, `read`, `label`, `create_draft`; `list_events`, `search_events`) and nothing else.
+  Terminal, code, files, browser, web and search, vision, memory, skills, cron, delegation, session search and the rest
+  are disabled (`services/hermes/comms/config.yaml`), so no tool of comms fetches a URL or reads a file. Memory and the
+  user profile are off; sessions are kept 7 days. Haiku, at most 20 turns a message.
+- Google tokens: only the brokers hold one, each with one scope (`gmail_comms_token`: `gmail.modify`;
+  `calendar_comms_token`: `calendar.events.readonly`), from the comms OAuth client, apart from ingest's readonly token.
+  A token granted other or more scopes stops its broker at the start and on every refresh (`brokers/common.py`). comms
+  holds no Google token or client; it reaches each broker over net-comms with that broker's own bearer token (`/mcp`
+  only, constant-time compare).
+- Sending: no Gmail scope allows drafts without sending (`gmail.modify` and `gmail.compose` both send), so the guard is
+  gmail-broker's fixed call list (`CALLS` in `brokers/gmail.py`): no send, delete, trash, import, filter, forwarding or
+  settings call, and a call outside it raises before a request leaves. `create_draft` writes a reply in the same thread
+  to the address the message names (one plain Reply-To, else From); comms cannot choose or add a recipient. At most 10
+  drafts and 200 label changes in any 24 hours.
+- A draft holds model text, and an email could steer it: nothing leaves until the owner reads the draft and sends it
+  from Gmail. SOUL.md saves a draft only when the owner asks in the chat, never because an email asks.
+- Finance mail is hidden, decided on every call: a message with a `Keuangan` or `Keuangan/*` label, or from the bank
+  domains of ingest-gmail (labelled or not; a sender that is not one plain address counts as hidden), is fetched no
+  further than its metadata, never labelled or answered, and reads as missing; a thread holding one gets no draft.
+- Labels: only the `Comms/<category>` labels of `brokers/policy.json` can be added or removed, so comms cannot archive,
+  mark read, move or delete mail.
+- Calendar: read-only by scope and by code, only the calendars `policy.json` names (the primary one), at most 31 days a
+  request; an event comes back without attendee or organizer addresses and without links.
+- Every text that reaches comms is cleaned (`brokers/common.py`): links removed, domains defanged, card-like (Luhn),
+  grouped and long numbers masked, lengths capped. Mail and invitations are written by others; SOUL.md treats them as
+  data, never as instructions.
+- Egress: comms reaches Anthropic and Telegram through squid-comms, the brokers reach Google through squid-google
+  (`config/squid/google.conf`: the Gmail API, the token endpoint, the Calendar API). The four share net-comms, so the
+  split is by proxy and token, not by network; comms has no route to the vault, front or control networks.
+- Card numbers: front's `cardblock` plugin, the same code mounted read-only, drops an inbound message with a Luhn-valid
+  run before dispatch. A photo still reaches the model (native image input): a card in it is left to SOUL.md.
+- Its own bot and its own Anthropic key (a third workspace, USD 10 limit); `scripts/render-comms-env.sh` refuses the
+  vault's or front's key and the vault's, front's or control's bot token. Telegram intake as the other Hermes zones;
+  BotFather "Allow Groups" off for its bot.
+- In Testing mode the two Google tokens run out after 7 days, as ingest's does (`docs/GMAIL_OAUTH.md`); a broker then
+  answers that the token must be renewed from the laptop. No host check watches them yet.

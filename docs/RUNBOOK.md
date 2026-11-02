@@ -56,6 +56,45 @@ on 1 Nov; 1 and 6 are the owner's):
 - After a change to `services/hermes/front/`: rsync as `make deploy` does, then the step 5 command with `front` only.
 - Stop: the same compose command with `--profile front stop front change-proposals`.
 
+## Comms zone (M4, built 2026-11-02, never started)
+comms: Hermes on Haiku 5.5 with the six tools of two brokers: gmail-broker (search, read, the `Comms/` labels, reply
+drafts the owner sends from Gmail) and calendar-broker (the primary calendar's events, read-only). No shell, code, files,
+browser, web, memory or skills, and nothing is sent (`docs/SECURITY.md`, comms zone). It lives in
+`compose/docker-compose.comms.yml` behind the `comms` profile; `make deploy` passes the main file alone, so it never
+builds, starts or stops comms. What is built are conservative defaults; the owner's choices are open question 18 in
+`docs/PROGRESS.md`. First start, in order (none done yet; 1-3 are the owner's):
+1. Google (`docs/GMAIL_OAUTH.md`, "Zona comms"): the comms OAuth client, on the VPS as `google_comms_client`, and the
+   two consents from the laptop: `bash scripts/gmail-renew.sh ~/client_secret_comms.json gmail_comms_token`, then the
+   same with `calendar_comms_token`.
+2. BotFather: a fourth bot for comms (username ending in `bot`), Bot Settings -> Allow Groups -> off; then
+   `make secret-set NAME=telegram_comms_token`.
+3. Anthropic Console: a third workspace for comms with a USD 10 monthly limit and a key from it; then
+   `make secret-set NAME=anthropic_comms_key`.
+4. `make secret-gen NAME=gmail_broker_mcp_token TYPE=token` and `make secret-gen NAME=calendar_broker_mcp_token
+   TYPE=token`.
+5. `make deploy` if the M4 files are not on the VPS yet (it also makes `hermes-comms` through `scripts/data-dirs.sh`),
+   then on the VPS `cd /opt/personal-agent && sudo bash scripts/render-comms-env.sh` (it refuses another zone's key or
+   bot).
+6. Recreate squid-comms once, so it reads the `comms.conf` of M4 (a file bind mount keeps the file the container
+   started with, and rsync writes a new one): `sudo docker compose -f compose/docker-compose.yml --env-file
+   config/stack.env up -d --no-deps --force-recreate squid-comms`. Until then the runtime map shows squid-comms's config
+   as different from the repo; harmless, since nothing uses squid-comms before comms runs.
+7. Start: `sudo docker compose -f compose/docker-compose.yml -f compose/docker-compose.comms.yml --env-file
+   config/stack.env --profile comms up -d --build squid-google gmail-broker calendar-broker comms`.
+8. Send `/start` to the comms bot, then ask for this week's mail and tomorrow's events: a bank email must not come up.
+- Logs: `/opt/personal-agent-data/hermes-comms/logs/` (root-only, `sudo` with absolute paths, as front); the brokers log
+  errors only (`sudo docker logs personal-agent-gmail-broker-1`, `personal-agent-calendar-broker-1`).
+- After a change to `services/hermes/comms/` or `services/comms-brokers/`: rsync as `make deploy` does, then the step 7
+  command with the changed services; `/new` to the comms bot after a change to its `config.yaml` or `SOUL.md`.
+- Google tokens: in Testing mode both run out 7 days after their consent. Renew both with step 1's commands before
+  then; each broker reads its token file again before every refresh, so no restart. A refused token reaches the owner
+  as comms's answer, which says to renew it from the laptop; no host check watches these tokens yet.
+- Once comms runs, compose commands with the main file alone (`make deploy`, the applier) warn about orphan
+  containers: the comms ones, which they leave alone (nothing here uses `--remove-orphans`). `scripts/prune.sh` knows
+  only the main file: while comms is stopped, the weekly prune removes the broker images, and step 7's `--build` makes
+  them again.
+- Stop: the step 7 command with `stop comms gmail-broker calendar-broker squid-google` in place of `up ...`.
+
 ## Applier (M3, installed 2026-11-01 23:23 WIB)
 `services/applier` applies a front change the owner approved in control (contract in `docs/SECURITY.md`). Its units are
 in `services/applier/systemd/`, not `host/`, so `make deploy` never enables them.

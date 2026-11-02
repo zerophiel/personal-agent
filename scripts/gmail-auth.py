@@ -54,9 +54,10 @@ def main() -> int:
     if set(creds.scopes or []) != set(SCOPES[name]):
         print("Scope tidak sesuai, dibatalkan.", file=sys.stderr)
         return 1
-    # issued_at lets the VPS warn before a Testing-mode token (7-day lifetime) expires
+    # issued_at lets the VPS warn before a Testing-mode token (7-day lifetime) expires; client_id lets gmail-renew.sh
+    # refuse a token minted with another OAuth client than the one the VPS refreshes it with
     json.dump({"refresh_token": creds.refresh_token, "scopes": list(creds.scopes),
-               "token_uri": creds.token_uri,
+               "token_uri": creds.token_uri, "client_id": creds.client_id,
                "issued_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}, sys.stdout)
     print("Token dibuat dan dikirim ke stdout.", file=sys.stderr)
     return 0

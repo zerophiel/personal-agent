@@ -15,13 +15,14 @@ set -euo pipefail
 VPS=${GMAIL_RENEW_VPS:-ubuntu@43.157.242.194}
 CLIENT=${1:-$HOME/client_secret_ingest.json}
 NAME=${2:-gmail_ingest_token}
-case "$NAME" in   # the token secrets gmail-auth.py has a scope for; never any other secret
-  gmail_ingest_token)   LABEL="Token Gmail" ;;
-  gmail_comms_token)    LABEL="Token Gmail comms" ;;
-  calendar_comms_token) LABEL="Token Kalender comms" ;;
+case "$NAME" in   # the tokens gmail-auth.py has a scope for (no other secret), each with the client that refreshes it
+  gmail_ingest_token)   LABEL="Token Gmail";          OWN=gmail_ingest_client ;;
+  gmail_comms_token)    LABEL="Token Gmail comms";    OWN=google_comms_client ;;
+  calendar_comms_token) LABEL="Token Kalender comms"; OWN=google_comms_client ;;
   *) echo "Nama token tidak dikenal: $NAME (gmail_ingest_token, gmail_comms_token, calendar_comms_token)." >&2; exit 2 ;;
 esac
 TOKEN=${GMAIL_RENEW_DIR:-/opt/personal-agent-secrets}/$NAME
+OWN=${GMAIL_RENEW_DIR:-/opt/personal-agent-secrets}/$OWN
 PY=${GMAIL_PY:-$HOME/.venv-gmail/bin/python}
 HERE=$(cd "$(dirname "$0")" && pwd)
 
@@ -30,8 +31,10 @@ HERE=$(cd "$(dirname "$0")" && pwd)
   echo "Butuh venv: python3 -m venv ~/.venv-gmail && ~/.venv-gmail/bin/pip install google-auth-oauthlib" >&2; exit 2; }
 
 # Runs as root on the VPS with the new token on stdin. The new token is read in full and checked (JSON with a
-# refresh token and its issue date) before the old file is touched. The old file is then rewritten in place: compose
-# mounts it into ingest-gmail as a file secret, so its inode stays, as with pdf-passwords-set.py.
+# refresh token and its issue date; minted with the OAuth client the VPS holds for it, when the VPS holds one and the
+# token names its client) before the old file is touched. The old file is then rewritten in place: compose
+# mounts it as a file secret (into ingest-gmail, or into a comms broker, which reads it again before every refresh), so
+# its inode stays, as with pdf-passwords-set.py.
 read -r -d '' REMOTE <<'EOF' || true
 set -eu
 umask 077
@@ -40,7 +43,7 @@ trap 'rm -f "$new"' EXIT
 cat > "$new"
 python3 -c '
 import json, os, sys
-new, tok = sys.argv[1], sys.argv[2]
+new, tok, own = sys.argv[1], sys.argv[2], sys.argv[3]
 data = open(new, "rb").read()
 try:
     d = json.loads(data)
@@ -49,6 +52,15 @@ except (ValueError, AttributeError):
     ok = False
 if not ok:
     sys.exit("Token baru tidak lengkap. Token lama tetap dipakai.")
+if d.get("client_id") and os.path.exists(own):
+    try:
+        c = json.load(open(own))
+        cid = (c.get("installed") or c.get("web") or {}).get("client_id")
+    except (ValueError, AttributeError):
+        cid = None
+    if cid and cid != d["client_id"]:
+        sys.exit("Token baru dibuat dengan client OAuth lain dari yang dipakai VPS untuk token ini (cek file client "
+                 "dan nama token). Token lama tetap dipakai.")
 if os.path.exists(tok):
     with open(tok, "r+b") as f:
         f.seek(0)
@@ -59,9 +71,10 @@ else:
     os.fchmod(fd, 0o444)
     with os.fdopen(fd, "wb") as f:
         f.write(data)
-' "$new" "$TOKEN"
+' "$new" "$TOKEN" "$OWN"
 echo "$LABEL di VPS diperbarui $(date '+%d %b %H:%M %Z'); berlaku 7 hari." >&2
 EOF
 
 "$PY" "$HERE/gmail-auth.py" "$CLIENT" "$NAME" |
-  ssh "$VPS" "sudo -n env TOKEN=$(printf %q "$TOKEN") LABEL=$(printf %q "$LABEL") bash -c $(printf %q "$REMOTE")"
+  ssh "$VPS" "sudo -n env TOKEN=$(printf %q "$TOKEN") OWN=$(printf %q "$OWN") LABEL=$(printf %q "$LABEL") \
+    bash -c $(printf %q "$REMOTE")"

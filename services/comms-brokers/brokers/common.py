@@ -42,23 +42,40 @@ def urllib_http(method: str, url: str, data: bytes | None, headers: dict) -> tup
 
 class GoogleSession:
     """Access tokens from one refresh token, for exactly the scopes the broker was built for: a token granted other or
-    more scopes is refused when the broker starts and again on every refresh. `http` is injectable for tests."""
+    more scopes is refused when the broker starts and again on every refresh. `token` is the token JSON or a function
+    that reads it; a function is read again before every refresh, so a token renewed on the VPS (gmail-renew.sh rewrites
+    the secret file in place) is used from the next refresh on, without a restart. `http` is injectable for tests."""
 
-    def __init__(self, client_json: dict, token_json: dict, scopes, http=urllib_http, clock=time.time):
+    def __init__(self, client_json: dict, token, scopes, http=urllib_http, clock=time.time):
         c = client_json.get("installed") or client_json.get("web") or {}
         self._id, self._secret = c["client_id"], c["client_secret"]
-        self._refresh = token_json["refresh_token"]
         self.scopes = frozenset(scopes)
-        if frozenset(token_json.get("scopes") or ()) != self.scopes:
-            raise GoogleError("token scopes differ from this broker's")
+        self._load = token if callable(token) else lambda: token
+        self._refresh = self._checked(self._load())
         self._http, self._clock = http, clock
         self._access, self._exp = None, 0.0
         self._lock = threading.Lock()
+
+    def _checked(self, token_json: dict) -> str:
+        if frozenset(token_json.get("scopes") or ()) != self.scopes:
+            raise GoogleError("token scopes differ from this broker's")
+        return token_json["refresh_token"]
+
+    def _reload(self) -> None:
+        """The token as the file holds it now; a file being rewritten (empty, cut short) or unreadable keeps the one
+        read last."""
+        try:
+            token_json = self._load()
+        except (OSError, ValueError):
+            return
+        if isinstance(token_json, dict) and token_json.get("refresh_token"):
+            self._refresh = self._checked(token_json)
 
     def access_token(self) -> str:
         with self._lock:
             if self._access and self._clock() < self._exp - 60:
                 return self._access
+            self._reload()
             body = urllib.parse.urlencode({"client_id": self._id, "client_secret": self._secret,
                                            "refresh_token": self._refresh, "grant_type": "refresh_token"}).encode()
             status, raw = self._http("POST", TOKEN_URL, body, {"Content-Type": "application/x-www-form-urlencoded"})

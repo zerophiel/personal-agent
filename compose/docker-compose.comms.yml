@@ -1,8 +1,8 @@
 # M4 comms zone (NOT deployed): the owner's email and calendar assistant. `make deploy` passes compose/docker-compose.yml
 # alone, so nothing here is built or started by it. Start it only after docs/RUNBOOK.md, "Comms zone" (the owner's OAuth
-# client and consents, the fourth bot, the comms workspace key, the secrets, scripts/render-comms-env.sh). First restart
-# squid-comms, so it reads the comms.conf of M4 (a file bind mount keeps the file it started with, and rsync writes a new
-# one), then:
+# client and consents, the fourth bot, the comms workspace key, the secrets, scripts/render-comms-env.sh). First
+# recreate squid-comms (`up -d --no-deps --force-recreate squid-comms` with the main file), so it reads the comms.conf
+# of M4 (a file bind mount keeps the file it started with, and rsync writes a new one), then:
 #   sudo docker compose -f compose/docker-compose.yml -f compose/docker-compose.comms.yml --env-file config/stack.env \
 #     --profile comms up -d --build squid-google gmail-broker calendar-broker comms
 # Every service here waits for the comms profile. The file only adds services and secrets: the networks and squid-comms

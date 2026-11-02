@@ -379,7 +379,8 @@ def main() -> None:
 
     with open(POLICY, encoding="utf-8") as f:
         policy = Policy(json.load(f)["gmail"])
-    session = GoogleSession(json.loads(secret("google_comms_client")), json.loads(secret("gmail_comms_token")), SCOPES)
+    session = GoogleSession(json.loads(secret("google_comms_client")), lambda: json.loads(secret("gmail_comms_token")),
+                            SCOPES)   # the token file is read again before every refresh: a renewal needs no restart
     run(create_app(Broker(Gmail(session), policy), secret("gmail_broker_mcp_token")))
 
 

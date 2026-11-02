@@ -1,6 +1,6 @@
 # Panduan OAuth Gmail (readonly) untuk ingest-gmail
 
-Tujuan: satu token **gmail.readonly** untuk job harian `ingest-gmail` (tanpa LLM). Token ini terpisah dari token `gmail-broker` milik zona comms (scope `gmail.modify`, dibuat di M4 dengan client berbeda). Akun: Gmail personal.
+Tujuan: satu token **gmail.readonly** untuk job harian `ingest-gmail` (tanpa LLM). Token ini terpisah dari dua token milik zona comms (`gmail.modify` untuk gmail-broker dan `calendar.events.readonly` untuk calendar-broker), yang dibuat dari proyek dan client lain: bagian "Zona comms" di akhir. Akun: Gmail personal.
 
 Semua langkah di bawah dikerjakan **di laptop Anda**. Token tidak pernah lewat chat.
 
@@ -31,7 +31,7 @@ bash scripts/gmail-renew.sh ~/client_secret_ingest.json
 ```
 - Skrip mencetak sebuah URL. Buka di browser, login ke akun Gmail Anda, dan setujui **hanya baca** email.
 - Token tidak pernah tercetak dan tidak disimpan di laptop. `scripts/gmail-auth.py` menulisnya ke pipa SSH, dan di VPS token masuk ke file sementara di sebelah token lama.
-- Token lama baru diganti setelah token baru lengkap (JSON dengan refresh token dan tanggal terbit). Penggantiannya menulis ulang file yang sama (inode tetap, karena compose me-mount file ini ke ingest-gmail). Login yang gagal, kehabisan waktu, atau dibatalkan membiarkan token lama tetap dipakai, jadi file lama tidak perlu dihapus dulu.
+- Token lama baru diganti setelah token baru lengkap (JSON dengan refresh token dan tanggal terbit) dan dibuat dengan client yang sama dengan yang tersimpan di VPS untuk token itu. Penggantiannya menulis ulang file yang sama (inode tetap, karena compose me-mount file ini ke ingest-gmail). Login yang gagal, kehabisan waktu, atau dibatalkan membiarkan token lama tetap dipakai, jadi file lama tidak perlu dihapus dulu.
 - Jangan menjalankan `scripts/gmail-auth.py` sendirian: tanpa pipa token akan tercetak di layar, dan skrip menolak bila keluarannya terminal.
 
 Simpan juga `client_secret_ingest.json` ke VPS dengan cara yang sama (`gmail_ingest_client`), karena ingest-gmail memakainya untuk menukar refresh token:
@@ -58,3 +58,26 @@ ssh ubuntu@43.157.242.194 'sudo bash -c "umask 077; cat > /opt/personal-agent-se
 ## Catatan keamanan
 - `gmail.readonly` memungkinkan membaca **seluruh** email, bukan hanya label Keuangan. Pembatasan ke label dilakukan di kode ingest-gmail, bukan oleh Google. Karena itu job ini deterministik, tanpa LLM, dan tidak punya jalur keluar selain `gmail.googleapis.com` dan `oauth2.googleapis.com`.
 - Kedua skrip sudah dipakai dengan client asli: token pertama dibuat 27 Okt 2026 dengan `scripts/gmail-auth.py`, dan perpanjangan pertama lewat `scripts/gmail-renew.sh` berhasil 2 Nov 2026.
+
+## Zona comms (M4, dibangun 2 Nov 2026, belum dipakai)
+Asisten email dan kalender (comms) butuh dua token Google lagi: `gmail_comms_token` (scope **`gmail.modify`**, untuk gmail-broker) dan `calendar_comms_token` (scope **`calendar.events.readonly`**, untuk calendar-broker). Hanya kedua broker yang memegangnya; comms sendiri tidak pernah memegang token Google (`docs/SECURITY.md`, zona comms). Kerjakan ini hanya setelah Anda memutuskan pertanyaan terbuka 18 di `docs/PROGRESS.md`; urutan lengkapnya ada di `docs/RUNBOOK.md`, "Comms zone".
+
+1. Proyek Google Cloud baru `personal-agent-comms`, bukan proyek ingest, supaya scope dan pencabutannya terpisah. Di **APIs & Services -> Library**, aktifkan **Gmail API** dan **Google Calendar API**.
+2. Layar persetujuan seperti bagian 2: **External**, nama aplikasi `personal-agent-comms`, status **Testing**, dan email Gmail Anda sendiri sebagai test user. Scope: **`https://www.googleapis.com/auth/gmail.modify`** dan **`https://www.googleapis.com/auth/calendar.events.readonly`** saja.
+3. Client OAuth seperti bagian 3: **Desktop app**, nama `comms-desktop`. Simpan JSON-nya sebagai `~/client_secret_comms.json` di laptop. Jangan commit file ini.
+4. Simpan client itu ke VPS sebagai `google_comms_client`. Pakai alamat VPS yang sama seperti perintah `gmail_ingest_client` di bagian 4 sebagai pengganti `<VPS>`:
+   ```
+   ssh ubuntu@<VPS> 'sudo bash -c "umask 077; cat > /opt/personal-agent-secrets/google_comms_client && chmod 0444 /opt/personal-agent-secrets/google_comms_client"' < ~/client_secret_comms.json
+   ```
+5. Dua persetujuan, satu per token, dari folder repo:
+   ```
+   bash scripts/gmail-renew.sh ~/client_secret_comms.json gmail_comms_token
+   bash scripts/gmail-renew.sh ~/client_secret_comms.json calendar_comms_token
+   ```
+   - Tiap perintah mencetak URL. Login, lalu setujui scope yang diminta. Skrip menolak token dengan scope lain, misalnya bila kotak centangnya Anda lepas.
+   - Untuk `gmail.modify`, layar Google menyebut aplikasi bisa membaca, menulis, dan mengirim email. Google memang tidak punya scope untuk draf tanpa mengirim. Yang membuat comms tidak bisa mengirim adalah gmail-broker: daftar panggilannya tidak memuat kirim, hapus, buang ke sampah, filter, atau penerusan.
+   - Nama token yang tidak dikenal ditolak sebelum SSH. Tanpa nama token, skrip memperbarui token ingest seperti di bagian 4.
+   - Token yang dibuat dengan client lain dari yang tersimpan di VPS untuk token itu ditolak, dan token lama tetap dipakai. Contohnya `~/client_secret_comms.json` tanpa nama token: token ingest yang masih berlaku tidak tertimpa.
+6. Mode **Testing**: kedua token comms juga kedaluwarsa dalam **7 hari**, jadi setiap minggu ada tiga perpanjangan bersama token ingest. Ulangi langkah 5 sebelum habis. Broker membaca file token lagi sebelum setiap refresh, jadi tidak perlu restart. Belum ada job yang memperingatkan token comms; bila token habis, comms menjawab bahwa token perlu diperbarui dari laptop.
+7. Yang tersembunyi dari comms: email berlabel `Keuangan` atau sublabelnya (termasuk `Keuangan/Kartu Kredit` dari bagian 5), dan email dari domain lima bank di tabel bagian 5. Label baru di bawah `Keuangan/` langsung ikut tersembunyi. Email bank lain (mis. BCA, Jago, Jenius) **tidak** tersembunyi, kecuali Anda memberinya label di bawah `Keuangan/` lewat filter Gmail.
+8. Pencabutan: hapus `personal-agent-comms` di https://myaccount.google.com/permissions. Kedua token comms berhenti, sedangkan token ingest tidak terpengaruh.

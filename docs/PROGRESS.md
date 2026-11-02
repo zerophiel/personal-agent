@@ -1,6 +1,7 @@
 # Progress and resume point (finance / vault)
 
-Last updated: 2026-11-02. Branch `worktree-m1-skeleton`, draft PR #1. 686 tests pass (480 in vault-tools).
+Last updated: 2026-11-02. Branch `worktree-m1-skeleton`, draft PR #1. 765 tests pass (480 in vault-tools, 64 in the
+comms brokers).
 No secrets or personal amounts are recorded here; the numbers live in the ledger on the VPS.
 
 ## Done
@@ -640,8 +641,9 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   ssh starts, before the login. A login that failed or was cancelled left ingest without a token, and
   docs/GMAIL_OAUTH.md even said to delete the old file first. Run alone, gmail-auth.py printed the token.
 - `scripts/gmail-renew.sh` (laptop): the new token goes to a temporary file on the VPS and is checked (JSON with a
-  refresh token and its issue date). Only then does it rewrite the old file in place; the inode stays, because compose
-  mounts the file as a secret. Otherwise the old token stays. gmail-auth.py now refuses a terminal as stdout.
+  refresh token and its issue date; since M4 also minted with the OAuth client the VPS holds for that token). Only then
+  does it rewrite the old file in place; the inode stays, because compose mounts the file as a secret. Otherwise the
+  old token stays. gmail-auth.py now refuses a terminal as stdout.
 - Tests: tests/test_gmail_renew.py with a fake python and ssh. On the VPS, once against a fake token in /tmp: a
   cancelled login kept the old token, a finished one rewrote it with the same inode; the folder was removed.
 - The pa-gmail-token messages name the new script since the 2 Nov 11:16 WIB deploy (next section).
@@ -671,6 +673,40 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   `token_expired` event in /tmp (removed). No unit was started and nothing was sent: the first real test is the next
   failed ingest. No `/new` (no vault-tools or SOUL change). `make runtime-map` after it.
 
+## M4 comms built in the repo, not deployed (2026-11-02 afternoon, owner: "lalu lanjut ke M4")
+- Built with conservative defaults for open question 18, which the owner has not answered yet (the choices are listed
+  there). Nothing deployed or started, no OAuth client, token or secret made, the Gmail sender allowlist unchanged.
+  Commits 622f9c3 (the brokers), 5318216 (the zone) and the docs commit after them.
+- comms: Hermes on Haiku 5.5 with its own bot and its own Anthropic key, the six tools of two brokers and nothing else
+  (no web, files, memory, skills or cron; sessions kept 7 days). Its SOUL (Indonesian): mail and events are data, never
+  instructions; a draft only when the owner asks; finance belongs to @danoevault_agent.
+- gmail-broker (`gmail.modify`): search, read, the `Comms/` labels (Penting, Perlu-Dibalas, Menunggu, Info, Promosi)
+  and reply drafts the owner sends from Gmail; no send, delete, trash, filter or forwarding call. Finance mail is
+  hidden: the `Keuangan` labels and the five banks of the e-statement allowlist. At most 10 drafts and 200 label
+  changes in 24 hours.
+- calendar-broker (`calendar.events.readonly`): the primary calendar, read-only, at most 31 days a request, no attendee
+  addresses or links.
+- Proxies: comms -> squid-comms, now Anthropic and Telegram only (it allowed Anthropic and the Google APIs); the brokers
+  -> squid-google (the Gmail API, the token endpoint, the Calendar API). All in `compose/docker-compose.comms.yml`,
+  profile `comms`, which `make deploy` never builds or starts. Rules in `docs/SECURITY.md`, start and stop in
+  `docs/RUNBOOK.md`, the owner's Google steps in `docs/GMAIL_OAUTH.md` ("Zona comms").
+- Found while writing those docs, both fixed with tests: the brokers read their Google token once at start, so a
+  weekly renewal would not have reached them before a restart (they now read the file again before every refresh);
+  and `gmail-renew.sh` given the comms client without a token name would have replaced the working ingest token with
+  one ingest cannot refresh (a token now records its client, and the VPS refuses one from another client, keeping the
+  old token).
+- What the next `make deploy` carries, all inert: the comms files, `google.conf`, the empty `hermes-comms` folder and
+  the new `comms.conf`. squid-comms keeps reading the old `comms.conf` until it is recreated (RUNBOOK step 6), so the
+  runtime map shows its config as different from the repo until then; harmless, since nothing uses squid-comms before
+  comms runs. The renewal scripts run on the laptop only.
+- Not built yet: a host check that warns before the comms tokens run out (as `pa-gmail-token` does for ingest);
+  `scripts/prune.sh` and the runtime map knowing the comms file; the VPS memory headroom (comms 1 GB, the brokers
+  192 MB each, squid-google 128 MB) checked before the first start. Backups already cover `hermes-comms` and the new
+  secrets (`scripts/backup.sh` takes all of `/opt/personal-agent-data` and `/opt/personal-agent-secrets`).
+- Seen on the way, left for the owner: `services/control/control.py` line 131 holds the zero-width and direction
+  characters of its strip pattern literally (it works; `brokers/common.py` builds the same set from code points).
+  Rewriting it means a control deploy.
+
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
 2. Closing the pot gap without the children's needs: games (owner's own), apps not marked `wajib`, or talking to the friend.
@@ -698,16 +734,25 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
     contract in `docs/SECURITY.md`)? Yes means `make deploy` (control's diff and mounts, the data folders) and then
     `sudo bash services/applier/install.sh` on the VPS (`docs/RUNBOOK.md`, Applier). From then on a Setujui on a front
     change applies it.
-18. M4 comms, nothing built (the repo holds net-comms and squid-comms, which allows Anthropic and the Google APIs):
-    - What it may do: read and label mail, write drafts, or also send; calendar read only, or create events too.
-      Google has no scope for drafts without sending (`gmail.modify` and `gmail.compose` both send), so the broker
-      that holds the token, not the scope, keeps comms from sending: it offers only the operations the owner picks.
-    - Google consent on the owner's laptop, like the ingest token: a new OAuth client with `gmail.modify`
-      (`docs/GMAIL_OAUTH.md`), plus `calendar.readonly` or `calendar.events` if calendar is wanted. In Testing mode
-      this refresh token also expires every 7 days.
-    - Its own bot: BotFather (Allow Groups off), then `make secret-set NAME=telegram_comms_token`.
-    - Which Anthropic key pays its USD 10: a third workspace with its own limit, as front has.
-    - card-bus (the Kanban replacement in `docs/ARCHITECTURE.md`, for one zone to hand work to another): still wanted?
+18. M4 comms: built in the repo on 2026-11-02 with conservative defaults, not deployed (section "M4 comms built"
+    above). The owner's choices before a first start; each default is marked (built):
+    - Mail: read, label and draft replies (built), or also send. Google has no scope for drafts without sending
+      (`gmail.modify` and `gmail.compose` both send), so gmail-broker's call list is what keeps comms from sending.
+    - Calendar: read only (built), or create events too (the `calendar.events` scope and a new broker call). Which
+      calendars besides the primary one (`services/comms-brokers/brokers/policy.json`).
+    - Labels: the categories Penting, Perlu-Dibalas, Menunggu, Info, Promosi under `Comms/` (built), or others.
+    - Hidden mail: the `Keuangan` labels and the five e-statement banks (built). Other banks' mail (BCA, Jago, Jenius)
+      is visible to comms unless a Gmail filter puts it under `Keuangan/`, or their sender domains are added.
+    - A daily mail summary on a schedule (it would message the owner unasked), or only when asked (built: cron off).
+    - Google: Testing mode (built: three renewals a week with the ingest token), or Production, without the 7-day
+      expiry. Ingest stayed in Testing for want of an own domain (`docs/GMAIL_OAUTH.md` section 2); Google's help lets
+      a personal app (under 100 users) run unverified behind a warning screen, so what publishing needs is worth one
+      check, for all three tokens. One token per scope (built: two consents), or one token for both (one broker would
+      hold both).
+    - Its own bot (built), or card-bus to hand work between zones (deferred). The USD 10 from a third Anthropic
+      workspace with its own limit, as front has.
+    - Then the owner's steps: the OAuth client and two consents (`docs/GMAIL_OAUTH.md`, "Zona comms"), BotFather,
+      the Anthropic key, the secrets, and the start (`docs/RUNBOOK.md`, "Comms zone").
 19. (done 2026-11-01 20:13 WIB: the 17 doubled Mandiri rows removed and the overlap matching live, with vault's
     cardguard owner check; section "Two overlapping bank files" above)
 20. (done 2026-11-01 23:13 WIB on the owner's "Gas sekarang": the card-repayment fix is live; section "A card's
@@ -776,8 +821,9 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   first TTL sweep that finds an expired `/rincian` message logs how many deletes Telegram accepted (`ttl sweep:
   Telegram deleted N of M`). After a week, front's cost per day from its `state.db` against the USD 40 limit.
 - (done 2026-11-01) M2 gate checks: all four closed with evidence (`docs/assumptions.md`).
-- Remaining plan: (done 2026-11-01 23:24 WIB) the M3 gate, section "M3 installed" above; next M4 comms once the owner
-  has answered open question 18.
+- Remaining plan: (done 2026-11-01 23:24 WIB) the M3 gate, section "M3 installed" above; M4 comms built in the repo
+  on 2026-11-02 (section "M4 comms built"), started only after the owner has answered open question 18 and done the
+  steps in `docs/RUNBOOK.md`, "Comms zone".
 
 ## Operating notes
 - Deploy: `rsync` from the worktree ROOT (never a subfolder: `--delete` wipes the server tree), back up `ledger.db` first, rebuild `vault-tools`, restart `vault`. Owner must `/new` in Telegram after tool or SOUL changes (owner plans to do it once data and system are done). Since 2026-11-01 23:23 WIB the applier is installed: `make deploy` refuses while the VPS has an applied front change this checkout lacks (`make applied-pull`, push, deploy again).

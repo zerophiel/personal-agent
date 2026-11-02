@@ -11,7 +11,9 @@ import unittest
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 SCRIPT = os.path.join(ROOT, "scripts", "gmail-renew.sh")
 NEW = {"refresh_token": "new-test-value", "scopes": ["https://www.googleapis.com/auth/gmail.readonly"],
-       "token_uri": "https://oauth2.googleapis.com/token", "issued_at": "2026-11-02T03:00:00+00:00"}
+       "token_uri": "https://oauth2.googleapis.com/token", "client_id": "test-client-a",
+       "issued_at": "2026-11-02T03:00:00+00:00"}
+OTHER = dict(NEW, client_id="test-client-b")       # the same token, minted with another OAuth client
 OLD = '{"refresh_token": "old-test-value", "issued_at": "2026-10-27T06:23:31+00:00"}'
 
 # Stands in for ~/.venv-gmail/bin/python: the import check passes, and "running gmail-auth.py" notes its arguments and
@@ -21,6 +23,7 @@ FAKE_PY = """#!/bin/bash
 printf '%s\\n' "$@" > "$ARGS"
 case "$MODE" in
   ok) printf '%s' '""" + json.dumps(NEW) + """' ;;
+  other) printf '%s' '""" + json.dumps(OTHER) + """' ;;
   cancel) echo "login dibatalkan" >&2; exit 1 ;;
   partial) printf '%s' '{"scopes": []}' ;;
 esac
@@ -113,6 +116,27 @@ class Renew(unittest.TestCase):
                 self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o444)
                 self.assertIn(f"{label} di VPS diperbarui", r.stderr)
                 self.assertEqual(open(self.token).read(), OLD)                 # the ingest token is left alone
+
+    def test_a_token_minted_with_another_client_keeps_the_old_one(self):
+        # e.g. the comms client given without a token name: the VPS could not refresh that token
+        for name, client in (("gmail_ingest_token", "gmail_ingest_client"),
+                             ("gmail_comms_token", "google_comms_client"),
+                             ("calendar_comms_token", "google_comms_client")):
+            with self.subTest(name=name):
+                path = os.path.join(self.d, name)
+                with open(path, "w") as f:
+                    f.write(OLD)
+                with open(os.path.join(self.d, client), "w") as f:
+                    json.dump({"installed": {"client_id": OTHER["client_id"]}}, f)
+                r = self.run_renew("ok", name=name)
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn("client OAuth lain", r.stderr)
+                self.assertIn("Token lama tetap dipakai", r.stderr)
+                self.assertEqual(open(path).read(), OLD)
+                self.assertFalse(os.path.exists(path + ".new"))
+                r = self.run_renew("other", name=name)          # minted with the client the VPS holds for it
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(json.load(open(path)), OTHER)
 
     def test_an_unknown_name_stops_before_ssh(self):
         for name in ("vault_tools_key", "../gmail_ingest_token", "gmail_ingest_token.new"):

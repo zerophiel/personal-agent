@@ -184,8 +184,8 @@ def main() -> None:
 
     with open(POLICY, encoding="utf-8") as f:
         policy = Policy(json.load(f)["calendar"])
-    session = GoogleSession(json.loads(secret("google_comms_client")), json.loads(secret("calendar_comms_token")),
-                            SCOPES)
+    session = GoogleSession(json.loads(secret("google_comms_client")), lambda: json.loads(secret("calendar_comms_token")),
+                            SCOPES)   # the token file is read again before every refresh: a renewal needs no restart
     run(create_app(Broker(Calendar(session, policy), policy), secret("calendar_broker_mcp_token")))
 
 

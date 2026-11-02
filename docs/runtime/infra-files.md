@@ -79,6 +79,7 @@ test:
 	cd services/control && python3 -I -m unittest discover -s tests -v
 	cd services/applier && python3 -I -m unittest discover -s tests -v   # a fake docker; its zone-rule test needs PyYAML
 	cd services/change-proposals && $${VAULT_PY:-python3} -I -m unittest discover -s tests -v   # needs mcp, as the vault-tools server tests
+	cd services/comms-brokers && $${VAULT_PY:-python3} -I -m unittest discover -s tests -v   # M4 brokers; the MCP server tests need mcp too
 	cd services/ingest-gmail && python3 -I -m unittest discover -s tests -v
 	cd services/vault-tools && $${VAULT_PY:-python3} -I -m unittest discover -s tests -v   # VAULT_PY=venv python to include server tests
 
@@ -131,9 +132,11 @@ BOT_CONTROL=danoecontrol_bot
 
 
 ```
-# Egress allowlist: comms zone (Anthropic + Google APIs). Default deny.
+# Egress allowlist: comms zone (M4). Default deny.
+# comms (Hermes) -> Anthropic + Telegram. Google is reached only by the two brokers, through squid-google
+# (google.conf): comms holds no Google token.
 http_port 3128
-acl allowed_domains dstdomain api.anthropic.com gmail.googleapis.com oauth2.googleapis.com www.googleapis.com
+acl allowed_domains dstdomain api.anthropic.com api.telegram.org
 acl SSL_ports port 443
 acl CONNECT method CONNECT
 http_access deny CONNECT !SSL_ports
@@ -176,6 +179,24 @@ http_access deny private_dst
 http_access deny !Safe_ports
 http_access deny CONNECT !SSL_ports
 http_access allow all
+access_log stdio:/var/log/squid/access.log
+cache deny all
+```
+
+## config/squid/google.conf
+
+
+
+```
+# Egress allowlist: the comms zone's Google brokers (gmail-broker, calendar-broker; M4). Default deny.
+# The Gmail API, Google's token endpoint and the Calendar API (www.googleapis.com/calendar/v3).
+http_port 3128
+acl allowed_domains dstdomain gmail.googleapis.com oauth2.googleapis.com www.googleapis.com
+acl SSL_ports port 443
+acl CONNECT method CONNECT
+http_access deny CONNECT !SSL_ports
+http_access allow allowed_domains
+http_access deny all
 access_log stdio:/var/log/squid/access.log
 cache deny all
 ```
@@ -510,6 +531,26 @@ HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD python -c "import socket; socket.create_connection(('127.0.0.1', 8000), 3)"
 # no -I: isolated mode would drop /app from sys.path (proposals imports control); only our own code lives there
 CMD ["python", "proposals.py"]
+```
+
+## services/comms-brokers/Dockerfile
+
+
+
+```dockerfile
+# The comms zone's two brokers (M4): one image, two containers; compose names each one's module (brokers.gmail,
+# brokers.gcal). policy.json is part of the code: what comms may see changes with a rebuild, never at run time.
+FROM python:3.12-slim
+RUN useradd --system --uid 10003 app
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY brokers ./brokers
+USER 10003
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD python -c "import socket; socket.create_connection(('127.0.0.1', 8000), 3)"
+# no -I: isolated mode would drop /app from sys.path (python -m brokers.gmail imports the package from there)
+CMD ["python", "-m", "brokers.gmail"]
 ```
 
 ## services/control/Dockerfile

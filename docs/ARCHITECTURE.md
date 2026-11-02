@@ -1,15 +1,15 @@
 # Architecture (M1 skeleton)
 
-Split by trust boundary: vault (finance), front (general/web), comms (email/calendar), control (approvals, no LLM). One Hermes profile and one container per zone; zone services are added in M2-M4.
+Split by trust boundary: vault (finance), front (general/web), comms (email/calendar), control (approvals, no LLM). One Hermes profile and one container per zone; zone services are added in M2-M4 (comms is in the repo since 2026-11-02, not deployed).
 
 ## Networks (all `internal: true`, no route out)
 | Network | Members | Outbound via |
 |---|---|---|
 | net-vault | squid-vault, vault, vault-tools, ingest-gmail (timer job) | squid-vault allowlist |
 | net-front | squid-front; front and change-proposals (M3, compose profile `front`, started once the owner's front secrets exist); sandbox and notion-mcp later | squid-front (web, private ranges blocked) |
-| net-comms | squid-comms (+ comms, brokers, card-bus in M4) | squid-comms allowlist |
+| net-comms | squid-comms; comms, gmail-broker, calendar-broker and squid-google (M4, not deployed: `compose/docker-compose.comms.yml`, compose profile `comms`) | comms: squid-comms (Anthropic, Telegram); the brokers: squid-google (Gmail API, Google's token endpoint, Calendar API) |
 | net-ctl | squid-ctl, control | squid-ctl (api.telegram.org) |
-| egress | the four squid proxies only | internet |
+| egress | the squid proxies only (squid-google with the comms zone) | internet |
 
 Only proxies join `egress`; a container with no proxy variable has no route out.
 
@@ -30,8 +30,23 @@ posts the diff it computes itself against the installed files (read-only mounts 
 Contract in `docs/SECURITY.md`. Control commands: `/status` (counts, with the applier's outcomes), `/usulan` (re-post
 waiting proposals with their buttons), `/ping`.
 
+## Comms zone (M4, in the repo since 2026-11-02, not deployed)
+The owner -> comms's own bot -> comms (Hermes, Haiku; `services/hermes/comms`) -> MCP over net-comms, a bearer token
+each -> gmail-broker or calendar-broker (`services/comms-brokers`, no LLM) -> squid-google -> the Gmail and Calendar
+APIs. Only the brokers hold a Google token, one scope each (`gmail_comms_token`: `gmail.modify`;
+`calendar_comms_token`: `calendar.events.readonly`). comms holds its own Anthropic key, its own bot token and the two
+broker tokens (`scripts/render-comms-env.sh`), and reaches Anthropic and Telegram through squid-comms.
+- gmail-broker: `search`, `read`, `label` (`Comms/` categories only) and `create_draft` (a reply, never sent); no send,
+  delete, archive or mark-read. Finance mail (the `Keuangan` labels, the bank senders of ingest-gmail) is hidden.
+- calendar-broker: `list_events` and `search_events` on the calendars `brokers/policy.json` names (the primary one),
+  read-only.
+- The four containers share net-comms: the split is by proxy and by token, not by network.
+- A file of its own, so `make deploy` (the main file alone) never builds or starts it. Start and stop in
+  `docs/RUNBOOK.md`, rules in `docs/SECURITY.md`. No card-bus (below): comms answers the owner in its own chat.
+
 ## Deviations from the original brief (see plan file)
-- Kanban replaced by a `card-bus` MCP (Hermes docs do not cover Kanban across containers).
+- Kanban replaced by a `card-bus` MCP (Hermes docs do not cover Kanban across containers); not built with M4
+  (2026-11-02): comms reports to the owner through its own bot until zones should hand work to each other.
 - Hermes cron jobs are seeded by deploy (`hermes cron create`), not defined in config.
 - `/rincian` handled in `pre_gateway_dispatch` with `skip` plus direct Bot API send.
 
