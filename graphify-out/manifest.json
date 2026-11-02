@@ -84,10 +84,10 @@
     "semantic_hash": "af537215737aec04aeca72a0964c965e"
   },
   "scripts/gmail-auth.py": {
-    "mtime": 1793587309.9098594,
-    "seen": 1793588805.5708423,
-    "ast_hash": "8998c8e71c9f4837da679284e20bdf5a",
-    "semantic_hash": "8998c8e71c9f4837da679284e20bdf5a"
+    "mtime": 1793602841.6891992,
+    "seen": 1793605202.5615408,
+    "ast_hash": "b6a5368d2ce8e4646dfbcb0c2b22c3f8",
+    "semantic_hash": "b6a5368d2ce8e4646dfbcb0c2b22c3f8"
   },
   "scripts/gmail-token-check.py": {
     "mtime": 1793587310.0378592,
@@ -600,34 +600,34 @@
     "semantic_hash": "1979cb313a9f66d5e1a1e24fdba3b522"
   },
   "docs/ARCHITECTURE.md": {
-    "mtime": 1793550497.3658955,
-    "seen": 1793552722.528352,
-    "ast_hash": "cd16f21b81c4256f989dbbcacf6918cb",
-    "semantic_hash": "cd16f21b81c4256f989dbbcacf6918cb"
+    "mtime": 1793602233.4932241,
+    "seen": 1793605202.5616176,
+    "ast_hash": "6b449b5936289a1879a3e077c74b0eac",
+    "semantic_hash": "6b449b5936289a1879a3e077c74b0eac"
   },
   "docs/GMAIL_OAUTH.md": {
-    "mtime": 1793592693.8136325,
-    "seen": 1793594798.997276,
-    "ast_hash": "82b0002e724d6a797864690bf4de07c9",
-    "semantic_hash": "82b0002e724d6a797864690bf4de07c9"
+    "mtime": 1793602907.9571958,
+    "seen": 1793605202.5616183,
+    "ast_hash": "5769ec3cae7b535b89f5b903b04cc0c6",
+    "semantic_hash": "5769ec3cae7b535b89f5b903b04cc0c6"
   },
   "docs/PROGRESS.md": {
-    "mtime": 1793593242.1704261,
-    "seen": 1793594798.9972768,
-    "ast_hash": "79c0109ad2eda1e7789f827599f06292",
-    "semantic_hash": "79c0109ad2eda1e7789f827599f06292"
+    "mtime": 1793603233.0891814,
+    "seen": 1793605202.561619,
+    "ast_hash": "530b2e9d08507e3e119172ff07aadc13",
+    "semantic_hash": "530b2e9d08507e3e119172ff07aadc13"
   },
   "docs/RUNBOOK.md": {
-    "mtime": 1793550497.2138956,
-    "seen": 1793552722.528353,
-    "ast_hash": "be9e359d6b3639d0b9692627f4617dd2",
-    "semantic_hash": "be9e359d6b3639d0b9692627f4617dd2"
+    "mtime": 1793602654.7972066,
+    "seen": 1793605202.5616198,
+    "ast_hash": "fe356a56478a94939991eddf8f4f5928",
+    "semantic_hash": "fe356a56478a94939991eddf8f4f5928"
   },
   "docs/SECURITY.md": {
-    "mtime": 1793550497.3178957,
-    "seen": 1793552722.5283535,
-    "ast_hash": "bc3af1adfc9031b2318aefaa34698385",
-    "semantic_hash": "bc3af1adfc9031b2318aefaa34698385"
+    "mtime": 1793602342.7052197,
+    "seen": 1793605202.5616202,
+    "ast_hash": "0cfd1ab82dd13e4d125f61a68522a32e",
+    "semantic_hash": "0cfd1ab82dd13e4d125f61a68522a32e"
   },
   "docs/assumptions.md": {
     "mtime": 1793539173.2463806,
@@ -678,10 +678,10 @@
     "semantic_hash": "703caafb2a57b6cf32ae5aa5b1e1917f"
   },
   "docs/runtime/infra-files.md": {
-    "mtime": 1793593082.6992955,
-    "seen": 1793594798.997281,
-    "ast_hash": "b28ebb9380188ca34bdbfe3cfd7c82bd",
-    "semantic_hash": "b28ebb9380188ca34bdbfe3cfd7c82bd"
+    "mtime": 1793603198.0127504,
+    "seen": 1793605202.5616212,
+    "ast_hash": "d0197433befe91092659f87a408ddb32",
+    "semantic_hash": "d0197433befe91092659f87a408ddb32"
   },
   "docs/runtime/proxies.md": {
     "mtime": 1793593082.6619377,
@@ -780,10 +780,10 @@
     "semantic_hash": "4a95f87895b4dd465ab57197b8021c73"
   },
   "scripts/data-dirs.sh": {
-    "mtime": 1793522364.5270915,
-    "seen": 1793526139.5792387,
-    "ast_hash": "d02c4e62eb974b5335016edc4340810d",
-    "semantic_hash": "d02c4e62eb974b5335016edc4340810d"
+    "mtime": 1793601452.3092592,
+    "seen": 1793605202.5615382,
+    "ast_hash": "98704b54c4b2efd0850bc8bd6656c6f7",
+    "semantic_hash": "98704b54c4b2efd0850bc8bd6656c6f7"
   },
   "scripts/render-front-env.sh": {
     "mtime": 1793474385.6095421,
@@ -810,10 +810,10 @@
     "semantic_hash": "3b5b637f6be4468228a80bce1e6c9597"
   },
   "tests/test_zones.py": {
-    "mtime": 1793522392.6230931,
-    "seen": 1793526139.5793095,
-    "ast_hash": "f2e18aa3a0e97cf22d7cca9fdfe6dbf1",
-    "semantic_hash": "f2e18aa3a0e97cf22d7cca9fdfe6dbf1"
+    "mtime": 1793601766.1612442,
+    "seen": 1793605202.5616171,
+    "ast_hash": "55e2770647f42ec3d2b8ee4f79e16484",
+    "semantic_hash": "55e2770647f42ec3d2b8ee4f79e16484"
   },
   "services/change-proposals/requirements.txt": {
     "mtime": 1793474104.9135518,
@@ -960,22 +960,22 @@
     "semantic_hash": "51ce9a103919173f025ec332011b7f6e"
   },
   "tests/test_deploy.py": {
-    "mtime": 1793553998.497747,
-    "seen": 1793559946.4053662,
-    "ast_hash": "8ec1ef375beee3d6fbc512fe1075522e",
-    "semantic_hash": "8ec1ef375beee3d6fbc512fe1075522e"
+    "mtime": 1793601660.2452424,
+    "seen": 1793605202.5616105,
+    "ast_hash": "2b7737a914fe85dd5a7556a2c6ef65b4",
+    "semantic_hash": "2b7737a914fe85dd5a7556a2c6ef65b4"
   },
   "scripts/gmail-renew.sh": {
-    "mtime": 1793587200.009868,
-    "seen": 1793588805.5708437,
-    "ast_hash": "040808b4c3113a7d7ac9394c441880c2",
-    "semantic_hash": "040808b4c3113a7d7ac9394c441880c2"
+    "mtime": 1793602888.1051967,
+    "seen": 1793605202.5615418,
+    "ast_hash": "fa2f59d798e431039564cc1f6244b411",
+    "semantic_hash": "fa2f59d798e431039564cc1f6244b411"
   },
   "tests/test_gmail_renew.py": {
-    "mtime": 1793587175.9538682,
-    "seen": 1793588805.5709076,
-    "ast_hash": "476975ffe68c541702ad17cc84c4dad2",
-    "semantic_hash": "476975ffe68c541702ad17cc84c4dad2"
+    "mtime": 1793602899.4651961,
+    "seen": 1793605202.5616114,
+    "ast_hash": "60efd88b4f7023fd04bd26fd74fb2dd8",
+    "semantic_hash": "60efd88b4f7023fd04bd26fd74fb2dd8"
   },
   "scripts/ingest-alert.py": {
     "mtime": 1793592693.7456326,
@@ -988,5 +988,107 @@
     "seen": 1793594798.9972725,
     "ast_hash": "b847f05f801481fd06184b769bf7a8f3",
     "semantic_hash": "b847f05f801481fd06184b769bf7a8f3"
+  },
+  "compose/docker-compose.comms.yml": {
+    "mtime": 1793602676.0612032,
+    "seen": 1793605202.5615027,
+    "ast_hash": "d7dd5d7ec83a1baabd8a82063dec684f",
+    "semantic_hash": "d7dd5d7ec83a1baabd8a82063dec684f"
+  },
+  "scripts/render-comms-env.sh": {
+    "mtime": 1793601408.2332609,
+    "seen": 1793605202.5615463,
+    "ast_hash": "0aa2ab13e378886f48eb781a4ec463e2",
+    "semantic_hash": "0aa2ab13e378886f48eb781a4ec463e2"
+  },
+  "services/comms-brokers/brokers/__init__.py": {
+    "mtime": 1793600230.9973114,
+    "seen": 1793605202.5615532,
+    "ast_hash": "a43f0dabc6934c261329324a1a5a930f",
+    "semantic_hash": "a43f0dabc6934c261329324a1a5a930f"
+  },
+  "services/comms-brokers/brokers/common.py": {
+    "mtime": 1793602480.4652152,
+    "seen": 1793605202.5615537,
+    "ast_hash": "ada67f30580155cec80a742e0b023e37",
+    "semantic_hash": "ada67f30580155cec80a742e0b023e37"
+  },
+  "services/comms-brokers/brokers/gcal.py": {
+    "mtime": 1793602480.6172152,
+    "seen": 1793605202.5615544,
+    "ast_hash": "a9081fb24e3eac58424a36406fb92cbc",
+    "semantic_hash": "a9081fb24e3eac58424a36406fb92cbc"
+  },
+  "services/comms-brokers/brokers/gmail.py": {
+    "mtime": 1793602480.5452154,
+    "seen": 1793605202.561555,
+    "ast_hash": "aaa237b9858c5eb561782ba27d0351c7",
+    "semantic_hash": "aaa237b9858c5eb561782ba27d0351c7"
+  },
+  "services/comms-brokers/brokers/policy.json": {
+    "mtime": 1793600195.291365,
+    "seen": 1793605202.5615554,
+    "ast_hash": "0eb62f1d1f62fde61357f1a3a4bffeb8",
+    "semantic_hash": "0eb62f1d1f62fde61357f1a3a4bffeb8"
+  },
+  "services/comms-brokers/brokers/serve.py": {
+    "mtime": 1793599614.7293375,
+    "seen": 1793605202.5615563,
+    "ast_hash": "81a3976eb0333a3920e6d1a489213167",
+    "semantic_hash": "81a3976eb0333a3920e6d1a489213167"
+  },
+  "services/comms-brokers/tests/fakes.py": {
+    "mtime": 1793600662.013293,
+    "seen": 1793605202.5615568,
+    "ast_hash": "499e5fe664000968a0a52d0aec79735d",
+    "semantic_hash": "499e5fe664000968a0a52d0aec79735d"
+  },
+  "services/comms-brokers/tests/test_common.py": {
+    "mtime": 1793602566.1732109,
+    "seen": 1793605202.5615573,
+    "ast_hash": "2caaf682e241b8bc38aac170b530085c",
+    "semantic_hash": "2caaf682e241b8bc38aac170b530085c"
+  },
+  "services/comms-brokers/tests/test_gcal.py": {
+    "mtime": 1793600552.9092975,
+    "seen": 1793605202.561558,
+    "ast_hash": "dc3957a6925238b349aeb4313c8a8368",
+    "semantic_hash": "dc3957a6925238b349aeb4313c8a8368"
+  },
+  "services/comms-brokers/tests/test_gmail.py": {
+    "mtime": 1793600552.7852974,
+    "seen": 1793605202.5615585,
+    "ast_hash": "c55795e93757abfbad92a5c4781c59d6",
+    "semantic_hash": "c55795e93757abfbad92a5c4781c59d6"
+  },
+  "services/comms-brokers/tests/test_server.py": {
+    "mtime": 1793600609.6092951,
+    "seen": 1793605202.561559,
+    "ast_hash": "b8803f1fe94159f996598b4d9a1a72f4",
+    "semantic_hash": "b8803f1fe94159f996598b4d9a1a72f4"
+  },
+  "services/hermes/comms/config.yaml": {
+    "mtime": 1793601766.0852442,
+    "seen": 1793605202.5615616,
+    "ast_hash": "47efaba85063bae7672bf0e70192ba6f",
+    "semantic_hash": "47efaba85063bae7672bf0e70192ba6f"
+  },
+  "tests/test_render_comms_env.py": {
+    "mtime": 1793601660.0452423,
+    "seen": 1793605202.5616148,
+    "ast_hash": "c0321baff07f61e55a3433e9dbf83ca8",
+    "semantic_hash": "c0321baff07f61e55a3433e9dbf83ca8"
+  },
+  "services/comms-brokers/requirements.txt": {
+    "mtime": 1793600231.1213114,
+    "seen": 1793605202.5616217,
+    "ast_hash": "f7cbe69dc877143f1be78e3c8ecaa3e5",
+    "semantic_hash": "f7cbe69dc877143f1be78e3c8ecaa3e5"
+  },
+  "services/hermes/comms/SOUL.md": {
+    "mtime": 1793601824.0812426,
+    "seen": 1793605202.5616224,
+    "ast_hash": "3cd6534015f2a93381c7a8c662956b76",
+    "semantic_hash": "3cd6534015f2a93381c7a8c662956b76"
   }
 }

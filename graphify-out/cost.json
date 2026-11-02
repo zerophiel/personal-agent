@@ -82,8 +82,15 @@
       "output_tokens": 308286,
       "files": 12,
       "note": "doc delta from cf4e7e1 (PROGRESS, GMAIL_OAUTH) and e41db72 (10 docs/runtime files) after the 2 Nov 11:16 ingest-alert deploy (4 patch agents)"
+    },
+    {
+      "date": "2026-11-02T08:08:42.957114+00:00",
+      "input_tokens": 4209808,
+      "output_tokens": 233031,
+      "files": 8,
+      "note": "Round 14: M4 comms, 8 docs as a delta from f7f45c8 (two new: the comms SOUL and the brokers' requirements), every community named"
     }
   ],
-  "total_input_tokens": 57641494,
-  "total_output_tokens": 5094421
+  "total_input_tokens": 61851302,
+  "total_output_tokens": 5327452
 }
