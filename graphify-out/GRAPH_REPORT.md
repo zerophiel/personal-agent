@@ -1,7 +1,9 @@
 # Graph Report - m1-skeleton  (2026-11-02)
 
 ## Corpus Check
-- cluster-only mode — file stats not available
+- 163 files · ~191,261 words
+- Verdict: corpus is large enough that graph structure adds value.
+- Unclassified: 38 file(s) not represented in the graph (top: .service 11, (none) 10, .timer 10)
 
 ## Summary
 - 4710 nodes · 12148 edges · 221 communities (164 shown, 57 thin omitted)
@@ -9,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `7fbd4b38`
+- Built from commit: `9db9211e`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1093,15 +1095,15 @@ Nodes (9): mandiri-utama (Mandiri main account), wajib:cicilan category (9 rules
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Ingest-alert deploy (2 Nov 11:16 WIB with make deploy, after the backup ledger.db.bak-pre-ingest-alert, integrity ok; it also shipped the three Gmail-renewal scripts)` connect `Progress: the Ingest-Failure Alert via the Control Bot (2 Nov Deploy) and the Gmail Token Renewal` to `Gmail OAuth Guide, Token Renewal and Sender Allowlist`, `Progress: Daily-Money Pace, Uncategorized Payday Transfers, Account Balances, Plan in Force, transfer_selesai and the 2 Nov 01:23 Deploy`, `Ledger, Deploys and Data-Fix Backups`?**
-  _High betweenness centrality (0.178) - this node is a cross-community bridge._
+- **Why does `State snapshot` connect `State Snapshot: Timers, Jobs, Restic and Runs` to `Egress Proxies, Containers, Deploy History and Jobs (State)`, `Payday Plan, Debts, Balances and Usulan (State Snapshot)`, `State Snapshot: Pre-Deploy Ledger Backups and the plan_progress Table`, `Runtime Map Collector`, `Card, Statement and Instalment Tables (State Snapshot)`?**
+  _High betweenness centrality (0.167) - this node is a cross-community bridge._
 - **Are the 3 inferred relationships involving `create_app()` (e.g. with `report()` and `rincian()`) actually correct?**
   _`create_app()` has 3 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `AWS_DEFAULT_REGION`, `graphify-out/GRAPH_REPORT.md (where to start in the project graph)`, `Runtime files that differ from /opt/personal-agent: none` to the rest of the system?**
   _149 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Runtime Map Overview: Collector, Sanitization Rules, Drift, Map Files and the Project Graphs` be split into smaller, more focused modules?**
   _Cohesion score 0.09759759759759759 - nodes in this community are weakly interconnected._
-- **Why does `State snapshot` connect `State Snapshot: Timers, Jobs, Restic and Runs` to `Egress Proxies, Containers, Deploy History and Jobs (State)`, `Payday Plan, Debts, Balances and Usulan (State Snapshot)`, `State Snapshot: Pre-Deploy Ledger Backups and the plan_progress Table`, `Runtime Map Collector`, `Card, Statement and Instalment Tables (State Snapshot)`?**
+- **Why does `Ingest-alert deploy (2 Nov 11:16 WIB with make deploy, after the backup ledger.db.bak-pre-ingest-alert, integrity ok; it also shipped the three Gmail-renewal scripts)` connect `Progress: the Ingest-Failure Alert via the Control Bot (2 Nov Deploy) and the Gmail Token Renewal` to `Gmail OAuth Guide, Token Renewal and Sender Allowlist`, `Progress: Daily-Money Pace, Uncategorized Payday Transfers, Account Balances, Plan in Force, transfer_selesai and the 2 Nov 01:23 Deploy`, `Ledger, Deploys and Data-Fix Backups`?**
   _High betweenness centrality (0.161) - this node is a cross-community bridge._
 
 ### Low-confidence Hints

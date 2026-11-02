@@ -77,8 +77,8 @@ class InThePlan(unittest.TestCase):
         self.assertNotIn("8808", json.dumps(snap))
 
     def test_debits_from_one_account_add_up_with_what_the_bank_holds_back(self):
-        """Owner 2026-10-28: Mandiri holds Rp 100.000; with SPayLater on the 1st and the car on the 2nd, a balance of only the
-        car instalment would let the car debit fail. One figure per account, before the first debit."""
+        """Owner 2026-10-28: Mandiri holds back a minimum balance; with SPayLater on the 1st and the car on the 2nd, a
+        balance of only the car instalment would let the car debit fail. One figure per account, before the first debit."""
         conn = setup()
         car(conn, pay_method="autodebit", debit_account_alias="mandiri-utama")
         tools.upsert_debt(conn, "spaylater", "Shopee", 5 * 270_000, 270_000, 5, 1, None, pay_method="autodebit",

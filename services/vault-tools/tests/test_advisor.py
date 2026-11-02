@@ -251,7 +251,8 @@ class LivingReserveEstimate(unittest.TestCase):
         self.assertEqual(tools.reserve_for(conn, date(2026, 10, 30)), (3_000_000, "diset pemilik"))
 
     def test_untidy_history_never_drives_the_plan(self):
-        """Regression: a Rp 13M reserve estimated from half-categorized months made the plan pay only a card minimum."""
+        """Regression: a reserve estimated from half-categorized months came out far too high, so the plan paid only a
+        card minimum."""
         conn = world(reserve=None)
         for m, cash, unknown in (("2026-07", 17_000_000, 27_000_000), ("2026-08", 4_000_000, 60_000_000), ("2026-09", 18_000_000, 45_000_000)):
             self.tx(conn, m, "makan", -cash)

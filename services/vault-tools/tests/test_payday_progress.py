@@ -1,6 +1,6 @@
 """Payday progress (30 Oct 2026). A payday's plan is computed from the ledger as it stood BEFORE that payday, so paying from
 that salary is progress, never a smaller plan next to a still whole salary: the old code handed the freed cash to the pot (plans
-#57-#60 and the simulation showed 19-20.7M for a pot that got nothing). Also: instalments paid by hand ahead of the auto-debit,
+#57-#60 and the simulation showed millions for a pot that got nothing). Also: instalments paid by hand ahead of the auto-debit,
 a card whose minimum is paid is not "due", and what the owner already reported is listed so it is not asked again."""
 import asyncio
 import json
@@ -36,7 +36,7 @@ def stmt(conn, card_id, printed, due, total, minimum):
 
 
 def world(path=":memory:"):
-    """Salary 20M; living money 3M; school 2M; two auto-debited instalments (1.8M); a pot filled from what is left; three
+    """A salary, living money and a school fee; two auto-debited instalments; a pot filled from what is left; three
     cards: the salary clears Jenius, most of DBS, and only CIMB's minimum (like 30 Oct, scaled down)."""
     conn = connect(path)
     vault = PayeeVault(conn, KEY)
@@ -94,7 +94,8 @@ class PlanStaysAfterPaying(unittest.TestCase):
         self.assertNotIn("hutang-teman", [t["to_alias"] for t in after["transfers"]])
 
     def test_the_simulation_starts_from_the_payday_like_its_plan(self):
-        """Regression: "Nov 2026: kas 22,08 jt; kartu 872.061; pot 20,71 jt" once the payments were recorded."""
+        """Regression: once the payments were recorded, the Nov 2026 row gave the cards almost nothing and the pot the
+        freed cash."""
         conn = world()
         first = simulate.simulate(conn, PAYDAY)["rows"][0]
         pay_as_on_30_oct(conn)
@@ -206,8 +207,8 @@ class Progress(unittest.TestCase):
         self.assertIn("saldo pot hutang-teman Rp 0 (dilaporkan 2026-11-01)", known)
 
     def test_an_emergency_balance_read_after_the_payday_says_whether_the_deposit_arrived(self):
-        """Regression (30 Oct 16:29): 600.048 then 600.000, both read after the 500.000 deposit, made the bot say the deposit
-        had not arrived and ask for another 500.000."""
+        """Regression (30 Oct 16:29): two emergency-fund readings, both taken after the payday's deposit, made the bot
+        say the deposit had not arrived and ask for another deposit."""
         conn = world()
         tools.set_threshold(conn, "emergency_target", 3_000_000)
         tools.set_threshold(conn, "emergency_monthly", 500_000)

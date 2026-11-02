@@ -194,8 +194,9 @@ class LeftoverLivingCash(unittest.TestCase):
         self.assertEqual(tools.reserve_for(conn, date(2026, 10, 30))[0], 0)
 
     def test_a_new_living_reserve_keeps_the_owners_leftover(self):
-        """Regression 2026-10-28: the leftover was stored as the top-up (7.500.000 - 4.894.157). After living_reserve became
-        7.546.005 the plan told the owner to move 4.940.162, money he never had, leaving the car auto-debit 46.005 short."""
+        """Regression 2026-10-28: the leftover was stored as the top-up (the reserve minus the leftover). After
+        living_reserve rose, the plan told the owner to move money the owner never had, leaving the car auto-debit
+        short."""
         conn = full_world()
         tools.set_pot_schedule(conn, "hutang-teman", None, None, NOV_1, pace="sisa")      # the owner's pattern: pot takes the rest
         tools.set_threshold(conn, "living_reserve", 7_500_000)

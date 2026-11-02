@@ -124,7 +124,7 @@ class Reports(unittest.TestCase):
         self.assertNotIn("rekening rekening", text)
 
     def test_partly_funded_payment_is_never_called_lunas(self):
-        """Regression: HSBC was shown as 'lunas' while Rp 3.77M of its bill was still unfunded."""
+        """Regression: HSBC was shown as 'lunas' while part of its bill was still unfunded."""
         conn = world()
         tools.set_threshold(conn, "living_reserve", 9_000_000)                    # enough for the minimums and only part of one card
         text = reports.build(conn, "rencana", TODAY)
