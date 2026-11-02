@@ -2,7 +2,8 @@
 """LAPTOP ONLY. Mint a gmail.readonly refresh token and write it as JSON to STDOUT (pipe it
 straight to the VPS; nothing secret is printed to the terminal or stored locally).
 
-Usage: gmail-auth.py client_secret.json | ssh vps '... cat > .../gmail_ingest_token'
+Usage: run by scripts/gmail-renew.sh, which pipes it to the VPS and replaces the old token only
+once the new one is complete. Refuses a terminal as stdout (the token would be printed).
 Needs: pip install google-auth-oauthlib
 """
 import contextlib
@@ -18,6 +19,10 @@ SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]  # read-only, nothin
 def main() -> int:
     if len(sys.argv) != 2:
         print("usage: gmail-auth.py client_secret.json", file=sys.stderr)
+        return 2
+    if sys.stdout.isatty():
+        print("Jangan dijalankan langsung (token akan tercetak di layar). Pakai: bash scripts/gmail-renew.sh",
+              file=sys.stderr)
         return 2
     flow = InstalledAppFlow.from_client_secrets_file(sys.argv[1], SCOPES)
     # The library print()s its prompt to STDOUT, which is piped into the token file on the VPS.

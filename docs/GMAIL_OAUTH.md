@@ -23,15 +23,15 @@ Semua langkah di bawah dikerjakan **di laptop Anda**. Token tidak pernah lewat c
 2. Application type: **Desktop app**, nama `ingest-desktop`.
 3. Klik **Download JSON** dan simpan sebagai `~/client_secret_ingest.json` di laptop. Jangan commit file ini.
 
-## 4. Buat token (di laptop)
+## 4. Buat atau perbarui token (di laptop)
+Sekali saja: `python3 -m venv ~/.venv-gmail && ~/.venv-gmail/bin/pip install google-auth-oauthlib`. Lalu, dari folder repo:
 ```
-python3 -m venv ~/.venv-gmail && ~/.venv-gmail/bin/pip install google-auth-oauthlib
-~/.venv-gmail/bin/python scripts/gmail-auth.py ~/client_secret_ingest.json | \
-  ssh ubuntu@43.157.242.194 'sudo bash -c "umask 077; cat > /opt/personal-agent-secrets/gmail_ingest_token && chmod 0444 /opt/personal-agent-secrets/gmail_ingest_token"'
+bash scripts/gmail-renew.sh ~/client_secret_ingest.json
 ```
-- Browser terbuka; login ke akun Gmail Anda dan setujui **hanya baca** email.
-- Skrip tidak mencetak token. Isi token (refresh token) langsung masuk ke file root di VPS lewat SSH.
-- Kalau file sudah ada dan ingin menggantinya, hapus dulu di VPS (`sudo rm /opt/personal-agent-secrets/gmail_ingest_token`).
+- Skrip mencetak sebuah URL. Buka di browser, login ke akun Gmail Anda, dan setujui **hanya baca** email.
+- Token tidak pernah tercetak dan tidak disimpan di laptop. `scripts/gmail-auth.py` menulisnya ke pipa SSH, dan di VPS token masuk ke file sementara di sebelah token lama.
+- Token lama baru diganti setelah token baru lengkap (JSON dengan refresh token dan tanggal terbit). Penggantiannya menulis ulang file yang sama (inode tetap, karena compose me-mount file ini ke ingest-gmail). Login yang gagal, kehabisan waktu, atau dibatalkan membiarkan token lama tetap dipakai, jadi file lama tidak perlu dihapus dulu.
+- Jangan menjalankan `scripts/gmail-auth.py` sendirian: tanpa pipa token akan tercetak di layar, dan skrip menolak bila keluarannya terminal.
 
 Simpan juga `client_secret_ingest.json` ke VPS dengan cara yang sama (`gmail_ingest_client`), karena ingest-gmail memakainya untuk menukar refresh token:
 ```
@@ -52,7 +52,7 @@ ssh ubuntu@43.157.242.194 'sudo bash -c "umask 077; cat > /opt/personal-agent-se
 
 ## 6. Rotasi / pencabutan
 - Cabut akses kapan saja di https://myaccount.google.com/permissions (hapus `personal-agent-ingest`).
-- Rotasi: hapus file token di VPS, ulangi langkah 4.
+- Rotasi: ulangi langkah 4. Token lama diganti setelah yang baru lengkap.
 
 ## Catatan keamanan
 - `gmail.readonly` memungkinkan membaca **seluruh** email, bukan hanya label Keuangan. Pembatasan ke label dilakukan di kode ingest-gmail, bukan oleh Google. Karena itu job ini deterministik, tanpa LLM, dan tidak punya jalur keluar selain `gmail.googleapis.com` dan `oauth2.googleapis.com`.

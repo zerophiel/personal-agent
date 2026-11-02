@@ -601,7 +601,7 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 
 ## transfer_selesai asks which payday's plan from a week after a payday (2026-11-02 night, under the owner's delegation)
 - Found with the rehearsal: from `PAYDAY_LOOKBACK_DAYS` after a payday, `transfer_selesai` marked the coming payday's
-  plan. A transfer of the month paid but not marked (a lesson fee of the 30 Oct plan, paid 30 Oct) would have been
+  plan. A transfer of the month marked late (the lesson fee of the 30 Oct plan, not paid yet on 2 Nov) would have been
   marked in the 30 Nov plan, and `semua=true` would have marked all of the 30 Nov plan weeks before its salary.
 - Rule (commit eeec197): from then on two plans are open, the month's (`plan_in_force`) and the coming one. A
   destination open in both (marked in both, for undo) is asked for: the tool names both paydays and due dates, and the
@@ -611,8 +611,10 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 - On a copy of the live ledger, simulated 8 Nov: the lesson fee is asked for, `gajian='2026-10-30'` marks it in the 30
   Oct plan, `semua=true` marks only that, and the 30 Nov plan stays unmarked. Live since 2 Nov 01:23 WIB; the MCP
   catalog shows `gajian`.
-- Owner: `/new` to the vault bot once (a new tool parameter). The lesson fee of 30 Oct is still unmarked: tell the bot
-  it was paid on 30 Oct (before 7 Nov there is no question; after, answer "gajian 30 Oktober").
+- Owner: `/new` to the vault bot once (a new tool parameter; sent on the morning of 2 Nov). The lesson fee of the 30
+  Oct plan is not paid yet: the owner set the money aside (2 Nov morning; this section first said it was paid on 30
+  Oct, which was wrong), and the ledger keeps it open. When it is paid, tell the bot: up to 6 Nov it marks the 30 Oct
+  plan without asking (`current_payday` keeps a payday for 7 days); from 7 Nov it asks, answer "gajian 30 Oktober".
 
 ## Deployed 2 Nov 01:23 WIB: the plan in force, the daily-money pace, transfer_selesai, q21 (under the owner's delegation)
 - Backup `ledger.db.bak-pre-plan-in-force` (01:22, integrity ok). Both bots idle (the vault's last log line was the
@@ -628,6 +630,19 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   Hermes sends its shutdown notice to the owner's Telegram on every restart.
 - Read-only live check with the deployed code: plan in force 2026-10-30, pace 30% used ('ok'), 23 rows waiting for a
   category. `make runtime-map` after it (commit e41db72).
+
+## Renewing the Gmail token never leaves the VPS without one (2026-11-02 morning)
+- The control bot's warning at 08:00 WIB: the gmail.readonly token (Testing mode, 7 days), minted 27 Oct 13:23 WIB,
+  runs out on 3 Nov around 13:20 WIB. The 3 Nov 06:00 ingest still has it; the 4 Nov 06:00 one would not.
+- The documented renewal piped gmail-auth.py into `cat > gmail_ingest_token`, which empties the old token as soon as
+  ssh starts, before the login. A login that failed or was cancelled left ingest without a token, and
+  docs/GMAIL_OAUTH.md even said to delete the old file first. Run alone, gmail-auth.py printed the token.
+- `scripts/gmail-renew.sh` (laptop): the new token goes to a temporary file on the VPS and is checked (JSON with a
+  refresh token and its issue date). Only then does it rewrite the old file in place; the inode stays, because compose
+  mounts the file as a secret. Otherwise the old token stays. gmail-auth.py now refuses a terminal as stdout.
+- Tests: tests/test_gmail_renew.py with a fake python and ssh. On the VPS, once against a fake token in /tmp: a
+  cancelled login kept the old token, a finished one rewrote it with the same inode; the folder was removed.
+- The pa-gmail-token messages name the new script from the next deploy.
 
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
@@ -680,9 +695,10 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
     payday, or leave the salary account out of the trend? A manual calibration for the owner; nothing changed.
 
 ## Next steps
-- Owner, after the 2 Nov 01:23 WIB deploy: `/new` once to vault (`transfer_selesai` has `gajian`), and tell the
-  bot the 30 Oct lesson fee is paid. October's categorizing goes on; each categorized payday row leaves "belum
-  dihitung".
+- (done 2 Nov morning) Owner `/new` to vault after the 2 Nov 01:23 WIB deploy (`transfer_selesai` has `gajian`). The
+  30 Oct lesson fee is not paid yet, its money set aside: tell the bot once it is paid. October's categorizing goes
+  on; each categorized payday row leaves "belum dihitung".
+- Owner, before 3 Nov ~13:00 WIB: `bash scripts/gmail-renew.sh` on the laptop (see "Renewing the Gmail token" above).
 - (done 2026-11-01 20:13 WIB) The doubled-rows fix. Owner: `/new` once to vault, whose session still holds the 186,8
   juta reply. Bank files over an already recorded period are fine again: same-day same-amount rows match, and BUKU
   TIDAK COCOK flags a row the second file dates otherwise.
@@ -700,7 +716,7 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   Telegram network errors at 23:01 and 23:04): the bot was idle, nothing to recover, no error since. The 23:23
   restart (M3) exited cleanly again. Keep watching.
 - (done 2026-10-31 14:04) Owner sent `/new` after the 30 Oct evening deploy. Still open: les Mandarin once paid
-  (`transfer_selesai`; paid 30 Oct, still unmarked on 2 Nov, see "transfer_selesai asks" above). The Mandiri October e-statement was recorded
+  (`transfer_selesai`; not paid yet on 2 Nov, the money set aside, see "transfer_selesai asks" above). The Mandiri October e-statement was recorded
   on 1 Nov 18:23 WIB (see "Two overlapping bank files" above).
 - (done 2026-11-01, Deploy 2 above) Admin fees, bills paid once, the `cicilan_dibayar` undo; the `format_autodebit_check`
   sentence was fixed in the recalibration. Still open: after a week, compare cached tokens per turn and compactions per

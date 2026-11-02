@@ -20,10 +20,10 @@ def days_left(issued_at: str, now: datetime) -> float:
 
 def message(left: float) -> str | None:
     if left <= 0:
-        return ("Token Gmail SUDAH kedaluwarsa. Ingest statement berhenti. Jalankan scripts/gmail-auth.py "
+        return ("Token Gmail SUDAH kedaluwarsa. Ingest statement berhenti. Jalankan bash scripts/gmail-renew.sh "
                 "di laptop (lihat docs/GMAIL_OAUTH.md).")
     if left <= LIFETIME_DAYS - WARN_AT_DAYS:
-        return (f"Token Gmail habis dalam {left:.1f} hari. Perbarui dengan scripts/gmail-auth.py "
+        return (f"Token Gmail habis dalam {left:.1f} hari. Perbarui dengan bash scripts/gmail-renew.sh "
                 "di laptop (satu menit) supaya ingest statement tidak berhenti.")
     return None
 
@@ -46,7 +46,7 @@ def main() -> int:
         notify("Token Gmail belum dibuat. Ikuti docs/GMAIL_OAUTH.md.")
         return 1
     except (ValueError, KeyError):
-        notify("File token Gmail rusak atau tanpa tanggal terbit. Buat ulang dengan scripts/gmail-auth.py.")
+        notify("File token Gmail rusak atau tanpa tanggal terbit. Buat ulang dengan bash scripts/gmail-renew.sh.")
         return 1
     msg = message(days_left(issued, datetime.now(timezone.utc)))
     if msg:
