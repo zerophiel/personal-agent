@@ -1,17 +1,28 @@
 #!/usr/bin/env bash
-# LAPTOP ONLY. Renew the gmail.readonly token of ingest-gmail. In Testing mode a token lasts 7 days, and
-# pa-gmail-token warns through the control bot from 2 days before it runs out. scripts/gmail-auth.py mints the new
-# token and writes it to stdout. This script pipes it to the VPS, where it goes into a temporary file next to the old
-# token. The old token is replaced only once the new one is complete, so a login that fails, times out or is cancelled
-# leaves the old token in use. Nothing secret is printed or kept on the laptop.
+# LAPTOP ONLY. Renew a Google token on the VPS: by default the gmail.readonly token of ingest-gmail, or one of the two
+# comms tokens (M4). In Testing mode a token lasts 7 days, and pa-gmail-token warns through the control bot from 2 days
+# before the ingest token runs out. scripts/gmail-auth.py mints the new token and writes it to stdout. This script pipes
+# it to the VPS, where it goes into a temporary file next to the old token. The old token is replaced only once the new
+# one is complete, so a login that fails, times out or is cancelled leaves the old token in use. Nothing secret is
+# printed or kept on the laptop.
 #
-# Usage: bash scripts/gmail-renew.sh [client_secret.json]      (default: ~/client_secret_ingest.json)
+# Usage: bash scripts/gmail-renew.sh [client_secret.json] [token name]
+#          (default: ~/client_secret_ingest.json gmail_ingest_token)
+#        bash scripts/gmail-renew.sh ~/client_secret_comms.json gmail_comms_token      (comms: Gmail)
+#        bash scripts/gmail-renew.sh ~/client_secret_comms.json calendar_comms_token   (comms: Calendar)
 set -euo pipefail
 
 VPS=${GMAIL_RENEW_VPS:-ubuntu@43.157.242.194}
-TOKEN=${GMAIL_RENEW_TOKEN:-/opt/personal-agent-secrets/gmail_ingest_token}
-PY=${GMAIL_PY:-$HOME/.venv-gmail/bin/python}
 CLIENT=${1:-$HOME/client_secret_ingest.json}
+NAME=${2:-gmail_ingest_token}
+case "$NAME" in   # the token secrets gmail-auth.py has a scope for; never any other secret
+  gmail_ingest_token)   LABEL="Token Gmail" ;;
+  gmail_comms_token)    LABEL="Token Gmail comms" ;;
+  calendar_comms_token) LABEL="Token Kalender comms" ;;
+  *) echo "Nama token tidak dikenal: $NAME (gmail_ingest_token, gmail_comms_token, calendar_comms_token)." >&2; exit 2 ;;
+esac
+TOKEN=${GMAIL_RENEW_DIR:-/opt/personal-agent-secrets}/$NAME
+PY=${GMAIL_PY:-$HOME/.venv-gmail/bin/python}
 HERE=$(cd "$(dirname "$0")" && pwd)
 
 [ -s "$CLIENT" ] || { echo "File client OAuth tidak ada: $CLIENT (docs/GMAIL_OAUTH.md langkah 3)." >&2; exit 2; }
@@ -49,7 +60,8 @@ else:
     with os.fdopen(fd, "wb") as f:
         f.write(data)
 ' "$new" "$TOKEN"
-echo "Token Gmail di VPS diperbarui $(date '+%d %b %H:%M %Z'); berlaku 7 hari." >&2
+echo "$LABEL di VPS diperbarui $(date '+%d %b %H:%M %Z'); berlaku 7 hari." >&2
 EOF
 
-"$PY" "$HERE/gmail-auth.py" "$CLIENT" | ssh "$VPS" "sudo -n env TOKEN=$(printf %q "$TOKEN") bash -c $(printf %q "$REMOTE")"
+"$PY" "$HERE/gmail-auth.py" "$CLIENT" "$NAME" |
+  ssh "$VPS" "sudo -n env TOKEN=$(printf %q "$TOKEN") LABEL=$(printf %q "$LABEL") bash -c $(printf %q "$REMOTE")"

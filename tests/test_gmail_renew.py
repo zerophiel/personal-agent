@@ -1,18 +1,24 @@
+import importlib.util
 import json
 import os
+import re
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 
-SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "gmail-renew.sh")
+ROOT = os.path.join(os.path.dirname(__file__), "..")
+SCRIPT = os.path.join(ROOT, "scripts", "gmail-renew.sh")
 NEW = {"refresh_token": "new-test-value", "scopes": ["https://www.googleapis.com/auth/gmail.readonly"],
        "token_uri": "https://oauth2.googleapis.com/token", "issued_at": "2026-11-02T03:00:00+00:00"}
 OLD = '{"refresh_token": "old-test-value", "issued_at": "2026-10-27T06:23:31+00:00"}'
 
-# Stands in for ~/.venv-gmail/bin/python: the import check passes, and "running gmail-auth.py" prints what MODE says.
+# Stands in for ~/.venv-gmail/bin/python: the import check passes, and "running gmail-auth.py" notes its arguments and
+# prints what MODE says.
 FAKE_PY = """#!/bin/bash
 [ "$1" = "-c" ] && exit 0
+printf '%s\\n' "$@" > "$ARGS"
 case "$MODE" in
   ok) printf '%s' '""" + json.dumps(NEW) + """' ;;
   cancel) echo "login dibatalkan" >&2; exit 1 ;;
@@ -44,12 +50,20 @@ class Renew(unittest.TestCase):
                 f.write(body)
             os.chmod(p, stat.S_IRWXU)
         self.mark = os.path.join(self.d, "ssh-called")
+        self.args = os.path.join(self.d, "auth-args")
         self.env = dict(os.environ, PATH=bin_ + os.pathsep + os.environ["PATH"], GMAIL_PY=os.path.join(bin_, "python"),
-                        GMAIL_RENEW_TOKEN=self.token, GMAIL_RENEW_VPS="vps", MARK=self.mark)
+                        GMAIL_RENEW_DIR=self.d, GMAIL_RENEW_VPS="vps", MARK=self.mark, ARGS=self.args)
 
-    def run_renew(self, mode, client=None):
-        return subprocess.run(["bash", SCRIPT, client or self.client], env=dict(self.env, MODE=mode),
-                              capture_output=True, text=True, timeout=30)
+    def run_renew(self, mode, client=None, name=None):
+        argv = ["bash", SCRIPT, client or self.client] + ([name] if name else [])
+        return subprocess.run(argv, env=dict(self.env, MODE=mode), capture_output=True, text=True, timeout=30)
+
+    def auth_args(self):
+        """What gmail-auth.py was given."""
+        with open(self.args) as f:
+            script, *args = f.read().splitlines()
+        self.assertEqual(os.path.basename(script), "gmail-auth.py")
+        return args
 
     def test_new_token_replaces_old_in_place(self):
         inode = os.stat(self.token).st_ino
@@ -58,7 +72,8 @@ class Renew(unittest.TestCase):
         self.assertEqual(json.load(open(self.token)), NEW)
         self.assertEqual(os.stat(self.token).st_ino, inode)          # compose mounts the file: the inode stays
         self.assertFalse(os.path.exists(self.token + ".new"))
-        self.assertIn("diperbarui", r.stderr)
+        self.assertIn("Token Gmail di VPS diperbarui", r.stderr)
+        self.assertEqual(self.auth_args(), [self.client, "gmail_ingest_token"])   # the default is the ingest token
         self.assertNotIn("new-test-value", r.stdout + r.stderr)     # the token is never printed
 
     def test_cancelled_login_keeps_old_token(self):
@@ -86,6 +101,46 @@ class Renew(unittest.TestCase):
         self.assertEqual(r.returncode, 2)
         self.assertFalse(os.path.exists(self.mark))
         self.assertEqual(open(self.token).read(), OLD)
+
+    def test_a_comms_token_goes_to_its_own_file(self):
+        for name, label in (("gmail_comms_token", "Token Gmail comms"), ("calendar_comms_token", "Token Kalender comms")):
+            with self.subTest(name=name):
+                r = self.run_renew("ok", name=name)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(self.auth_args(), [self.client, name])        # gmail-auth.py mints that token's scope
+                path = os.path.join(self.d, name)
+                self.assertEqual(json.load(open(path)), NEW)
+                self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o444)
+                self.assertIn(f"{label} di VPS diperbarui", r.stderr)
+                self.assertEqual(open(self.token).read(), OLD)                 # the ingest token is left alone
+
+    def test_an_unknown_name_stops_before_ssh(self):
+        for name in ("vault_tools_key", "../gmail_ingest_token", "gmail_ingest_token.new"):
+            with self.subTest(name=name):
+                r = self.run_renew("ok", name=name)
+                self.assertEqual(r.returncode, 2)
+                self.assertIn("tidak dikenal", r.stderr)
+                self.assertFalse(os.path.exists(self.mark))
+                self.assertFalse(os.path.exists(self.args))                    # gmail-auth.py never ran
+        self.assertEqual(open(self.token).read(), OLD)
+
+
+class Scopes(unittest.TestCase):
+    def test_each_token_asks_for_the_scope_its_reader_uses(self):
+        spec = importlib.util.spec_from_file_location("gmail_auth", os.path.join(ROOT, "scripts", "gmail-auth.py"))
+        auth = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(auth)                    # loads without google_auth_oauthlib (main() imports it)
+        sys.path.insert(0, os.path.join(ROOT, "services", "comms-brokers"))
+        try:
+            from brokers import gcal, gmail                # the scopes come without mcp (the servers import it)
+        finally:
+            sys.path.pop(0)
+        self.assertEqual(auth.SCOPES, {"gmail_ingest_token": ["https://www.googleapis.com/auth/gmail.readonly"],
+                                       "gmail_comms_token": list(gmail.SCOPES),
+                                       "calendar_comms_token": list(gcal.SCOPES)})
+        self.assertEqual(set(auth.ASK), set(auth.SCOPES))
+        with open(SCRIPT, encoding="utf-8") as f:            # the names gmail-renew.sh accepts are these, no other
+            self.assertEqual(sorted(re.findall(r"^  (\w+)\)", f.read(), re.M)), sorted(auth.SCOPES))
 
 
 if __name__ == "__main__":

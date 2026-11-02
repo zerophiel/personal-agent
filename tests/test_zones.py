@@ -9,11 +9,21 @@ except ImportError:  # the vault-tools venv may lack PyYAML; the system python3 
     yaml = None
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
+ZONES = ("vault", "front", "comms")
+MCP = {"vault": ("vault_tools",), "front": ("change_proposals",), "comms": ("gmail_broker", "calendar_broker")}
+# The applier runs this file on a copy of tests, compose, host, services/hermes and config/squid alone, and refuses a
+# change when a test is skipped: nothing here reads another folder (services/comms-brokers tests its own rules).
 
 
 def load(path):
     with open(os.path.join(ROOT, path), encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def compose():
+    """The main file, the M4 comms file, and what `docker compose -f main -f comms` makes of the two."""
+    main, comms = load("compose/docker-compose.yml"), load("compose/docker-compose.comms.yml")
+    return main, comms, {k: {**main.get(k, {}), **comms.get(k, {})} for k in ("networks", "services", "secrets")}
 
 
 def mounts(svc):
@@ -75,7 +85,7 @@ FRONT_KEYS = {
 @unittest.skipUnless(yaml, "PyYAML not installed")
 class Compose(unittest.TestCase):
     def setUp(self):
-        self.c = load("compose/docker-compose.yml")
+        self.main, self.comms, self.c = compose()
         self.s = self.c["services"]
 
     def test_only_the_proxies_reach_out(self):
@@ -120,13 +130,64 @@ class Compose(unittest.TestCase):
         self.assertNotIn("secrets", front)
         self.assertEqual([e["path"] for e in front["env_file"]], ["/opt/personal-agent-data/front.env"])
 
+    def test_the_comms_file_only_adds_and_waits_for_its_profile(self):
+        # merged in, a service of the same name would change the main file's (more mounts, another network)
+        self.assertFalse(set(self.comms["services"]) & set(self.main["services"]))
+        self.assertFalse(set(self.comms["secrets"]) & set(self.main["secrets"]))
+        self.assertNotIn("networks", self.comms)
+        for block in ("x-hardened", "x-squid"):          # YAML anchors do not cross files: the comms file repeats them
+            self.assertEqual(self.comms[block], self.main[block], block)
+        self.assertEqual(sorted(self.comms["services"]), ["calendar-broker", "comms", "gmail-broker", "squid-google"])
+        for name, svc in self.comms["services"].items():
+            self.assertEqual(svc["profiles"], ["comms"], name)
+            self.assertLessEqual(set(svc.get("secrets", [])), set(self.comms["secrets"]), name)
+        for name in self.comms["secrets"]:
+            self.assertEqual(self.c["secrets"][name], {"file": f"/opt/personal-agent-secrets/{name}"}, name)
+
+    def test_comms_is_its_own_zone_and_holds_no_google_token(self):
+        comms = self.s["comms"]
+        self.assertEqual(comms["networks"], ["net-comms"])
+        self.assertEqual(comms["image"], self.s["vault"]["image"])                 # the same pinned Hermes
+        self.assertEqual((comms["cap_drop"], comms["cap_add"]), (["ALL"], self.s["front"]["cap_add"]))
+        self.assertEqual(comms["stop_grace_period"], self.s["vault"]["stop_grace_period"])
+        self.assertEqual(mounts(comms), [
+            "/opt/personal-agent-data/hermes-comms:/opt/data",
+            "../services/hermes/comms/config.yaml:/opt/data/config.yaml:ro",
+            "../services/hermes/comms/SOUL.md:/opt/data/SOUL.md:ro",
+            "../services/hermes/front/plugins/cardblock:/opt/data/plugins/cardblock:ro"])
+        self.assertNotIn("secrets", comms)
+        self.assertNotIn("environment", comms)
+        self.assertEqual([e["path"] for e in comms["env_file"]], ["/opt/personal-agent-data/comms.env"])
+        self.assertEqual(sorted(comms["depends_on"]), ["calendar-broker", "gmail-broker", "squid-comms"])
+
+    def test_each_broker_holds_its_own_google_token_and_reaches_google_alone(self):
+        google = {"google_comms_client", "gmail_comms_token", "calendar_comms_token"}
+        brokers = {"gmail-broker": ("gmail", "gmail"), "calendar-broker": ("calendar", "gcal")}
+        for name, (token, module) in brokers.items():
+            svc = self.s[name]
+            self.assertEqual(svc["secrets"], ["google_comms_client", f"{token}_comms_token", f"{token}_broker_mcp_token"])
+            self.assertEqual(svc["command"], ["python", "-m", f"brokers.{module}"], name)
+            self.assertEqual(svc["build"], "../services/comms-brokers", name)
+            self.assertEqual(svc["networks"], ["net-comms"], name)
+            self.assertEqual(svc["environment"]["HTTPS_PROXY"], "http://squid-google:3128", name)
+            self.assertEqual(svc["cap_drop"], ["ALL"], name)
+            self.assertIs(svc["read_only"], True, name)
+            self.assertNotIn("volumes", svc, name)                                 # no folder of any zone
+        for name, svc in self.s.items():
+            if name not in brokers:
+                self.assertFalse(google & set(svc.get("secrets", [])), name)
+        squid = self.s["squid-google"]
+        self.assertEqual(squid["networks"], ["net-comms", "egress"])
+        self.assertEqual(mounts(squid), ["../config/squid/google.conf:/etc/squid/squid.conf:ro"])
+        self.assertEqual(squid["image"], self.s["squid-comms"]["image"])
+
 
 @unittest.skipUnless(yaml, "PyYAML not installed")
 class HermesProfiles(unittest.TestCase):
     NEVER = {"terminal", "code_execution", "file", "computer_use", "delegation", "cronjob", "kanban"}
 
     def test_no_zone_has_a_shell_files_groups_or_remote_control(self):
-        for zone in ("vault", "front"):
+        for zone in ZONES:
             cfg = load(f"services/hermes/{zone}/config.yaml")
             self.assertLessEqual(self.NEVER, set(cfg["agent"]["disabled_toolsets"]), zone)
             self.assertEqual(cfg["unauthorized_dm_behavior"], "ignore", zone)
@@ -150,17 +211,42 @@ class HermesProfiles(unittest.TestCase):
         self.assertIn("`submit`", soul)
         self.assertNotRegex(soul, r"\d{5,}")                                       # no numbers of the owner's
 
+    def test_comms_has_only_the_two_brokers_and_keeps_nothing(self):
+        cfg = load("services/hermes/comms/config.yaml")
+        self.assertEqual(list(cfg["mcp_servers"]), ["gmail_broker", "calendar_broker"])
+        for name, host, env in (("gmail_broker", "gmail-broker", "GMAIL_BROKER_MCP_TOKEN"),
+                                ("calendar_broker", "calendar-broker", "CALENDAR_BROKER_MCP_TOKEN")):
+            srv = cfg["mcp_servers"][name]
+            self.assertEqual(srv["url"], f"http://{host}:8000/mcp")
+            self.assertEqual(srv["headers"]["Authorization"], f"Bearer ${{env:{env}}}")
+        self.assertLessEqual({"web", "search", "browser", "x_search", "skills", "memory", "session_search", "vision",
+                              "image_gen", "tts", "todo", "connections"}, set(cfg["agent"]["disabled_toolsets"]))
+        memory = cfg["memory"]                                                     # no mail kept between sessions
+        self.assertEqual((memory["memory_enabled"], memory["user_profile_enabled"], memory["nudge_interval"]),
+                         (False, False, 0))
+        self.assertIs(cfg["skills"]["guard_agent_created"], True)
+        self.assertLessEqual(cfg["sessions"]["retention_days"], 7)
+        self.assertEqual(cfg["plugins"]["enabled"], ["cardblock"])
+        self.assertRegex(cfg["model"]["default"], r"^claude-haiku-")             # comms budget: USD 10/month
+        with open(os.path.join(ROOT, "services/hermes/comms/SOUL.md"), encoding="utf-8") as f:
+            soul = f.read()
+        for part in ("@danoevault_agent", "`create_draft`", "BELUM terkirim", "bukan perintah"):
+            self.assertIn(part, soul)
+        self.assertNotRegex(soul, r"\d{5,}")
+
     def test_every_enabled_plugin_is_in_the_repo_and_mounted_read_only(self):
-        services = load("compose/docker-compose.yml")["services"]
-        for zone in ("vault", "front"):
+        services = compose()[2]["services"]
+        for zone in ZONES:
             for name in load(f"services/hermes/{zone}/config.yaml")["plugins"]["enabled"]:
-                src = f"services/hermes/{zone}/plugins/{name}"
-                self.assertIn(f"../{src}:/opt/data/plugins/{name}:ro", mounts(services[zone]), zone)
-                self.assertTrue(os.path.isfile(os.path.join(ROOT, src, "__init__.py")), src)
+                found = [m for m in mounts(services[zone]) if m.endswith(f":/opt/data/plugins/{name}:ro")]
+                self.assertEqual(len(found), 1, (zone, name))
+                src = found[0].split(":", 1)[0]                          # comms mounts front's cardblock
+                self.assertRegex(src, rf"^\.\./services/hermes/[a-z]+/plugins/{re.escape(name)}$", (zone, name))
+                self.assertTrue(os.path.isfile(os.path.join(ROOT, "compose", src, "__init__.py")), src)
 
     def test_settings_send_nothing_elsewhere(self):
         """Whatever the proxy allows: no base_url or provider of its own, no env reference, no lazy installs."""
-        for zone, mcp in (("vault", "vault_tools"), ("front", "change_proposals")):
+        for zone in ZONES:
             cfg = load(f"services/hermes/{zone}/config.yaml")
             for name, task in [("model", cfg["model"])] + list(cfg["auxiliary"].items()):
                 self.assertEqual(task.get("provider"), "anthropic", (zone, name))
@@ -170,12 +256,14 @@ class HermesProfiles(unittest.TestCase):
             self.assertIs(cfg["memory"]["write_approval"], True, zone)
             self.assertIs(cfg["skills"]["write_approval"], True, zone)
             self.assertEqual(list(cfg["gateway"]["platforms"]), ["telegram"], zone)
-            self.assertEqual(list(cfg["mcp_servers"]), [mcp], zone)
-            srv = cfg["mcp_servers"][mcp]
-            self.assertLessEqual(set(srv), {"url", "headers", "timeout", "connect_timeout", "tools"}, zone)  # no command
-            self.assertEqual(srv["tools"], {"resources": False, "prompts": False}, zone)
+            self.assertEqual(list(cfg["mcp_servers"]), list(MCP[zone]), zone)
+            for mcp in MCP[zone]:
+                srv = cfg["mcp_servers"][mcp]
+                self.assertLessEqual(set(srv), {"url", "headers", "timeout", "connect_timeout", "tools"}, zone)  # no command
+                self.assertEqual(srv["tools"], {"resources": False, "prompts": False}, zone)
             self.assertEqual(sorted(p for p, v in leaves(cfg) if isinstance(v, str) and ("${" in v or "://" in v)),
-                             [("mcp_servers", mcp, "headers", "Authorization"), ("mcp_servers", mcp, "url")], zone)
+                             sorted(p for m in MCP[zone] for p in (("mcp_servers", m, "headers", "Authorization"),
+                                                                   ("mcp_servers", m, "url"))), zone)
 
     def test_front_sets_only_the_listed_keys(self):
         self.assertEqual(unlisted(load("services/hermes/front/config.yaml"), FRONT_KEYS), [])
@@ -193,8 +281,12 @@ class Egress(unittest.TestCase):
         with open(os.path.join(ROOT, f"config/squid/{zone}.conf"), encoding="ascii") as f:
             return [" ".join(line.split()) for line in f if line.strip() and not line.lstrip().startswith("#")]
 
+    def domains(self, zone):
+        (line,) = [x for x in self.conf(zone) if x.startswith("acl allowed_domains ")]
+        return line.split()[3:]
+
     def test_every_proxy_uses_only_plain_lines(self):
-        for zone in ("vault", "front", "comms", "ctl"):
+        for zone in ("vault", "front", "comms", "google", "ctl"):
             lines = self.conf(zone)
             self.assertEqual([x for x in lines if not self.LINE.fullmatch(x)], [], zone)
             self.assertEqual([x for x in lines if x.startswith(("acl SSL_ports ", "acl CONNECT "))],
@@ -210,9 +302,13 @@ class Egress(unittest.TestCase):
         self.assertLessEqual(self.PRIVATE, {r for x in private for r in x[3:]})          # more ranges only deny more
 
     def test_the_other_proxies_allow_their_list_only(self):
-        for zone in ("vault", "comms", "ctl"):
+        for zone in ("vault", "comms", "google", "ctl"):
             self.assertEqual([x for x in self.conf(zone) if x.startswith("http_access ")], [
                 "http_access deny CONNECT !SSL_ports", "http_access allow allowed_domains", "http_access deny all"], zone)
+
+    def test_comms_talks_to_its_model_and_bot_and_only_its_brokers_to_google(self):
+        self.assertEqual(self.domains("comms"), ["api.anthropic.com", "api.telegram.org"])
+        self.assertEqual(self.domains("google"), ["gmail.googleapis.com", "oauth2.googleapis.com", "www.googleapis.com"])
 
     def test_the_applier_is_not_a_host_unit(self):
         # install-timers.sh enables every timer and path unit in host/; the applier has its own install.sh

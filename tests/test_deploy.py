@@ -42,7 +42,9 @@ class Rsync(unittest.TestCase):
 @unittest.skipUnless(yaml, "needs PyYAML")
 class BuildContexts(unittest.TestCase):
     def test_an_image_that_copies_a_folder_ignores_python_caches(self):
-        services = yaml.safe_load(read("compose/docker-compose.yml"))["services"]
+        services = {}
+        for path in ("compose/docker-compose.yml", "compose/docker-compose.comms.yml"):   # M4 builds the comms brokers
+            services.update(yaml.safe_load(read(path))["services"])
         checked = []
         for name, svc in services.items():
             build = svc.get("build")
@@ -63,7 +65,7 @@ class BuildContexts(unittest.TestCase):
             self.assertLessEqual({"**/__pycache__", "**/*.pyc"}, patterns, name)
             for folder in folders:   # the ignore file leaves out the caches, never what the image copies
                 self.assertFalse(patterns & {"*", "**", folder, folder.rstrip("/")}, name)
-        self.assertEqual(sorted(checked), ["ingest-gmail", "vault-tools"])
+        self.assertEqual(sorted(checked), ["calendar-broker", "gmail-broker", "ingest-gmail", "vault-tools"])
 
 
 if __name__ == "__main__":

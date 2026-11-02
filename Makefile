@@ -69,6 +69,7 @@ test:
 	cd services/control && python3 -I -m unittest discover -s tests -v
 	cd services/applier && python3 -I -m unittest discover -s tests -v   # a fake docker; its zone-rule test needs PyYAML
 	cd services/change-proposals && $${VAULT_PY:-python3} -I -m unittest discover -s tests -v   # needs mcp, as the vault-tools server tests
+	cd services/comms-brokers && $${VAULT_PY:-python3} -I -m unittest discover -s tests -v   # M4 brokers; the MCP server tests need mcp too
 	cd services/ingest-gmail && python3 -I -m unittest discover -s tests -v
 	cd services/vault-tools && $${VAULT_PY:-python3} -I -m unittest discover -s tests -v   # VAULT_PY=venv python to include server tests
 
