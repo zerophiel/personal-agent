@@ -357,6 +357,19 @@ Persistent=true
 WantedBy=timers.target
 ```
 
+## host/pa-ingest-alert.service
+
+Tell the owner when the statement ingest fails (OnFailure of pa-ingest)
+
+```ini
+[Unit]
+Description=Tell the owner when the statement ingest fails (OnFailure of pa-ingest)
+[Service]
+Type=oneshot
+EnvironmentFile=/opt/personal-agent/config/stack.env
+ExecStart=/usr/bin/python3 /opt/personal-agent/scripts/ingest-alert.py
+```
+
 ## host/pa-ingest.service
 
 ingest-gmail daily statement fetch (no LLM)
@@ -365,6 +378,7 @@ ingest-gmail daily statement fetch (no LLM)
 [Unit]
 Description=ingest-gmail daily statement fetch (no LLM)
 After=docker.service
+OnFailure=pa-ingest-alert.service
 [Service]
 Type=oneshot
 WorkingDirectory=/opt/personal-agent

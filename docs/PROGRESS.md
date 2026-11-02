@@ -1,6 +1,6 @@
 # Progress and resume point (finance / vault)
 
-Last updated: 2026-11-02. Branch `worktree-m1-skeleton`, draft PR #1. 663 tests pass (480 in vault-tools).
+Last updated: 2026-11-02. Branch `worktree-m1-skeleton`, draft PR #1. 686 tests pass (480 in vault-tools).
 No secrets or personal amounts are recorded here; the numbers live in the ledger on the VPS.
 
 ## Done
@@ -644,11 +644,32 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   mounts the file as a secret. Otherwise the old token stays. gmail-auth.py now refuses a terminal as stdout.
 - Tests: tests/test_gmail_renew.py with a fake python and ssh. On the VPS, once against a fake token in /tmp: a
   cancelled login kept the old token, a finished one rewrote it with the same inode; the folder was removed.
-- The pa-gmail-token messages name the new script from the next deploy.
+- The pa-gmail-token messages name the new script since the 2 Nov 11:16 WIB deploy (next section).
 - First real renewal, 2 Nov 10:28 WIB (the owner, on the laptop): on the VPS the token file was rewritten at 10:28:53,
   is not empty, and no temporary file is left (`test -s` and `stat` only, the token never read), so the new token
   passed the script's check. The 3 Nov 06:00 ingest is the first to use it with Google. It runs out on 9 Nov around
   10:28 WIB; the 08:00 check stays silent until 8 Nov, when it warns (2 days or less left).
+
+## The control bot says when the statement ingest fails (2026-11-02 midday)
+- Until now a failed 06:00 ingest (Google rejecting the token, a missing label, a Gmail error) showed only when the
+  owner greeted the vault bot (`ingest_events`); no host job reported it.
+- `pa-ingest.service` has `OnFailure=pa-ingest-alert.service`. The ingest exits 1 on every error event (`token_expired`,
+  `label_not_found`, `gmail_error`) and on an uncaught exception. `scripts/ingest-alert.py` then reads the type, time
+  and reason of the error events that run wrote (from systemd's ExecMainStartTimestamp, or the last 6 hours without
+  it) and sends one Indonesian message via the control bot with the cause and what to do: `bash scripts/gmail-renew.sh`
+  for a rejected token, recreate the label, or nothing for a Gmail error (that email is retried the next day). With no
+  error event it points to `journalctl -u pa-ingest`. The alert unit has no [Install] and no timer, so only a failed
+  ingest starts it. tests/test_ingest_alert.py (18).
+- Deployed 2 Nov 11:16 WIB with `make deploy`, after the backup `ledger.db.bak-pre-ingest-alert` (integrity ok). It
+  also shipped the three scripts of 99c2c96: the pa-gmail-token text now names `bash scripts/gmail-renew.sh`;
+  gmail-auth.py and gmail-renew.sh run on the laptop only. Checked read-only: the eight files of this deploy
+  hash-identical to the repo (the runtime map: 205 of 205 files identical), the installed units identical to them,
+  `OnFailure=pa-ingest-alert.service`, the alert unit `static` and never run, `systemd-analyze verify` clean, 11
+  timers, no container recreated (same StartedAt). control and vault-tools, rebuilt from cache, got new image IDs with
+  the same creation time; the control container already ran an older ID than its tag before this deploy. `--dry-run`
+  on the VPS printed the no-cause message for today's successful run and the renewal message for one synthetic
+  `token_expired` event in /tmp (removed). No unit was started and nothing was sent: the first real test is the next
+  failed ingest. No `/new` (no vault-tools or SOUL change). `make runtime-map` after it.
 
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
@@ -705,7 +726,9 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   30 Oct lesson fee is not paid yet, its money set aside outside the daily account (no correction): tell the bot once
   it is paid. October's categorizing goes on; each categorized payday row leaves "belum dihitung".
 - (done 2 Nov 10:28 WIB) Owner: `bash scripts/gmail-renew.sh` on the laptop (see "Renewing the Gmail token" above).
-  Next renewal before 9 Nov ~10:28 WIB; the control bot warns on 8 Nov at 08:00.
+  Next renewal before 9 Nov ~10:28 WIB; the control bot warns on 8 Nov at 08:00. Since 2 Nov 11:16 WIB it also says
+  when an ingest fails, e.g. Google rejecting the token at 06:00 ("The control bot says when the statement ingest
+  fails" above).
 - (done 2026-11-01 20:13 WIB) The doubled-rows fix. Owner: `/new` once to vault, whose session still holds the 186,8
   juta reply. Bank files over an already recorded period are fine again: same-day same-amount rows match, and BUKU
   TIDAK COCOK flags a row the second file dates otherwise.
@@ -760,4 +783,6 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 - Deploy: `rsync` from the worktree ROOT (never a subfolder: `--delete` wipes the server tree), back up `ledger.db` first, rebuild `vault-tools`, restart `vault`. Owner must `/new` in Telegram after tool or SOUL changes (owner plans to do it once data and system are done). Since 2026-11-01 23:23 WIB the applier is installed: `make deploy` refuses while the VPS has an applied front change this checkout lacks (`make applied-pull`, push, deploy again).
 - `make deploy` never builds the `jobs` profile and `pa-ingest.service` runs without `--build`: after an ingest-gmail
   change, run `--profile jobs build ingest-gmail` on the VPS (as on 2 Nov 01:23 WIB).
+- Never start `pa-ingest`, `pa-gmail-token` or `pa-ingest-alert` by hand to try them: each can message the owner.
+  `scripts/ingest-alert.py --dry-run` prints the alert instead of sending it.
 - Run the vault agent for batches via `hermes chat --oneshot`, ask for status only, and use a Monitor script for progress.
