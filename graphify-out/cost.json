@@ -61,8 +61,15 @@
       "output_tokens": 356712,
       "files": 12,
       "note": "doc delta from e7c3382: PROGRESS, calibration and 10 docs/runtime files after the 2 Nov 01:23 deploy (5 patch agents)"
+    },
+    {
+      "date": "2026-11-02T03:21:11.761244+00:00",
+      "input_tokens": 2821485,
+      "output_tokens": 99176,
+      "files": 2,
+      "note": "doc delta from 1602b17: PROGRESS and GMAIL_OAUTH after 99c2c96 (gmail-renew, lesson fee not paid) (1 patch agent)"
     }
   ],
-  "total_input_tokens": 47874351,
-  "total_output_tokens": 4686959
+  "total_input_tokens": 50695836,
+  "total_output_tokens": 4786135
 }

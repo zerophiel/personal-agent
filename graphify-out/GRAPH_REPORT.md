@@ -4,70 +4,70 @@
 - cluster-only mode — file stats not available
 
 ## Summary
-- 4618 nodes · 11813 edges · 214 communities (171 shown, 43 thin omitted)
-- Extraction: 85% EXTRACTED · 15% INFERRED · 0% AMBIGUOUS · INFERRED: 1731 edges (avg confidence: 0.83)
+- 4642 nodes · 11898 edges · 206 communities (164 shown, 42 thin omitted)
+- Extraction: 85% EXTRACTED · 15% INFERRED · 0% AMBIGUOUS · INFERRED: 1758 edges (avg confidence: 0.83)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `b58c1022`
+- Built from commit: `99c2c961`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
-- Card Statement Line Parsing
-- Hermes Runtime Probes
-- Payee Vault, Reconcile and Ledger Vault Tests (payee_vault.py)
+- Payday Status, Plan Summaries, Bill Status and Card Payment Recording (tools.py)
+- Hermes and Host Runtime Probes (probe_hermes.py, probe_host.py) and the Front Cardblock Plugin
+- Payee Vault Store, Rincian Builder and Payment Rule Tests (payee_vault.py, rincian.py)
 - Cardguard Plugin (Number Guard, Menu, Control Bot)
 - Runtime Map Overview, Host Timers and pa-* Units
 - Vault-Tools Data Dir, Ledger Backups and Change Log
-- Report Renderers, Subscriptions and Audit Tests
+- Hermes Logs, Compression, Auxiliary Models and Cardguard (Runtime)
 - Shared Imports, Ledger Connections and Ops Scripts
 - Front Change Applier (applier.py)
 - Live MCP Tool Catalog
 - Bot Activity: Tool Calls, Tool Usage and Prompt Snapshots (state.db)
-- Bank Mutation Recording, Rules and Tests
+- Bank Mutation Recording, Rules, Cashflow Summary and Tests (mutations.py)
 - Hermes Home, Engine Install, Credentials and Stores
-- Applier Self-Checks, Zone Tests and Prechecks
+- Reconcile and Ledger-Vault Tests, Random-Ledger Property Tests (reconcile.py)
 - Gateway Lifecycle and Messages
 - Cardguard Tests and Cardblock Plugin
-- Payday Status, Plan Summaries and Notion Page Rendering
-- Advisor and Living-Reserve Estimate Tests (test_advisor.py)
-- Payday Plan Builder (payday.py)
+- Standard-Library Imports and Test Modules (os, json, sys, unittest)
+- Advisor, Living-Reserve Estimate and Plan-in-Force Tests (test_advisor.py, test_health.py)
+- Payday Plan Builder (payday.py) and Fee Invariant Tests
 - Egress Proxies (squid) Runtime Map
-- Balance Readings, Expense Recording and Living-Money Pace Tests
-- Payday Plan Generation, Rincian and Calibration Tests
+- Expense Recording, Spending Pace and Living-Money Pace Tests (health.py)
+- Calibration and Roadmap Tests with Threshold, Card, Pot and Emergency-Fund Setters
 - Runtime Map Collector
 - Ledger Schema (v13 Tables)
-- Debt Roadmap, Thresholds and Calibration Tests
+- Debt Roadmap Module, Date Helpers, Paid Debts and Card Payment Tests (roadmap.py)
 - Pot Simulation, Admin Fees and Plan Invariants
 - Makefile Targets, Stack Settings, Deploy Guard and Host Units
-- Runbook: Applier Install, Deploys and Recovery
+- Progress: Card-Repayment Fix and Deploy, Category Scheme and October Categorizing
 - Applier Tests (test_applier.py)
 - Zones, Containers and Squid
-- Health Check, Spending Pace, Budgets and Debt Load (health.py)
+- Progress: Card Statements, Payment Targets, Instalments, Scenario A and Open Questions
 - Receipt Merge Rules and Resent Screenshots
-- Payday Progress and Two-Open-Plans Tests (test_payday_progress.py)
+- Payday Progress and Two-Open-Plans Tests, Debt Payment Recording and Undo
 - Spending Analysis (Budget Baseline)
-- MCP Server App, Budgets and Tool Flow Tests
+- MCP Server App, Tool Wrappers and Through-the-Tools Flow Tests (server.py)
 - Egress, Containers and Telegram Polling (State)
-- Holiday Fetch Decisions, Overrides and Tests
-- Health, Budget and Pace Tests (test_health.py)
+- Holiday Fetch: Sources, Parsing, Candidate Days and Overrides (cuti_fetch.py)
+- Health Check, Debt Load and Living Anchor, with Health and Pace Tests (health.py)
 - Ingest Inputs
 - Sinking Fund Tests
-- Gmail Ingest Job: Run, Client, Sender Auth and Tests
+- Gmail Ingest run() and Its Job Tests (FakeClient, test_ingest.py)
 - Pot Deposit Schedule (pot_schedule)
-- Runbook (M1-M3): VPS Setup and Front Start
-- Category Suggestions (suggest.py)
+- Runbook (M1-M3): VPS Setup, Front First Start, Telegram Allowlist and Front Persona
+- Category Rules, Set Category, Uncategorized Rows and Owner Names (mutations.py)
 - Progress Hub: Bots, Zones and Milestones
-- Debt Payment Recording, Undo and Rupiah Checks (record_debt_payment)
+- Statement Line Counting and Completeness Tests (count_dated_lines)
 - Control and Change-Proposals Containers, Env and Approval Paths (Runtime)
-- Host Probe Script (probe_host.py)
-- Control Bot Approval Tests
-- Hermes Agent Settings and Toolsets (Live)
 - Card Installments (card_installments.py)
-- Applied-Pull Host Script and Ops Script Test Modules
+- Control Bot: Proposal Validation, Approval, Diff Review and Fake-Telegram Tests
+- Hermes Agent Settings and Toolsets (Live)
+- Card Lines: Statement Parsing, Recording, Netting, Per-Card Detail and Their Tests (card_lines.py)
+- Fetch-Cuti and Gmail Token-Check Host Scripts
 - Bills Paid Once (one_off.py) and Placement Tests
-- Security: Egress, Squid Proxies and Sender Checks
+- Security (M1): Egress, Squid Proxies and Sender Checks
 - Ledger, Deploys and Data-Fix Backups
 - Recording Completeness Tests
 - Vault-Tools Probe Script (probe_vault_tools.py)
@@ -75,133 +75,126 @@
 - Hermes Gateway Containers (Vault, Front)
 - Compose Secrets
 - Front Cardblock Plugin Tests (CardBlock)
-- Control Bot Core and Diff Posting (Control class)
-- Statement PDF Intake, Sanitizing, Line Counting and Reread Guard
+- Control Bot: Core, Diff Posting, Review Messages and Buttons (control.py)
+- Statement PDF Decrypt, Text Extraction and Sanitizing (statement_pdf.py)
 - Hermes config.yaml (Repo)
 - Ledger Tables: Cards, Card Payees, Transactions and Subscriptions (Runtime)
-- Expense Listing and Deletion (list_expenses, delete_expense)
+- Expense Listing, Deletion and Edit Tests (list_expenses, delete_expense)
 - Ledger Thresholds, Budgets and Plans
 - Hermes Assumptions, Architecture and Vault-Tools Surfaces
-- Payday Plan Spec (Funding Order, Worked Example)
+- Payday Plan Spec: Funding Order, Worked Example, Living Money and Cash to Hold
 - Control Bot Auth and Applied-Outcome Tests
 - Payday Plan, Debts, Balances and Usulan (State Snapshot)
 - Compose Logging Options
 - Compose: ingest-gmail Service and Env Settings
 - Compose: vault-tools and ingest-gmail Services
-- Calibration Runbook and Reviews
-- Audit and Report Rendering Tests
-- Card Statement Recording and Reconciliation Tests (record_statement)
+- Calibration Runbook: Owner Rules, Change-and-Verify, Reviews and the Deploy Procedure
+- Report Renderers for /rencana, /anggaran, /cicilan and /tagihan (reports.py)
+- Statement PDF Intake Tests (PdfIntake, test_statements.py)
 - Compose Service: control
 - Compose Service: vault (Hermes)
 - Weekly Docker Prune Script
 - Notion Sync, Client and Tests (notion_sync.py)
-- Living Money and Cash to Hold
+- Daily Account Re-Anchor (saldo_rekening)
 - Front Compose Service
-- Debt and Expense Upserts with Autodebit and Tools-Server Tests
+- Debt and Expense Upserts with Autodebit, Balance Readings and Tools-Server Tests
 - Graph-First Hook Tests
 - Compose Service: squid-comms
 - Compose Service: squid-ctl
 - Compose Service: squid-front
 - Compose Service: squid-vault
-- Gmail OAuth and Sender Allowlist
+- Gmail OAuth Guide, Token Renewal and Sender Allowlist
 - Card, Statement and Instalment Tables (State Snapshot)
-- Category Suggestion Listing, Owner Names and Tests (test_living.py)
+- Category Suggestions: Groups, Apply and Their Tests (suggest.py, test_living.py)
 - Expense Correction Tests (edit_expense, test_corrections.py)
 - Upload Sync Tests
 - Ledger Tables and Backups (State Snapshot)
-- Control Diff Review Tests
+- Ledger Audit (/periksa) and Its Tests (audit.py, test_audit.py)
 - Deploy 2 Data Fix
-- Control Bot Module: Review Messages, Diffs and Buttons (control.py)
+- Notion Sync: Plan, Installment, Budget and Roadmap Pages (notion_sync.py)
 - Compose Networks
 - Compose Squid Template
-- Progress: Card Statements, Payment Targets, Categories and Repayment Fix
-- Card Lines Processing: Statements, Netting and Instalments (card_lines.py)
+- Progress: Open Questions, Receipt Merges, Record Fixes and 1 Nov Recalibration
+- Gmail Sender Authentication Checks and Tests (auth.py)
 - Change-Proposal Submission Tests
 - Hermes Auxiliary Models
 - Hermes MCP Server Config
 - Change-Proposals Compose Service
-- Hermes Logs, Compression, Auxiliary Models and Cardguard (Runtime)
-- Security (M1): Infrastructure Invariants, Secrets and Front Limits
-- Vault-Tools Surfaces (/mcp and /internal) and Requirements
+- Gmail Ingest Run Module: Config, Message Processing and Retention (run.py)
+- Front SOUL: No Finance, Card-Data Refusal and Untrusted-Web-Content Rules
+- Vault-Tools Surfaces (/mcp and /internal), Requirements and the /periksa Data Checks
 - State Snapshot: Timers, Jobs, Restic and Runs
-- Card Payment Recording and Its Tests (record_card_payment)
+- Progress: Plan in Force, transfer_selesai Asking Which Payday and the Open 30 Oct Lesson Fee
 - Control Proposal Store
-- Vault SOUL: Payday List, One-Off Bills and Recording After Paying
-- Progress: Open Questions, Receipt Merges, Record Fixes and 1 Nov Recalibration
-- Plan Invariant Checks and Fee Invariant Tests (invariants.py)
-- Calibration: Owner Rules, Change-and-Verify and Quality Checks
-- Vault SOUL: Owner Rules, Living Money and Tool Catalogue
-- Front Cardblock Plugin (cardblock/__init__.py)
-- Zone Isolation and Egress Tests
+- Admin Fee Rules and Fee Tests (admin_fee, test_admin_fees.py)
+- Progress: Resume Point, Recalibration v2, Chat Calibration, Pots and Subscriptions
 - Report Builder and Usulan Report Tests (test_reports.py)
+- Receipt Merge and Unmerge Internals (merge_receipts, _give, _take_out)
+- Vault SOUL: Owner Rules, Number Rules, Payday List, Pots and Simulations
+- Hermes Telegram Adapter, Plugins and Delivery
+- Zone Isolation, Egress Allowlist and Deploy Rsync Tests (test_zones.py, test_deploy.py)
+- Applied-Pull Host Script and Deploy-Guard Tests (applied-pull.py, test_deploy_guard.py)
 - Number Guard Tests
-- Control Bot, Shared Folders and Applier Outcome Reports
+- Deploy Guard: make deploy Refusals and make applied-pull
 - Front Hermes Config
 - Gmail Token Check Tests
 - Hermes Telegram Gateway Config
 - MCP Server Apps, Token Middleware and Row Models (server.py, proposals.py)
-- Deploy Rsync and Build-Context Tests (test_deploy.py)
+- Recurring Payments and Rows Left Out of Cashflow (mutations.py)
 - Hermes Agent Block
 - Hermes Memory Settings
 - Cardguard Plugin Manifest
-- Approvals, Control Zone and Applier (Contract and Runbook)
+- Approvals, Control Bot and Applier: Contract, Install, Deploys and Shared Folders
 - Hermes Session Store and Telegram Delivery
-- Progress: Plan in Force, Daily-Money Pace and transfer_selesai Fixes
+- Progress: Daily-Money Pace, Uncategorized Payday Transfers and Report Commands
 - Front Auxiliary Models
 - Vault Env Renderer
 - Front Change-Proposals MCP
-- Daily Account Re-Anchor (saldo_rekening)
+- Tools-Server Tests: Auth Separation and CVV Rejection (test_tools_server.py)
 - Bot Activity: Sessions, Context Compression and /new Resets
-- Front Agent Persona and Setup
-- Front and Vault Card Detection Parity Tests
+- Telegram HTML Tag Balance Check (Balanced)
+- Runtime-Map Scrub and Drift Tests (test_runtime_map.py)
 - Front Telegram Chat Filter
-- Card Spending Summary and Per-Card Detail (belanja_kartu)
+- Gmail API Client and Its Errors (client.py)
 - Front Memory Settings
 - Applied-Pull Tests (test_applied_pull.py)
-- Vault Tools Module (tools.py)
-- Applier Safe File Reads and Atomic Writes
-- Cashflow Summary and Recurring Payments (mutations.py)
+- Vault Tools Module (tools.py) with Payday Windows, Holidays, Sinking Funds and Plan in Force
+- PDF Password Collection Tests (pdf_passwords_set)
 - Front Agent Limits
-- Graph-First Hook, Fetch-Cuti and Gmail Token-Check Scripts
+- Graph-First Prompt Hook (graph_first.py)
 - Hermes Engine Tools, Tool Search and Kanban/Cron Stores
-- Front SOUL: No Finance and Card-Data Refusal Rules
 - Pace-Fix Deploy Script (31 Oct)
 - Pocket-Balance Deploy Script (1 Nov)
 - Recalibration Deploy Script (1 Nov)
 - Front Model Setting
-- Card Payment Method Rule Tests (test_mutations_pay.py)
 - Vault Tool Search Setting
 - Infrastructure Files: Dockerfiles, Compose and Squid Allowlists
 - Data Dirs Script
 - Front Env Render Script
 - Vault-Tools Container, MCP Server, Network and Secrets (Runtime)
 - Host Data Dirs, Secrets, Systemd Units and Stack Settings (Runtime)
-- PDF Password Collection Tests (pdf_passwords_set)
-- Hermes Telegram Adapter, Plugins and Delivery
-- Progress: Recalibration v2, Payday Plans and Daily Money Rules
+- Gmail Client Tests: Pagination and Attachment Decoding (test_ingest.py)
+- Payment-Mutation Server-Flow Tests (ServerFlows, test_mutations_pay.py)
+- Progress: Payday Plans, Admin Fees, Daily Money Rules and the 30 Nov Rehearsal
 - Deploy Guard Tests (test_deploy_guard.py)
 - Fixed Expenses and Children's Fees
-- Egress Proxy Allowlist Tests (test_zones.py)
 - Mandiri Doubled Rows Data Fix (fix_data.py)
 - Bot Activity: Gateway Lifecycle, Shutdowns and Restarts
 - Cardblock Plugin Manifest
-- Control Tests: Fake Telegram
-- Change-Proposals Service: Submit Tool and Requirements
-- Expense Edit and Corrected-Source Tests (test_corrections.py)
-- Vault SOUL: Persona, Data and Card Rules
-- Plan-in-Force Tests (test_health.py)
+- Architecture: Front and Comms Zones and the Change-Proposals Service
+- Corrected-Source Merge Tests (test_corrections.py)
 - Ledger Accounts, Payee Secrets and Sinking Funds
 - Owner Names and Uploads
 - Live Catalog: Payday, Bill and Instalment Tools, Ledger Masking
-- Roadmap Date Helpers (add_months, next_due)
+- Holiday Fetch Decisions and Their Tests (decide)
 - Front Compression Settings
-- Telegram HTML Tag Balance Check (Balanced)
-- Hermes Config Key Lines Probe (key_lines)
+- Statement Reread Guard Tests (RereadGuard)
+- Gmail Token Renewal Tests (test_gmail_renew.py)
 - Bank Admin Fee Estimates and Rules
 - Set Category, Text Cleaning and Unsorted-Elsewhere Tests
-- Ledger connect() and Vault-Tools Test Module Imports
-- Vault SOUL: Number Rules, Pots, Simulations and Usulan
-- Receipt-to-Mutation Merge Tests (Merge)
+- Ledger connect() and Migrations, and the Subscriptions Store with Tests
+- Vault SOUL: Persona, Data and Card Rules, Expenses, Living Reserve and One-Off Bills
+- Budgets: Status, Setting and Tests, and Receipt-Merge Tests (Merge)
 - Preflight Script
 - Backup Script
 - Disk Check Script
@@ -210,22 +203,21 @@
 - Secret Generation Script
 - Secret Set Script
 - Upload Sync Script
-- Control Proposal Validation
 - Deploy 2 Script
 - Hermes Projects Store (projects.db, empty)
-- Admin Fees, Indonesian Holidays and Fee Tests (admin_fee, id_holidays)
-- M4 Comms Question, Front First Start and Telegram Allowlist
-- Hermes Socket Inode Probes (socket_inodes)
-- Card Line Kind Classification (classify)
+- M4 Comms Question (Open Question 18) and Its Follow-Ups
+- Gmail Ingest Entry Point and Sender Config (__main__.py)
+- PDF Passwords Set Script (pdf-passwords-set.py)
 - Ledger Categories and Thresholds
-- Bank Amount Formats (parse_amount)
+- Gmail Search Client Test Double (SearchedClient)
 - Deploy Guard Script (deploy-guard.sh)
 - Applier Install Script (install.sh)
-- Card Statement Layout and Date Tests
-- Hermes Defaults Module Probe (defaults_module)
+- Usulan and Scenario-Simulation Tool Tests (Tools, test_simulate.py)
 - Card-Internal Data Fix Deploy (deploy.sh)
-- Applier Real Zone Tests (RealZoneTests)
+- Statement Ingest: File Parts, References and Passwords (ingest_statement)
+- WIB Date Tests (Wib, test_sinking.py)
 - Mandiri Doubled Rows Deploy Script (deploy.sh)
+- Gmail Token Renewal Script (gmail-renew.sh)
 
 ## God Nodes (most connected - your core abstractions)
 1. `generate_payday_plan()` - 111 edges
@@ -296,6 +288,8 @@
 - **Vault cardguard owner check rollout (built, found never on the VPS, pre-checked, synced and restarted by the doubled-rows deploy, live since 2026-11-01 20:13 WIB, with the sweep_ttl delete count)** — docs_progress_cardguard_owner_check, docs_progress_cardguard_owner_check_not_on_vps, docs_progress_cardguard_is_owner_precheck, docs_progress_mandiri_dupes_deploy_sh, docs_progress_mandiri_dupes_deploy, docs_security_cardguard_owner_check_live, docs_security_earlier_cardguard_any_private_chat, docs_assumptions_sweep_ttl_delete_count, docs_progress_ttl_sweep_check [INFERRED 0.85]
 - **Daily money computation (top-up plus leftover, anchored by the daily-account reading)** — docs_progress_payday_living_money, docs_progress_cash_to_hold, docs_progress_living_leftover_spent, docs_progress_living_account_constant, docs_progress_living_balance_report, docs_progress_living_balance_mark, docs_progress_spending_pace, docs_progress_uang_harian_bulan_ini [INFERRED 0.85]
 - **Deploy 2 delivered across the progress log, the payday spec and SOUL (admin fees, bills paid once, instalment undo, grace period, data fix, schema 14)** — docs_progress_deploy_2, docs_progress_admin_fees, docs_progress_tagihan_sekali, docs_progress_cicilan_dibayar_batal, docs_progress_stop_grace_period, docs_progress_deploy_2_data_fix, docs_progress_schema_v14_one_off_bills, docs_progress_deploy_2_deploy, docs_payday_admin_fees, docs_payday_bills_paid_once, services_hermes_vault_soul_admin_fees, services_hermes_vault_soul_tagihan_sekali, services_hermes_vault_soul_cicilan_dibayar_batal [INFERRED 0.85]
+- **Safe Gmail token renewal (the 2 Nov expiry warning, the finding, gmail-renew.sh with its check and in-place rewrite, gmail-auth.py refusing a terminal, the tests, the pa-gmail-token messages, the guide's step 4 and the owner's next step)** — docs_progress_gmail_token_expiry_warning_2_nov, docs_progress_gmail_renewal_empties_token_finding, docs_progress_gmail_renew_sh, docs_progress_gmail_token_inplace_rewrite, docs_progress_gmail_auth_refuses_terminal, docs_progress_test_gmail_renew_py, docs_progress_gmail_renew_vps_fake_token_test, docs_progress_pa_gmail_token, docs_progress_next_step_gmail_renew, docs_gmail_oauth_laptop_token_flow, docs_gmail_oauth_gmail_renew_sh, docs_gmail_oauth_old_token_kept_until_new_complete [INFERRED 0.85]
+- **Marking the open 30 Oct lesson fee once it is paid (the open transfer, transfer_selesai with gajian, the 7-day current_payday window, the two open plans, the plan in force, the owner's next step)** — docs_progress_les_mandarin_open, docs_progress_transfer_selesai, docs_progress_transfer_selesai_gajian, docs_progress_payday_window_current_payday, docs_progress_transfer_selesai_two_open_plans, docs_progress_plan_in_force, docs_progress_next_owner_steps_after_2_nov_deploy [INFERRED 0.85]
 - **Payday progress records (schema v13 tables and the tools that write and read them)** — docs_progress_schema_v13_payment_tables, docs_progress_card_payments_table, docs_progress_debt_payments_table, docs_progress_plan_progress_table, docs_progress_fund_reports_table, docs_progress_status_gajian, docs_progress_transfer_selesai, docs_progress_cicilan_dibayar [INFERRED 0.85]
 - **Pot planning flow (schedule, pattern, simulator, plan, roadmap)** — docs_progress_pot_hutang_teman, docs_progress_pot_schedule, docs_progress_atur_jadwal_pot, docs_progress_pot_pattern_sisa, docs_progress_simulasi_skenario, docs_progress_payday_plan, docs_progress_roadmap [INFERRED 0.85]
 - **Deploys while the applier is installed (make deploy holds the applier and refuses while the VPS has an applied change this checkout lacks; make applied-pull brings it in; a stale hold is ended with deploy-guard.sh)** — docs_security_applier_deploys_and_repo, docs_runbook_deploy_while_installed, docs_runbook_make_applied_pull, docs_runbook_deploy_guard_hold, docs_runbook_make_deploy [INFERRED 0.85]
@@ -326,19 +320,19 @@
 - **Front card-number defense (cardblock drops card-like digit runs before dispatch, front's SOUL handles card photos and other numbers, detection kept equal to vault's cardguard)** — docs_security_cardblock_plugin, docs_progress_cardblock_plugin, docs_runbook_cardblock_plugin, docs_security_cardblock_limits, services_hermes_front_soul_card_messages_removed, services_hermes_front_soul_sensitive_numbers_rule, docs_progress_cardguard_plugin [INFERRED 0.85]
 - **Test approvals the applier never applied (#1 approved with Setujui and skipped at the install as skipped/1.json; #2 front's test skill, rejected by the owner on 1 Nov)** — docs_progress_test_proposal_1, docs_progress_test_proposal_2, docs_security_test_approvals_never_applied, docs_progress_applier, docs_security_applier_contract, docs_security_test_1_skip_record [INFERRED 0.85]
 
-## Communities (214 total, 43 thin omitted)
+## Communities (206 total, 42 thin omitted)
 
-### Community 0 - "Card Statement Line Parsing"
-Cohesion: 0.24
-Nodes (9): Accuracy, add_statement(), card_world(), Recovery, Store, categorize(), format_summary(), parse_text() (+1 more)
+### Community 0 - "Payday Status, Plan Summaries, Bill Status and Card Payment Recording (tools.py)"
+Cohesion: 0.08
+Nodes (22): Plan, _own_row(), format_idr(), describe(), generate_payday_plan(), list_statements(), paid(), bill_status() (+14 more)
 
-### Community 1 - "Hermes Runtime Probes"
-Cohesion: 0.14
-Nodes (28): activity(), config(), day(), db_profile(), engine(), fkind(), flatten(), free() (+20 more)
+### Community 1 - "Hermes and Host Runtime Probes (probe_hermes.py, probe_host.py) and the Front Cardblock Plugin"
+Cohesion: 0.05
+Nodes (65): activity(), config(), day(), db_profile(), defaults_module(), engine(), fkind(), flatten() (+57 more)
 
-### Community 2 - "Payee Vault, Reconcile and Ledger Vault Tests (payee_vault.py)"
-Cohesion: 0.06
-Nodes (13): LinkPayees, Ledger, Reconcile, Vault, has_forbidden_card_data(), _norm(), PayeeVault, _subkey() (+5 more)
+### Community 2 - "Payee Vault Store, Rincian Builder and Payment Rule Tests (payee_vault.py, rincian.py)"
+Cohesion: 0.08
+Nodes (16): DailyAccount, LinkPayees, Vault, PayRules, Rincian, _norm(), PayeeVault, _bank() (+8 more)
 
 ### Community 3 - "Cardguard Plugin (Number Guard, Menu, Control Bot)"
 Cohesion: 0.09
@@ -352,17 +346,17 @@ Nodes (51): Hermes .env in HERMES_HOME (mode 0600, never opened by the collector
 Cohesion: 0.21
 Nodes (21): LEDGER_DB=/data/ledger.db (vault-tools env), transfer_internal category (243 rules), wajib:kartu category (10 rules), /data/cuti_bersama.json (cuti bersama: 21 entries for 2026, 19 for 2027), /data (vault-tools data directory), holidays package (0.107), ledger.db.bak-pre-card-internal (ledger copy taken before the card-internal step, with -shm and -wal sidecars, 2026-11-01), ledger.db.bak-pre-* backups (48 copies dated 2026-10-27 to 2026-11-02) (+13 more)
 
-### Community 6 - "Report Renderers, Subscriptions and Audit Tests"
-Cohesion: 0.25
-Nodes (19): _anggaran(), b(), _banks(), _belanja(), bln(), _cicilan(), _data(), e() (+11 more)
+### Community 6 - "Hermes Logs, Compression, Auxiliary Models and Cardguard (Runtime)"
+Cohesion: 0.08
+Nodes (26): logs/agent.log (INFO and above: 9 ERROR, 477 WARNING, 753 distinct templates), auxiliary.compression: claude-sonnet-5-5 via anthropic (default auto), auxiliary config section (139 keys; our compression, title_generation and vision models on anthropic), auxiliary.title_generation: claude-haiku-5-5 via anthropic (default auto), auxiliary.vision: claude-sonnet-5-5 via anthropic (default auto), cardguard plugin v0.1 (replaces card numbers in inbound Telegram text with tokens before dispatch; spike), cardguard TTL file (ttl/rincian.jsonl: /rincian messages to delete after expiry; 0 lines), Gateway multiplex standalone (only one profile exists, nothing to multiplex) (+18 more)
 
 ### Community 7 - "Shared Imports, Ledger Connections and Ops Scripts"
 Cohesion: 0.06
-Nodes (7): _rata_deposit(), bp_of_idr(), debts_paid(), _open_transfers(), payday_progress(), _round_up(), stored_plan()
+Nodes (4): CardPath, LatestStatement, _reason(), clean_text()
 
 ### Community 8 - "Front Change Applier (applier.py)"
-Cohesion: 0.11
-Nodes (5): Applier, main(), sha(), stamp(), write_json()
+Cohesion: 0.07
+Nodes (8): Applier, load_control(), main(), run(), sha(), squid_complaints(), stamp(), write_json()
 
 ### Community 9 - "Live MCP Tool Catalog"
 Cohesion: 0.08
@@ -372,17 +366,17 @@ Nodes (52): add_owner_name (add the owner's name exactly as printed in account t
 Cohesion: 0.04
 Nodes (72): Bot activity snapshot, mcp__vault_tools__add_owner_name, mcp__vault_tools__apply_suggestions, mcp__vault_tools__atur_jadwal_pot, Vault tool names called without the MCP prefix, mcp__vault_tools__belanja_kartu, mcp__vault_tools__budget_status, mcp__vault_tools__card_installments_status (+64 more)
 
-### Community 11 - "Bank Mutation Recording, Rules and Tests"
+### Community 11 - "Bank Mutation Recording, Rules, Cashflow Summary and Tests (mutations.py)"
 Cohesion: 0.16
-Nodes (10): acct_db(), Mutations, rows(), format_cashflow(), ledger_gap(), list_uncategorized(), set_category_rule(), suggest_salary() (+2 more)
+Nodes (11): show(), acct_db(), Mutations, rows(), cashflow(), format_cashflow(), ledger_gap(), _month_rows() (+3 more)
 
 ### Community 12 - "Hermes Home, Engine Install, Credentials and Stores"
 Cohesion: 0.09
 Nodes (34): runtime/active_sessions.json (active-session entries), api_server platform (OpenAI-compatible, 127.0.0.1:8642, reachable only inside the container; connected, no requests), channel_directory.json (chats the gateway knows: one telegram entry), logs/container-boot.log (boot diagnostics, 65 lines), logs/errors.log (WARNING and above: 715 lines, 152 distinct templates), Hermes gateway process (the Telegram bot: hermes gateway run --replace, uid 10000, kind hermes-gateway, state running), logs/gateway-exit-diag.log (exit diagnostics, 193 lines), logs/gateway_faulthandler.log (empty) (+26 more)
 
-### Community 13 - "Applier Self-Checks, Zone Tests and Prechecks"
-Cohesion: 0.12
-Nodes (4): check(), run(), squid_complaints(), Agreement
+### Community 13 - "Reconcile and Ledger-Vault Tests, Random-Ledger Property Tests (reconcile.py)"
+Cohesion: 0.09
+Nodes (5): RandomLedgers, Reconcile, _subkey(), reconcile(), Reconciliation
 
 ### Community 14 - "Gateway Lifecycle and Messages"
 Cohesion: 0.12
@@ -392,161 +386,165 @@ Nodes (21): Agent budget: max_iterations=40, agent.deadline: task timed out and 
 Cohesion: 0.08
 Nodes (3): CardGuard, ev(), Fake
 
-### Community 16 - "Payday Status, Plan Summaries and Notion Page Rendering"
-Cohesion: 0.09
-Nodes (32): format_idr(), bullet(), heading(), para(), render_budgets(), render_cards(), render_installments(), render_plan() (+24 more)
+### Community 16 - "Standard-Library Imports and Test Modules (os, json, sys, unittest)"
+Cohesion: 0.16
+Nodes (6): write_json(), Migration, StoredPlans, PendingStatements, Fixed, InPlace
 
-### Community 17 - "Advisor and Living-Reserve Estimate Tests (test_advisor.py)"
+### Community 17 - "Advisor, Living-Reserve Estimate and Plan-in-Force Tests (test_advisor.py, test_health.py)"
 Cohesion: 0.12
-Nodes (7): Advice, amounts(), DueBeforePayday, LivingReserveEstimate, statement(), world(), estimate_living_reserve()
+Nodes (9): Advice, amounts(), DueBeforePayday, LivingReserveEstimate, statement(), world(), PlanInForce, estimate_living_reserve() (+1 more)
 
-### Community 18 - "Payday Plan Builder (payday.py)"
+### Community 18 - "Payday Plan Builder (payday.py) and Fee Invariant Tests"
 Cohesion: 0.05
-Nodes (31): BuildPlan, fixed(), amounts_of(), Engine, PaydayWindow, Masking, dummy(), Masking (+23 more)
+Nodes (27): BuildPlan, fixed(), Invariants, change(), amounts_of(), Engine, Masking, dummy() (+19 more)
 
 ### Community 19 - "Egress Proxies (squid) Runtime Map"
 Cohesion: 0.24
 Nodes (18): api.anthropic.com, api.notion.com, api.telegram.org, Denied: AWS IMDSv2 credential probes to the instance-metadata address (/latest/api/token, iam/security-credentials), Denied: DNS-over-HTTPS fallbacks of the HTTP clients (dns.google, cloudflare-dns.com), Denied: Hermes model-catalog and provider refreshes (hermes-agent.nousresearch.com, raw.githubusercontent.com, openrouter.ai, portal.nousresearch.com), Docker DNS (name resolution used instead of DNS-over-HTTPS), Egress proxies (squid) runtime map (+10 more)
 
-### Community 20 - "Balance Readings, Expense Recording and Living-Money Pace Tests"
+### Community 20 - "Expense Recording, Spending Pace and Living-Money Pace Tests (health.py)"
 Cohesion: 0.14
-Nodes (5): BalanceCheck, LivingMoneyPace, record_expense(), record_account_balance(), after()
+Nodes (7): LivingMoneyPace, alerts_for(), _by_balance(), record_expense(), spending_pace(), _spent_by_category(), unsorted_elsewhere()
 
-### Community 21 - "Payday Plan Generation, Rincian and Calibration Tests"
+### Community 21 - "Calibration and Roadmap Tests with Threshold, Card, Pot and Emergency-Fund Setters"
 Cohesion: 0.08
-Nodes (26): Gate, amounts(), bill(), DailyAccount, Emergency, LeftoverLivingCash, ReserveAndPot, Fund (+18 more)
+Nodes (21): amounts(), bill(), Emergency, LeftoverLivingCash, PaydayWindow, PotBalance, ReserveAndPot, stmt() (+13 more)
 
 ### Community 22 - "Runtime Map Collector"
-Cohesion: 0.17
-Nodes (28): amounts(), cell(), deep_scrub(), engine_refs(), fence(), header(), listener_note(), local_tree() (+20 more)
+Cohesion: 0.16
+Nodes (29): amounts(), cell(), deep_scrub(), engine_refs(), fence(), header(), listener_note(), local_tree() (+21 more)
 
 ### Community 23 - "Ledger Schema (v13 Tables)"
 Cohesion: 0.08
 Nodes (34): accounts, balance_reports, card_installment_scans, card_installments, card_lines, card_payments, cards, category_keywords (+26 more)
 
-### Community 24 - "Debt Roadmap, Thresholds and Calibration Tests"
-Cohesion: 0.14
-Nodes (11): CardPath, LatestStatement, Recurring, Roadmap, statement(), world(), format_roadmap(), roadmap() (+3 more)
+### Community 24 - "Debt Roadmap Module, Date Helpers, Paid Debts and Card Payment Tests (roadmap.py)"
+Cohesion: 0.16
+Nodes (8): CardPayments, Dates, add_months(), _clamp(), next_due(), roadmap(), debt_free_roadmap(), debts_paid()
 
 ### Community 25 - "Pot Simulation, Admin Fees and Plan Invariants"
-Cohesion: 0.10
-Nodes (13): Consumers, CardsFirstPot, EmergencyFund, Simulate, simulasi_skenario(), _bln(), format_result(), verdict() (+5 more)
+Cohesion: 0.06
+Nodes (19): bills_of(), TheChecksCatchBrokenNumbers, PlanStaysAfterPaying, Consumers, CardsFirstPot, EmergencyFund, Simulate, CalculationError (+11 more)
 
 ### Community 26 - "Makefile Targets, Stack Settings, Deploy Guard and Host Units"
 Cohesion: 0.06
 Nodes (54): Python 3.12.16 image env (GPG_KEY, LANG C.UTF-8, PYTHON_SHA256, PYTHON_VERSION; change-proposals, control, vault-tools), restart unless-stopped (every container), pdf_passwords secret (read-only at /run/secrets), authorized_keys (root: 0 entries, ubuntu: 1), docker daemon.json (json-file log driver, max-size 10m, max-file 3), Docker disk use (6 images, 9 containers, 8 local volumes, 131 build cache entries), Docker 29.9.2 and Compose 5.6.1 on the VPS, /etc/cron.d entries (e2scrub_all, sgagenttask, sysstat, yunjing) (+46 more)
 
-### Community 27 - "Runbook: Applier Install, Deploys and Recovery"
-Cohesion: 0.20
-Nodes (19): Applier (M3, installed 2026-11-01 23:23 WIB): services/applier applies a front change the owner approved in control, Applier install (done 2026-11-01 23:22-23:24 WIB on the owner's go-ahead at the M3 gate; again only after an uninstall, and only with the owner's go-ahead): make deploy, then services/applier/install.sh on the VPS; from then on the card says the applier applies exactly the diff above it, services/applier/install.sh: the host check runs first, changes nothing and stops at the first FAIL; then the install time is recorded, pa-applier.path and pa-applier.timer are enabled and one run skips the approvals from before (the test #1), Look at the applier: journalctl -u pa-applier.service, and sudo ls of applier/applied, applier/failed and applier/skipped; a record holds hashes and reasons, Applier units pa-applier.service, pa-applier.path and pa-applier.timer (in services/applier/systemd/, not host/), Applier uninstall: disable pa-applier.path and pa-applier.timer, remove the three units from /etc/systemd/system, daemon-reload, then remove applier/outcome/applier.json, Control v3 deploy (2026-11-01 23:22 WIB): since then control posts the diff it computed itself before every card, Hold left by a deploy that stopped halfway: end it with bash scripts/deploy-guard.sh end (+11 more)
+### Community 27 - "Progress: Card-Repayment Fix and Deploy, Category Scheme and October Categorizing"
+Cohesion: 0.15
+Nodes (25): apply_suggestions (stores the suggested categories; now skips a refused group and names it), Finding: since a 2026-10-28 commit suggest.groups counted the owner's cards among the own accounts, so four September card repayments (cimb-9888, dbs-5685, hsbc-5915, mega-5855) were stored as transfer_internal and are missing from September's cashflow expenses, Data fix ops/datafix/2026-11-01-card-internal (backup ledger.db.bak-pre-card-internal; the four card rules and rows to wajib:kartu, the two pocket rules and four rows to bunga / biaya-bank; 14 change_log rows), Card-repayment fix deploy (2026-11-01 23:12:14-23:13:18 WIB on the owner's go-ahead; vault restarted 23:12:57), Card-internal deploy.sh (checkout clean and pushed, the idle check, services/vault-tools synced onto its twin and rebuilt, the fix, the vault restarted when idle, verify.py), Guard: transfer_internal refused for an own card's payment (set_category, set_category_rule; set_category_keyword skips those rows and says how many; apply_suggestions skips a refused group and names it), card_payments table, Card-repayment fix (tests 647, 3 new) (+17 more)
 
 ### Community 28 - "Applier Tests (test_applier.py)"
-Cohesion: 0.12
-Nodes (5): Apply, Base, FakeDocker, Install, proposal()
+Cohesion: 0.08
+Nodes (8): Agreement, Apply, Base, FakeDocker, Install, proposal(), RealZoneTests, sha()
 
 ### Community 29 - "Zones, Containers and Squid"
 Cohesion: 0.20
 Nodes (21): Anonymous squid log and spool volumes (8, from image VOLUME lines), cap_drop ALL (every container except vault: change-proposals, control, front, the four squids, vault-tools), Compose project personal-agent (compose/docker-compose.yml), front exceptions (cap_add CAP_CHOWN, CAP_DAC_OVERRIDE, CAP_FOWNER, CAP_KILL, CAP_SETGID, CAP_SETUID; writable rootfs, no tmpfs; pids limit 256), ubuntu/squid:6.6-24.04_edge image (all four squid containers), json-file logs, max-size 10m, max-file 3 (every container), privileged False and security_opt no-new-privileges:true (every container), No published ports (every container) (+13 more)
 
-### Community 30 - "Health Check, Spending Pace, Budgets and Debt Load (health.py)"
-Cohesion: 0.09
-Nodes (23): account_balances(), alerts_for(), budget_status(), _by_balance(), cash_spent(), debt_load(), format_health(), _give() (+15 more)
+### Community 30 - "Progress: Card Statements, Payment Targets, Instalments, Scenario A and Open Questions"
+Cohesion: 0.14
+Nodes (24): Rehearsal C: the BCA bill due 28 Nov (a Saturday) comes before the 30 Nov payday, like 28 Oct, so its minimum comes from the balance on hand, belanja_kartu (per-card statement lines, long numbers masked), BCA card, CIMB card, HSBC card, Card installments (x/y) tracking per scanned statement, Jenius card, Mega card (+16 more)
 
 ### Community 31 - "Receipt Merge Rules and Resent Screenshots"
-Cohesion: 0.16
-Nodes (3): _Banks, LateRecordsAndResentScreenshots, MergeRules
+Cohesion: 0.17
+Nodes (4): _Banks, LateRecordsAndResentScreenshots, MergeRules, spend()
 
-### Community 32 - "Payday Progress and Two-Open-Plans Tests (test_payday_progress.py)"
-Cohesion: 0.10
-Nodes (9): CardPayment, pay_as_on_30_oct(), PlanStaysAfterPaying, Progress, TwoPlansOpen, transfer_selesai(), mark_transfers_done(), _own_transfers() (+1 more)
+### Community 32 - "Payday Progress and Two-Open-Plans Tests, Debt Payment Recording and Undo"
+Cohesion: 0.08
+Nodes (14): UndoInstalment, CardPayment, Instalments, pay_as_on_30_oct(), plan_of(), Progress, TwoPlansOpen, cicilan_dibayar() (+6 more)
 
 ### Community 33 - "Spending Analysis (Budget Baseline)"
-Cohesion: 0.17
-Nodes (11): Analysis, Monthly, tx(), world(), analyse(), card_charges(), commitments(), format_analysis() (+3 more)
+Cohesion: 0.15
+Nodes (12): Analysis, Monthly, tx(), world(), is_discretionary(), analyse(), card_charges(), commitments() (+4 more)
 
-### Community 34 - "MCP Server App, Budgets and Tool Flow Tests"
+### Community 34 - "MCP Server App, Tool Wrappers and Through-the-Tools Flow Tests (server.py)"
 Cohesion: 0.03
-Nodes (34): Rincian, Rincian, ThroughTheTools, ThroughTheTools, ThroughTheTools, Tools, ThroughTheTools, ThroughTheTools (+26 more)
+Nodes (35): Rincian, Rincian, ThroughTheTools, ThroughTheTools, make_pdf(), ThroughTheTools, ThroughTheTools, ThroughTheTools (+27 more)
 
 ### Community 35 - "Egress, Containers and Telegram Polling (State)"
 Cohesion: 0.13
 Nodes (33): Telegram fallback-IP discovery via DNS-over-HTTPS, platforms.telegram.extra.drop_pending_on_cold_boot: true, Fatal telegram adapter error: updater.stop() missed the network-recovery deadline, Hermes model catalog fetch failing (urlopen Tunnel error), Reply target deleted: retry without reply_to, squid-vault proxy (http://squid-vault:3128), Hermes Telegram adapter (polling mode), Telegram menu: 60 commands registered, 63 hidden (over the 60 limit) (+25 more)
 
-### Community 36 - "Holiday Fetch Decisions, Overrides and Tests"
-Cohesion: 0.13
-Nodes (10): Decide, Override, Parse, candidate_days(), decide(), load_year(), merge_file(), parse_github() (+2 more)
+### Community 36 - "Holiday Fetch: Sources, Parsing, Candidate Days and Overrides (cuti_fetch.py)"
+Cohesion: 0.17
+Nodes (8): Override, Parse, candidate_days(), load_year(), merge_file(), parse_github(), parse_ics_cuti(), render_diff()
 
-### Community 37 - "Health, Budget and Pace Tests (test_health.py)"
-Cohesion: 0.13
-Nodes (8): Budgets, cash_month(), Health, Pace, planned(), RecordExpense, spend(), set_budget()
+### Community 37 - "Health Check, Debt Load and Living Anchor, with Health and Pace Tests (health.py)"
+Cohesion: 0.10
+Nodes (13): cash_month(), Health, Pace, planned(), RecordExpense, account_balances(), debt_load(), format_health() (+5 more)
 
 ### Community 38 - "Ingest Inputs"
 Cohesion: 0.24
 Nodes (9): /ingest (read-only; filled by ingest-gmail and pa-uploads), ingest-gmail (fills /ingest), /ingest/telegram (59 files: bank statements, e-statements and mutasi sent as Telegram documents), pa-uploads (fills /ingest), doc_files (ledger table, 150 rows), ingest_checks (ledger table, 146 rows), mutation_files (ledger table, 30 rows), skipped_files (ledger table, 52 rows) (+1 more)
 
 ### Community 39 - "Sinking Fund Tests"
-Cohesion: 0.17
-Nodes (9): fund(), InThePlan, Math, row(), setup(), Validation, upsert_sinking_fund(), sinking_paydays_left() (+1 more)
+Cohesion: 0.20
+Nodes (7): fund(), InThePlan, Math, row(), setup(), Validation, upsert_sinking_fund()
 
-### Community 40 - "Gmail Ingest Job: Run, Client, Sender Auth and Tests"
-Cohesion: 0.05
-Nodes (23): auth_ok(), _clauses(), from_address(), safe_label(), GmailClient, GmailError, TokenError, Config (+15 more)
+### Community 40 - "Gmail Ingest run() and Its Job Tests (FakeClient, test_ingest.py)"
+Cohesion: 0.26
+Nodes (4): run(), FakeClient, message(), Run
 
-### Community 42 - "Runbook (M1-M3): VPS Setup and Front Start"
-Cohesion: 0.11
-Nodes (19): front (Hermes on Haiku, compose profile front, started once the owner's front secrets exist), Front zone (general and web, net-front), notion-mcp (front zone, later), sandbox (front zone, later), Runbook (M1), Blocked-domain egress test (example.com via squid-ctl from control must return 403), First-time VPS setup (each step needs owner approval), Front logs (/opt/personal-agent-data/hermes-front/logs/: agent.log, gateway.log, errors.log) (+11 more)
+### Community 42 - "Runbook (M1-M3): VPS Setup, Front First Start, Telegram Allowlist and Front Persona"
+Cohesion: 0.06
+Nodes (39): Front rendered env file (0600, 10 names; the front token differs from control's; the allowlist is the owner alone; no vault name in the container's env), telegram_comms_token secret (comms' own bot from BotFather with Allow Groups off, set with make secret-set), telegram_front_token secret (set by the owner on 2026-11-01 09:08 WIB), Runbook (M1), Finding 2026-11-01: getMe showed Allow Groups still on for @danoevault_agent and @danoecontrol_bot, Hermes configs drop groups (allowed_chats: none); control drops them in code, Blocked-domain egress test (example.com via squid-ctl from control must return 403), BotFather bots (usernames end in bot, Allow Groups off) (+31 more)
 
-### Community 43 - "Category Suggestions (suggest.py)"
-Cohesion: 0.11
-Nodes (11): plan(), card_paid(), normalize(), _not_a_card_bill(), own_cards(), _reworded(), set_category_keyword(), set_category_keyword() (+3 more)
+### Community 43 - "Category Rules, Set Category, Uncategorized Rows and Owner Names (mutations.py)"
+Cohesion: 0.15
+Nodes (9): list_uncategorized(), _not_a_card_bill(), set_category(), set_category_rule(), add_owner_name(), list_uncategorized(), set_category(), set_category_rule() (+1 more)
 
 ### Community 44 - "Progress Hub: Bots, Zones and Milestones"
 Cohesion: 0.08
-Nodes (63): allowed_chats: none (both Hermes configs; drops every group, keeps DMs), anthropic_front_key secret (set by the owner on 2026-11-01 09:09 WIB), api.notion.com (allowed through squid-vault), Applier (services/applier: writes, deploys and health-checks an approved front change; built 2026-11-01, installed 2026-11-01 23:23 WIB), The applier, built (M3, 2026-11-01 afternoon); installed 23:23 WIB, Applier data folders (applier/ root 0700, applier/outcome/ root 0755; made by make deploy), Applier install's eight host checks (control.db read-only with the review column, approved/ a folder, regular files, tests/test_zones.py on the installed tree, front and squid-front running, squid -k parse on front.conf, front's Telegram state, root's state folders), Applier outcome files (outcome/applier.json with the install time; applied/ and failed/, empty after the install) (+55 more)
+Nodes (60): anthropic_front_key secret (set by the owner on 2026-11-01 09:09 WIB), api.notion.com (allowed through squid-vault), Applier (services/applier: writes, deploys and health-checks an approved front change; built 2026-11-01, installed 2026-11-01 23:23 WIB), The applier, built (M3, 2026-11-01 afternoon); installed 23:23 WIB, Applier data folders (applier/ root 0700, applier/outcome/ root 0755; made by make deploy), Applier install's eight host checks (control.db read-only with the review column, approved/ a folder, regular files, tests/test_zones.py on the installed tree, front and squid-front running, squid -k parse on front.conf, front's Telegram state, root's state folders), Applier outcome files (outcome/applier.json with the install time; applied/ and failed/, empty after the install), Applier tests (22 with a fake docker; the zone-rule test runs the real tests/test_zones.py against named mutations of the front files) (+52 more)
 
-### Community 45 - "Debt Payment Recording, Undo and Rupiah Checks (record_debt_payment)"
-Cohesion: 0.16
-Nodes (10): UndoInstalment, Instalments, plan_of(), StoredPlans, log(), check_idr(), cicilan_dibayar(), _paid_reason() (+2 more)
+### Community 45 - "Statement Line Counting and Completeness Tests (count_dated_lines)"
+Cohesion: 0.22
+Nodes (5): Counting, count_dated_lines(), count_signed_lines(), count_transactions(), _first_money_is_real()
 
 ### Community 46 - "Control and Change-Proposals Containers, Env and Approval Paths (Runtime)"
 Cohesion: 0.12
 Nodes (28): control.py (python -I control.py, workdir /app), change-proposals env (PROPOSALS_INBOX_DIR; no proxy env), CHANGE_PROPOSALS_MCP_TOKEN (front env name), Control env (MY_TELEGRAM_ID value masked, TELEGRAM_TOKEN_FILE, PROPOSALS_INBOX_DIR, CONTROL_STATE_DIR, APPLIER_OUTCOME_DIR, CONTROL_REPO_DIR), control proxy env (HTTPS_PROXY http://squid-ctl:3128, NO_PROXY localhost), front NO_PROXY: localhost, 127.0.0.1, change-proposals (proxy env HTTPS_PROXY and HTTP_PROXY point at squid-front:3128), Hermes Telegram env (TELEGRAM_BOT_TOKEN; TELEGRAM_ALLOWED_USERS and TELEGRAM_HOME_CHANNEL values masked), /opt/personal-agent-data/applier/outcome (read-only at /outcome, control) (+20 more)
 
-### Community 47 - "Host Probe Script (probe_host.py)"
-Cohesion: 0.16
-Nodes (21): containers(), deployed_tree(), docker_logs(), images(), listening(), mixed(), networks(), opt_layout() (+13 more)
+### Community 47 - "Card Installments (card_installments.py)"
+Cohesion: 0.15
+Nodes (11): Installments, OneCardOneAlias, Overview, world(), active(), _add_months(), format_list(), monthly_total() (+3 more)
+
+### Community 48 - "Control Bot: Proposal Validation, Approval, Diff Review and Fake-Telegram Tests"
+Cohesion: 0.13
+Nodes (8): path_allowed(), validate(), ApprovalTests, edit_fails(), FakeTelegram, proposal(), ReviewTests, ValidateTests
 
 ### Community 49 - "Hermes Agent Settings and Toolsets (Live)"
 Cohesion: 0.08
 Nodes (27): agent.reasoning_effort high (not in DEFAULT_CONFIG; a per-model override would win), auth.json (Hermes credential store and pool, empty; the API key comes from env; never opened by the collector), Proposed skill card-spend-breakdown-advisory (productivity, created 2026-10-28, pending approval), catat_usulan (record a proposal when the bot hits a limit: a missing tool, calculation or command, instead of a workaround), Hermes config backups (backups/config.yaml.good.*, five from 2026-10-28 to 2026-11-01), DEFAULT_CONFIG sections table (100 top-level sections with line, key count and the keys we set), Hermes profile config.yaml (read-only bind mount of services/hermes/vault/config.yaml, identical to the repo), Vault container environment variable names (values never read) (+19 more)
 
-### Community 50 - "Card Installments (card_installments.py)"
-Cohesion: 0.15
-Nodes (11): Installments, OneCardOneAlias, Overview, world(), active(), _add_months(), format_list(), monthly_total() (+3 more)
+### Community 50 - "Card Lines: Statement Parsing, Recording, Netting, Per-Card Detail and Their Tests (card_lines.py)"
+Cohesion: 0.06
+Nodes (31): Accuracy, add_statement(), Amounts, card_world(), Classify, Parsing, PerCard, Recovery (+23 more)
 
-### Community 51 - "Applied-Pull Host Script and Ops Script Test Modules"
-Cohesion: 0.08
-Nodes (14): run_probe(), fetch(), git(), load_control(), main(), problem(), pull(), sha() (+6 more)
+### Community 51 - "Fetch-Cuti and Gmail Token-Check Host Scripts"
+Cohesion: 0.22
+Nodes (8): get(), main(), notify(), read_json(), days_left(), main(), message(), notify()
 
 ### Community 52 - "Bills Paid Once (one_off.py) and Placement Tests"
 Cohesion: 0.09
-Nodes (24): random_world(), RandomLedgers, rupiah(), amounts(), bill_world(), catat(), Flows, Placement (+16 more)
+Nodes (25): random_world(), rupiah(), amounts(), bill_world(), catat(), Flows, Placement, Simulation (+17 more)
 
-### Community 53 - "Security: Egress, Squid Proxies and Sender Checks"
-Cohesion: 0.17
-Nodes (21): Control zone and control service (approvals, no LLM, net-ctl), egress network (the four squid proxies only, to the internet), squid-comms proxy (allowlist), squid-ctl proxy (api.telegram.org only), squid-front proxy (web, private ranges blocked), squid-vault proxy (allowlist), Closed: the DNS-over-HTTPS fallback cannot bypass the proxy, Spike 5: Hermes reaches Telegram via the zone proxy from an internal network (pass) (+13 more)
+### Community 53 - "Security (M1): Egress, Squid Proxies and Sender Checks"
+Cohesion: 0.15
+Nodes (24): Control zone and control service (approvals, no LLM, net-ctl), egress network (the four squid proxies only, to the internet), squid-ctl proxy (api.telegram.org only), squid-front proxy (web, private ranges blocked), squid-vault proxy (allowlist), Closed: the DNS-over-HTTPS fallback cannot bypass the proxy, Spike 5: Hermes reaches Telegram via the zone proxy from an internal network (pass), Hermes' Telegram fallback transport takes its proxy from TELEGRAM_PROXY/HTTPS_PROXY (v0.22.5 plugins/platforms/telegram/telegram_network.py) (+16 more)
 
 ### Community 54 - "Ledger, Deploys and Data-Fix Backups"
-Cohesion: 0.08
-Nodes (65): sweep_ttl logs how many deletes Telegram accepted (counts only), up -d --build (the rebuild step of make deploy), Deploy guard of make deploy (when it refuses: make applied-pull, push, then deploy again), Deploy procedure (from the worktree root, committed and pushed), Ledger (SQLite /data/ledger.db in the vault-tools container), make applied-pull, push, then deploy again (when the deploy guard refuses), make deploy (the deploy guard, the rsync, timers, data folders and up -d --build), /new sent by the owner in Telegram (+57 more)
+Cohesion: 0.09
+Nodes (58): sweep_ttl logs how many deletes Telegram accepted (counts only), allowed_chats: none (both Hermes configs; drops every group, keeps DMs), cardblock plugin (front's only plugin, mounted read-only: drops a message holding a Luhn-valid 13-19 digit run before dispatch), Read-only pre-check in the vault container with the new cardguard module (the allowlist holds exactly the owner; _is_owner true for the owner's DM only, not a group or another id; card detection unchanged), Front follow-up live 2026-11-01 20:13 WIB: vault's cardguard acts only for the owner in a private chat, Finding: vault's cardguard owner check (built 2026-11-01 14:54 WIB) never reached the VPS; the plugin there hashed as the recalibration commit's, cardguard plugin (Hermes), Deploy 2 deploy (2026-11-01 10:25-10:27 WIB with deploy.sh; Hermes listed 57 tools) (+50 more)
 
 ### Community 55 - "Recording Completeness Tests"
-Cohesion: 0.28
-Nodes (6): acct_db(), Completeness, r(), _purge_file(), record_mutations(), record_mutations()
+Cohesion: 0.34
+Nodes (5): acct_db(), Completeness, r(), record_mutations(), record_mutations()
 
 ### Community 56 - "Vault-Tools Probe Script (probe_vault_tools.py)"
-Cohesion: 0.09
-Nodes (16): data_files(), day(), fkind(), fname(), free(), ledger(), money_free(), scrub() (+8 more)
+Cohesion: 0.19
+Nodes (12): cuti(), data_files(), day(), fkind(), fname(), free(), ledger(), money_free() (+4 more)
 
 ### Community 57 - "Hermes Engine Image, Install and Bundled Plugins"
 Cohesion: 0.17
@@ -564,13 +562,13 @@ Nodes (19): file, file, file, file, file, secrets, change_proposals_mcp_token, g
 Cohesion: 0.20
 Nodes (4): CardBlock, failing(), slow(), ev()
 
-### Community 61 - "Control Bot Core and Diff Posting (Control class)"
-Cohesion: 0.17
-Nodes (4): auto_reason(), Control, main(), Telegram
+### Community 61 - "Control Bot: Core, Diff Posting, Review Messages and Buttons (control.py)"
+Cohesion: 0.07
+Nodes (15): auto_reason(), buttons(), card(), Control, diff_message(), discard(), hidden_chars(), main() (+7 more)
 
-### Community 62 - "Statement PDF Intake, Sanitizing, Line Counting and Reread Guard"
-Cohesion: 0.05
-Nodes (25): Counting, ThroughTheTools, RereadGuard, make_pdf(), McpIngest, PdfIntake, ingest_statement(), record_statement() (+17 more)
+### Community 62 - "Statement PDF Decrypt, Text Extraction and Sanitizing (statement_pdf.py)"
+Cohesion: 0.19
+Nodes (7): decrypt(), _extract_clean(), extract_text(), ingest_file(), PdfError, sanitize(), wrap_untrusted()
 
 ### Community 63 - "Hermes config.yaml (Repo)"
 Cohesion: 0.13
@@ -580,9 +578,9 @@ Nodes (14): approvals, destructive_slash_confirm, compression, min_tail_user_mes
 Cohesion: 0.15
 Nodes (20): bca-9706 (bca card; statement day 12, due day 28, transfer to num-9706), cimb-9888 (cimb card; statement day 19, due day 7, transfer to num-9888), dbs-5685 (DBS card; statement day 25, due day 10, transfer to num-5685), hsbc-5915 (HSBC card; statement day 19, due day 4, transfer to num-5915), mandiri-4365 (mandiri card; statement day 16, due day 5, paid via app_menu), mega-5855 (Mega card; statement day 22, due day 7, transfer to num-5855), langganan category (1 rule), num-* card payees (num-0480, num-1111, num-4365, num-5685, num-5855, num-5915, num-9706, num-9888; no card in the cards table ends in 1111) (+12 more)
 
-### Community 65 - "Expense Listing and Deletion (list_expenses, delete_expense)"
-Cohesion: 0.11
-Nodes (12): OnlyTheOwnersRecords, delete_expense(), _given(), list_expenses(), _merged_note(), _own_row(), _paid_from(), _shown() (+4 more)
+### Community 65 - "Expense Listing, Deletion and Edit Tests (list_expenses, delete_expense)"
+Cohesion: 0.13
+Nodes (7): Edit, log(), OnlyTheOwnersRecords, delete_expense(), list_expenses(), daftar_belanja(), hapus_belanja()
 
 ### Community 66 - "Ledger Thresholds, Budgets and Plans"
 Cohesion: 0.11
@@ -590,11 +588,11 @@ Nodes (23): jago-darurat (Jago savings account), belanja-harian category (3 rule
 
 ### Community 67 - "Hermes Assumptions, Architecture and Vault-Tools Surfaces"
 Cohesion: 0.13
-Nodes (24): Architecture (M1 skeleton), Hermes pin: nousresearch/hermes-agent v0.22.5 (manifest digest recorded, checked 2026-10-27), /rincian handled in pre_gateway_dispatch with skip plus direct Bot API send, vault (Hermes finance bot container), vault-tools (vault zone tool service), Vault zone (finance, net-vault), Assumption spikes (Hermes v0.22.5), Card token placeholder [[CARD:****last4]] (+16 more)
+Nodes (27): Architecture (M1 skeleton), Hermes pin: nousresearch/hermes-agent v0.22.5 (manifest digest recorded, checked 2026-10-27), ingest folder (ingest-gmail writes, vault-tools reads read-only; statement drop), ingest-gmail (timer job on net-vault, writes the ingest folder), /rincian handled in pre_gateway_dispatch with skip plus direct Bot API send, vault (Hermes finance bot container), vault-tools (vault zone tool service), Vault zone (finance, net-vault) (+19 more)
 
-### Community 68 - "Payday Plan Spec (Funding Order, Worked Example)"
-Cohesion: 0.12
-Nodes (19): Payday plan spec (vault_tools/payday.py), Bills paid once (2026-11-01): an open one is an essential in the plan of every payday after the day it was recorded whose window reaches its due date, Tier 4: card remaining balance (default: pay in full), Tier 1: card minimum due, Estimated cost of delay per shortfall (amount * late_cost_bp / 10000, rounded half up), Kartu dbs-1111 (dummy card alias in the example), Tier 3: debt installments and pool-account transfers, late_cost_bp input (late cost in basis points) (+11 more)
+### Community 68 - "Payday Plan Spec: Funding Order, Worked Example, Living Money and Cash to Hold"
+Cohesion: 0.08
+Nodes (34): Payday plan spec (vault_tools/payday.py), Bills paid once (2026-11-01): an open one is an essential in the plan of every payday after the day it was recorded whose window reaches its due date, Tier 4: card remaining balance (default: pay in full), Tier 1: card minimum due, cash_to_hold (salary minus funded minus fees), Estimated cost of delay per shortfall (amount * late_cost_bp / 10000, rounded half up), daily_allowance (cash_to_hold // days_in_window, salary part only, stored never shown), Kartu dbs-1111 (dummy card alias in the example) (+26 more)
 
 ### Community 69 - "Control Bot Auth and Applied-Outcome Tests"
 Cohesion: 0.16
@@ -616,17 +614,17 @@ Nodes (14): build, cap_drop, cpus, depends_on, mem_limit, networks, profiles, re
 Cohesion: 0.08
 Nodes (26): environment, environment, APPLIER_OUTCOME_DIR, CONTROL_REPO_DIR, CONTROL_STATE_DIR, HTTPS_PROXY, MY_TELEGRAM_ID, NO_PROXY (+18 more)
 
-### Community 74 - "Calibration Runbook and Reviews"
-Cohesion: 0.09
-Nodes (25): Bot calibration runbook (manual, on the owner's request), ops/calibration/bot_usage.py (cost per day and source at list prices), cardguard plugin (appends the number-guard flag), Hermes cost_status unknown for claude-sonnet-5-5 (compare by hand), Data review (read-only), hermes chat --oneshot with the UJI KALIBRASI prefix (no recording or changes), Instalments gone from the statement check, JUMLAH line in a tool result (2026-11-01) (+17 more)
+### Community 74 - "Calibration Runbook: Owner Rules, Change-and-Verify, Reviews and the Deploy Procedure"
+Cohesion: 0.06
+Nodes (32): Bot calibration runbook (manual, on the owner's request), Read the audit and the plan for the coming 1st, ops/calibration/bot_quality.py (tool errors, replies that apologise or correct themselves), ops/calibration/bot_usage.py (cost per day and source at list prices), cardguard plugin (appends the number-guard flag), Change and verify, up -d --build (the rebuild step of make deploy), Hermes cost_status unknown for claude-sonnet-5-5 (compare by hand) (+24 more)
 
-### Community 75 - "Audit and Report Rendering Tests"
-Cohesion: 0.08
-Nodes (18): Audit, found(), line(), stmt(), world(), ServerFlows, OwnerRules, Subscriptions (+10 more)
+### Community 75 - "Report Renderers for /rencana, /anggaran, /cicilan and /tagihan (reports.py)"
+Cohesion: 0.26
+Nodes (20): check(), _anggaran(), b(), _banks(), _belanja(), bln(), _cicilan(), _data() (+12 more)
 
-### Community 76 - "Card Statement Recording and Reconciliation Tests (record_statement)"
-Cohesion: 0.32
-Nodes (3): card_db(), RecordStatement, record_statement()
+### Community 76 - "Statement PDF Intake Tests (PdfIntake, test_statements.py)"
+Cohesion: 0.24
+Nodes (5): make_pdf(), McpIngest, PdfIntake, file_sha256(), ingest()
 
 ### Community 77 - "Compose Service: control"
 Cohesion: 0.14
@@ -637,20 +635,20 @@ Cohesion: 0.14
 Nodes (14): vault, command, cpu_shares, cpus, depends_on, env_file, image, mem_limit (+6 more)
 
 ### Community 80 - "Notion Sync, Client and Tests (notion_sync.py)"
-Cohesion: 0.15
-Nodes (7): FakeNotion, Sync, world(), main(), Notion, NotionError, sync()
+Cohesion: 0.16
+Nodes (6): FakeNotion, Sync, main(), Notion, NotionError, sync()
 
-### Community 81 - "Living Money and Cash to Hold"
-Cohesion: 0.19
-Nodes (13): cash_to_hold (salary minus funded minus fees), daily_allowance (cash_to_hold // days_in_window, salary part only, stored never shown), fees (plan output list: date, destination, amount, kind kartu or transfer), living_leftover (last cycle's leftover the owner still held), living_leftover_spent (cash spent from the payday until the leftover was reported), living_money = cash_to_hold + living_leftover (the owner's daily money for the window), Plan output (transfers, fees, cash_to_hold, daily_allowance, warnings), Salary (plan input) (+5 more)
+### Community 81 - "Daily Account Re-Anchor (saldo_rekening)"
+Cohesion: 0.28
+Nodes (7): jago-harian account alias, living_reserve (protected living money, the owner's choice since 2026-10-28), saldo_rekening tool (re-anchors the month's daily money to the balance given), Anchor correction (difference with the records), health.living_anchor, jago-harian daily account, saldo_rekening tool (a read balance of the daily account re-anchors the month)
 
 ### Community 82 - "Front Compose Service"
 Cohesion: 0.10
 Nodes (20): path, required, cap_add, cap_drop, command, cpu_shares, cpus, depends_on (+12 more)
 
-### Community 83 - "Debt and Expense Upserts with Autodebit and Tools-Server Tests"
-Cohesion: 0.09
-Nodes (15): car(), InThePlan, Rules, setup(), Migration, stmt(), world(), Wib (+7 more)
+### Community 83 - "Debt and Expense Upserts with Autodebit, Balance Readings and Tools-Server Tests"
+Cohesion: 0.12
+Nodes (10): BalanceCheck, car(), InThePlan, Rules, setup(), seeded(), Tools, record_account_balance() (+2 more)
 
 ### Community 85 - "Compose Service: squid-comms"
 Cohesion: 0.17
@@ -668,33 +666,37 @@ Nodes (12): squid-front, cap_add, cap_drop, cpus, image, mem_limit, networks, oo
 Cohesion: 0.11
 Nodes (18): name, services, squid-vault, cap_add, cap_drop, cpus, image, mem_limit (+10 more)
 
-### Community 89 - "Gmail OAuth and Sender Allowlist"
-Cohesion: 0.23
-Nodes (16): brokers (comms zone, M4), card-bus MCP (replaces Kanban, M4), Comms zone (email and calendar, net-comms; comms, brokers, card-bus in M4), Gmail OAuth guide (readonly) for ingest-gmail, Bank sender allowlist with DKIM/DMARC pass (DBS, CIMB Niaga, HSBC, Mandiri, Mega), Gmail API (gmail.googleapis.com, oauth2.googleapis.com), gmail-broker token (comms zone, gmail.modify, M4), Gmail readonly token (gmail_ingest_token) (+8 more)
+### Community 89 - "Gmail OAuth Guide, Token Renewal and Sender Allowlist"
+Cohesion: 0.14
+Nodes (25): Gmail OAuth guide (readonly) for ingest-gmail, Bank sender allowlist with DKIM/DMARC pass (DBS, CIMB Niaga, HSBC, Mandiri, Mega), Gmail API (gmail.googleapis.com, oauth2.googleapis.com), Gmail readonly token (gmail_ingest_token), scripts/gmail-renew.sh (create or renew the Gmail token, run from the repo folder on the laptop with the downloaded client JSON), Google Cloud project personal-agent-ingest (Gmail API enabled), ingest-desktop OAuth client (gmail_ingest_client), ingest-gmail (daily deterministic job, no LLM) (+17 more)
 
 ### Community 90 - "Card, Statement and Instalment Tables (State Snapshot)"
 Cohesion: 0.11
 Nodes (33): Ledger backups made 2026-10-27: pre-v4, v5, v6, v8, v9, categorize, completeness, instkey, owner-names, pending, perantara, pocketfix, scans, subs, bca-9706 card (10 statements 2026-01-12 to 2026-10-12, last due 2026-10-28; 8 instalment rows), card_installment_scans table (25 rows, 25 scanned statements), card_installments table (26 instalment rows across 5 cards), Card line kinds (belanja 493, biaya 134, bunga 36, cicilan 109, langganan 181, pembayaran 78, refund 35), card_lines table (1066 card statement lines), card_payments table (7 rows, one payment per card, last 2026-10-28 to 2026-10-30), cards table (7 cards; all statements reconciled, lines ok 0 per card) (+25 more)
 
-### Community 91 - "Category Suggestion Listing, Owner Names and Tests (test_living.py)"
-Cohesion: 0.14
-Nodes (6): Suggestions, add_owner_name(), suggest_categories(), add_owner_name(), suggest_category(), suggestions()
+### Community 91 - "Category Suggestions: Groups, Apply and Their Tests (suggest.py, test_living.py)"
+Cohesion: 0.08
+Nodes (15): plan(), Suggestions, card_paid(), normalize(), own_cards(), _reworded(), set_category_keyword(), apply_suggestions() (+7 more)
 
 ### Community 92 - "Expense Correction Tests (edit_expense, test_corrections.py)"
-Cohesion: 0.24
-Nodes (3): MergedRecords, edit_expense(), _merged_target()
+Cohesion: 0.18
+Nodes (7): MergedRecords, edit_expense(), _merged_note(), _merged_target(), _paid_from(), _shown(), _with_aliases()
 
 ### Community 94 - "Ledger Tables and Backups (State Snapshot)"
 Cohesion: 0.17
 Nodes (23): mcp__vault_tools__periksa_data, mcp__vault_tools__record_expense, mcp__vault_tools__record_mutations, accounts table (8 rows), bca-utama account (993 transactions; 10 mutation files 2026-01-01 to 2026-10-28), Card-internal data fix (2026-11-01 16:12 UTC: 6 category_rules and the latest transactions edited by hand), berhenti: stopped categories (cicilan-rumah, komisi-allianz, supir, trip-mancing), persembahan category (1 transaction) (+15 more)
 
+### Community 95 - "Ledger Audit (/periksa) and Its Tests (audit.py, test_audit.py)"
+Cohesion: 0.20
+Nodes (10): Audit, found(), line(), stmt(), world(), format_audit(), _keyword(), _latest_cycle() (+2 more)
+
 ### Community 96 - "Deploy 2 Data Fix"
 Cohesion: 0.24
 Nodes (5): allocation(), copy(), plan(), report(), say()
 
-### Community 97 - "Control Bot Module: Review Messages, Diffs and Buttons (control.py)"
-Cohesion: 0.17
-Nodes (8): buttons(), card(), diff_message(), hidden_chars(), outcome_text(), review_of(), sha(), shown()
+### Community 97 - "Notion Sync: Plan, Installment, Budget and Roadmap Pages (notion_sync.py)"
+Cohesion: 0.31
+Nodes (13): bullet(), heading(), para(), render_budgets(), render_cards(), render_installments(), render_plan(), render_roadmap() (+5 more)
 
 ### Community 98 - "Compose Networks"
 Cohesion: 0.20
@@ -704,17 +706,17 @@ Nodes (10): internal, internal, internal, internal, networks, egress, net-comms,
 Cohesion: 0.20
 Nodes (10): x-squid, cap_add, cap_drop, cpus, image, mem_limit, oom_score_adj, restart (+2 more)
 
-### Community 100 - "Progress: Card Statements, Payment Targets, Categories and Repayment Fix"
+### Community 100 - "Progress: Open Questions, Receipt Merges, Record Fixes and 1 Nov Recalibration"
 Cohesion: 0.09
-Nodes (39): apply_suggestions (stores the suggested categories; now skips a refused group and names it), Rehearsal C: the BCA bill due 28 Nov (a Saturday) comes before the 30 Nov payday, like 28 Oct, so its minimum comes from the balance on hand, belanja_kartu (per-card statement lines, long numbers masked), Finding: since a 2026-10-28 commit suggest.groups counted the owner's cards among the own accounts, so four September card repayments (cimb-9888, dbs-5685, hsbc-5915, mega-5855) were stored as transfer_internal and are missing from September's cashflow expenses, BCA card, CIMB card, HSBC card, Jenius card (+31 more)
+Nodes (49): jago-harian account (daily pocket), jago-utama account (one Jago statement file for every pocket), Mandiri account (salary lands here; auto-debit account), periksa_data audit rule 8: the ledger gap reported as a MASALAH, Bank mutations Jan-Oct (BCA, Mandiri, Jago; verified complete, October BCA CSV reconciled), BUKU TIDAK COCOK warning (ledger_gap): the account's rows over the file's period no longer add up to its balance change, Cash budgets (listrik, internet, transport; count account payments), Cash records never merge (record_expense: exactly one of account_alias, card_alias, tunai=true) (+41 more)
 
-### Community 101 - "Card Lines Processing: Statements, Netting and Instalments (card_lines.py)"
-Cohesion: 0.15
-Nodes (10): _all_instalments(), _card(), _date(), find_file(), _netted(), process_statement(), reconcile(), remember_file() (+2 more)
+### Community 101 - "Gmail Sender Authentication Checks and Tests (auth.py)"
+Cohesion: 0.17
+Nodes (6): auth_ok(), _clauses(), from_address(), safe_label(), Auth, hdrs()
 
 ### Community 102 - "Change-Proposal Submission Tests"
-Cohesion: 0.22
-Nodes (3): FakeTelegram, good(), Proposals
+Cohesion: 0.15
+Nodes (6): create_app(), submit(), main(), FakeTelegram, good(), Proposals
 
 ### Community 103 - "Hermes Auxiliary Models"
 Cohesion: 0.20
@@ -728,65 +730,57 @@ Nodes (10): Authorization, mcp_servers, vault_tools, prompts, resources, connect
 Cohesion: 0.12
 Nodes (16): context, dockerfile, build, cap_drop, cpu_shares, cpus, mem_limit, networks (+8 more)
 
-### Community 106 - "Hermes Logs, Compression, Auxiliary Models and Cardguard (Runtime)"
-Cohesion: 0.08
-Nodes (26): logs/agent.log (INFO and above: 9 ERROR, 477 WARNING, 753 distinct templates), auxiliary.compression: claude-sonnet-5-5 via anthropic (default auto), auxiliary config section (139 keys; our compression, title_generation and vision models on anthropic), auxiliary.title_generation: claude-haiku-5-5 via anthropic (default auto), auxiliary.vision: claude-sonnet-5-5 via anthropic (default auto), cardguard plugin v0.1 (replaces card numbers in inbound Telegram text with tokens before dispatch; spike), cardguard TTL file (ttl/rincian.jsonl: /rincian messages to delete after expiry; 0 lines), Gateway multiplex standalone (only one profile exists, nothing to multiplex) (+18 more)
+### Community 106 - "Gmail Ingest Run Module: Config, Message Processing and Retention (run.py)"
+Cohesion: 0.22
+Nodes (8): Config, emit(), _headers(), _pdf_parts(), process_message(), _save_pdf(), _state(), sweep_retention()
 
-### Community 107 - "Security (M1): Infrastructure Invariants, Secrets and Front Limits"
-Cohesion: 0.16
-Nodes (13): Spike 1: read-only config.yaml and plugins mount (pass), Front memory approval (/memory pending, /memory approve <id>, /memory reject <id>), Install FAIL on tests/test_zones.py with No module named 'yaml': sudo apt install python3-yaml (present on 2026-11-01: PyYAML 6.0.1), Security (M1), Rules before writing: tests/test_zones.py passes on a copy of the tree with the change in it (none skipped), and a squid conf passes squid -k parse in a throwaway container without a network, cardblock plugin (services/hermes/front/plugins/cardblock, mounted read-only): drops every inbound message holding a Luhn-valid 13-19 digit run before Hermes dispatches it, Container hardening (cap_drop ALL, no-new-privileges, read-only root fs, memory and CPU caps, oom_score_adj), Front tools: web search and extract, clarify, vision_analyze, memory (owner OK per write), submit; terminal, code, files, browser, skills, x_search, delegation, cron disabled (+5 more)
-
-### Community 108 - "Vault-Tools Surfaces (/mcp and /internal) and Requirements"
-Cohesion: 0.19
-Nodes (13): Spike 7: MCP over HTTP with a bearer token from env (pass), Statement reconciliation (statements that do not reconcile; every statement must re-read as cocok), holidays input (holiday list supplied and kept current by the owner, open item), /mcp surface (model-facing; aliases and amounts only, no tool stores or reveals a full number), Payee encryption key vault_tools_key (make secret-gen on the VPS, never overwritten, backed up with restic), Surface tokens (random, at least 32 chars, must differ, constant-time compare; unknown paths 404), vault-tools requirements.txt, cryptography 50.0.2 (+5 more)
+### Community 108 - "Vault-Tools Surfaces (/mcp and /internal), Requirements and the /periksa Data Checks"
+Cohesion: 0.11
+Nodes (20): Spike 7: MCP over HTTP with a bearer token from env (pass), Instalments gone from the statement check, Missing statements check, Old pot balance check, /periksa in Telegram and the periksa_data tool, ops/calibration/recurring_charges.py (per-month table of recurring merchants), Statement reconciliation (statements that do not reconcile; every statement must re-read as cocok), Subscription checks (recorded vs charged, stopped subscriptions still charged) (+12 more)
 
 ### Community 109 - "State Snapshot: Timers, Jobs, Restic and Runs"
 Cohesion: 0.09
 Nodes (30): Sanitized snapshot (no secrets, balances or message text), docs/runtime/README.md, State snapshot, api.notion.com (Notion API; 370 requests via squid-vault), pa-disk log line disk N% (135 runs in 7 days), pa-prune journal: unused images untagged and deleted, space reclaimed, gmail.googleapis.com (Gmail API; 428 requests via squid-vault), Host systemd timers and jobs (pa-*; pa-check and pa-forget failed on 2026-11-01, the rest succeeded) (+22 more)
 
-### Community 110 - "Card Payment Recording and Its Tests (record_card_payment)"
-Cohesion: 0.17
-Nodes (4): Plan, CardPayments, record_card_payment(), record_card_payment()
+### Community 110 - "Progress: Plan in Force, transfer_selesai Asking Which Payday and the Open 30 Oct Lesson Fee"
+Cohesion: 0.29
+Nodes (15): les Mandarin transfer (left in Mandiri on 30 Oct; not paid yet on 2 Nov, its money set aside, still open in the 30 Oct plan), Finding (latent since the bot went live): three readers took the newest row of plans as the plan in force (spending_pace, _living_balance, _open_transfers), Next step done 2 Nov morning: the owner's /new to vault after the 2 Nov 01:23 WIB deploy (transfer_selesai has gajian); the 30 Oct lesson fee is not paid yet, its money set aside: tell the bot once it is paid, _open_transfers (the auto-debit check of a reported balance; reads the plan of current_payday(today)), PAYDAY_LOOKBACK_DAYS (7 days after a payday current_payday turns to the coming one), Payday window (current_payday, 7 days after payday), plan_in_force(conn, today): the latest payday's plan on or before today, Plan-in-force fix (live since 2 Nov 01:23 WIB): spending_pace and _living_balance read the plan in force, only while today is before its next payday; _open_transfers reads the plan of current_payday(today) (+7 more)
 
-### Community 111 - "Control Proposal Store"
-Cohesion: 0.16
-Nodes (3): discard(), now(), Store
+### Community 112 - "Admin Fee Rules and Fee Tests (admin_fee, test_admin_fees.py)"
+Cohesion: 0.18
+Nodes (5): fees_world(), Gate, Rule, Simulation, admin_fee()
 
-### Community 112 - "Vault SOUL: Payday List, One-Off Bills and Recording After Paying"
-Cohesion: 0.16
-Nodes (11): tagihan_sekali tool (records a bill paid once such as arrears or a repair: alias, name, amount, due date, how it is paid), transfer_selesai (or lunas) marks a bill paid once as paid; paid in a plan's window it stays in that plan's progress, belanja_kartu (/belanja: statement lines per cycle and per card; not reading PDFs), dana_darurat (emergency fund status and recorded balance), generate_payday_plan (payday plan, uses the new salary up to 7 days after payday), Long-list commands (/rencana, /tagihan, /belanja, /cicilan, /anggaran, /peta, /kondisi, /data, /periksa), Payday list on the 1st (main flow, steps 0-5; no automatic reminders), Recording after paying (record_card_payment per card, cicilan_dibayar, transfer_selesai, dana_darurat, saldo_pot) (+3 more)
-
-### Community 113 - "Progress: Open Questions, Receipt Merges, Record Fixes and 1 Nov Recalibration"
-Cohesion: 0.08
-Nodes (53): jago-harian account (daily pocket), jago-utama account (one Jago statement file for every pocket), Mandiri account (salary lands here; auto-debit account), Biggest avoidable costs (game/digital top-ups; late/overlimit fees and interest), Bank mutations Jan-Oct (BCA, Mandiri, Jago; verified complete, October BCA CSV reconciled), Bot calibration from the owner's real chat (2026-10-28), BUKU TIDAK COCOK warning (ledger_gap): the account's rows over the file's period no longer add up to its balance change, Cash budgets (listrik, internet, transport; count account payments) (+45 more)
-
-### Community 114 - "Plan Invariant Checks and Fee Invariant Tests (invariants.py)"
-Cohesion: 0.13
-Nodes (8): Invariants, change(), TheChecksCatchBrokenNumbers, CalculationError, plan_errors(), require(), simulation_errors(), _whole()
-
-### Community 115 - "Calibration: Owner Rules, Change-and-Verify and Quality Checks"
-Cohesion: 0.14
-Nodes (7): Read the audit and the plan for the coming 1st, ops/calibration/bot_quality.py (tool errors, replies that apologise or correct themselves), Change and verify, ops/calibration/dry_run.py on a copy of the live ledger, services/hermes/vault/SOUL.md (also holds the owner rules), Unit test suites (vault-tools, hermes vault, ingest-gmail, root tests), Tier 2: essentials (fixed expenses, e.g. school; bills paid once)
-
-### Community 116 - "Vault SOUL: Owner Rules, Living Money and Tool Catalogue"
+### Community 113 - "Progress: Resume Point, Recalibration v2, Chat Calibration, Pots and Subscriptions"
 Cohesion: 0.10
-Nodes (15): Auto-debit debts (upsert_debt pay_method=autodebit; one figure per account incl. the bank-held minimum), Category scheme (wajib:, sinking:, transfer_internal, sekali:, perantara:, berhenti:, free daily spending), Daily living account (uang-harian at Jago; the owner spends daily only from it), Digital subscription rules (subscriptions_status; upsert_subscription only after the owner confirms; stored notes kept), Financial analysis (cashflow_summary, recurring_payments, suggest_salary, list_uncategorized, set_category_rule), Procedure: computing the living reserve (set_category_keyword, add_owner_name, suggest_categories, 80% categorized, living_cost_analysis from 2026-07), periksa_data (data check: MASALAH and PERHATIAN; compares subscriptions with card charges), record_expense (recorded, alerts, possible_duplicate, allow_duplicate) (+7 more)
+Nodes (35): fee_estimate (simulation fees after cycle 1: one per fixed cost, instalment paid by transfer, card with a bill now, pot, emergency fund and the living money), PROGRESS.md: progress and resume point (finance / vault), atur_jadwal_pot (saves the pot schedule after the owner agrees; pola, pakai_gaji_hari_tenggat), Biggest avoidable costs (game/digital top-ups; late/overlimit fees and interest), Bot calibration from the owner's real chat (2026-10-28), Bot model config (reasoning_effort high, claude-sonnet-5-5 vision and compression, Haiku titles), Car instalment (MTF, incl. admin; auto-debit on day 2), Card spending budgets (kartu:<category>, owner approved 2026-10-28) (+27 more)
 
-### Community 117 - "Front Cardblock Plugin (cardblock/__init__.py)"
-Cohesion: 0.24
-Nodes (8): _bot(), _digits_of(), find_numbers(), _luhn(), on_inbound(), _owner_ids(), register(), _tell_owner()
-
-### Community 118 - "Zone Isolation and Egress Tests"
-Cohesion: 0.15
-Nodes (6): Compose, HermesProfiles, leaves(), load(), mounts(), unlisted()
-
-### Community 119 - "Report Builder and Usulan Report Tests (test_reports.py)"
+### Community 114 - "Report Builder and Usulan Report Tests (test_reports.py)"
 Cohesion: 0.30
 Nodes (4): check_html(), Reports, world(), build()
 
-### Community 121 - "Control Bot, Shared Folders and Applier Outcome Reports"
+### Community 115 - "Receipt Merge and Unmerge Internals (merge_receipts, _give, _take_out)"
+Cohesion: 0.14
+Nodes (8): log(), _give(), _given(), merge_receipts(), _refused(), _take_out(), _window(), _purge_file()
+
+### Community 116 - "Vault SOUL: Owner Rules, Number Rules, Payday List, Pots and Simulations"
+Cohesion: 0.07
+Nodes (20): Auto-debit debts (upsert_debt pay_method=autodebit; one figure per account incl. the bank-held minimum), belanja_kartu (/belanja: statement lines per cycle and per card; not reading PDFs), catat_usulan (records a missing capability or number for /usulan), Daily living account (uang-harian at Jago; the owner spends daily only from it), Digital subscription rules (subscriptions_status; upsert_subscription only after the owner confirms; stored notes kept), health_check verdict (decided by the tool, not changed or softened; 2-3 concrete options), Frequently asked numbers, always labelled (no defisit unless tool output), Long-list commands (/rencana, /tagihan, /belanja, /cicilan, /anggaran, /peta, /kondisi, /data, /periksa) (+12 more)
+
+### Community 117 - "Hermes Telegram Adapter, Plugins and Delivery"
+Cohesion: 0.27
+Nodes (8): Log line 'Cold boot: dropping Telegram updates' (Telegram adapter), Logger hermes_plugins.platforms__telegram.adapter (879 INFO, 287 WARNING, 2 ERROR), Logger plugins.platforms.telegram.telegram_network (66 INFO), state.db conversation_generations table (1 row, source telegram), state.db delivery_obligations table (196 Telegram deliveries, all delivered, 2026-10-27 to 2026-11-01), gateway.platforms.telegram.extra.disable_link_previews true (read by the Telegram adapter), Telegram platform adapter (plugins/platforms/telegram/adapter.py; state connected), telegram_update_receipts JSON file in HERMES_HOME
+
+### Community 118 - "Zone Isolation, Egress Allowlist and Deploy Rsync Tests (test_zones.py, test_deploy.py)"
+Cohesion: 0.07
+Nodes (11): BuildContexts, deploy_rsync(), read(), Rsync, Compose, Egress, HermesProfiles, leaves() (+3 more)
+
+### Community 119 - "Applied-Pull Host Script and Deploy-Guard Tests (applied-pull.py, test_deploy_guard.py)"
 Cohesion: 0.21
-Nodes (12): applier/outcome folder (the applier, a root host unit, writes; control reads it read-only), Control commands /status (counts, with the applier's outcomes), /usulan (re-post waiting proposals with their buttons), /ping, scripts/data-dirs.sh (creates the M3 folders), Shared folders under /opt/personal-agent-data (writer, reader, why), Control bot @danoecontrol_bot (M3, live since 2026-11-01, owner only), Read control state without printing nonces (control.db opened read-only, counts and statuses only), sudo bash scripts/data-dirs.sh (also run by make deploy) before the first start, Deploy only control (rsync as make deploy does, then compose up --build --wait control) (+4 more)
+Nodes (9): fetch(), git(), load_control(), main(), problem(), pull(), sha(), sha() (+1 more)
+
+### Community 121 - "Deploy Guard: make deploy Refusals and make applied-pull"
+Cohesion: 0.52
+Nodes (5): Deploy guard of make deploy (when it refuses: make applied-pull, push, then deploy again), make applied-pull, push, then deploy again (when the deploy guard refuses), deploy-guard (start and end around make deploy; no hold left after the M3 deploy), make applied-pull (brings the VPS's applied changes into this checkout, one commit each), make deploy holds the applier and refuses while the VPS has an applied change this checkout lacks
 
 ### Community 122 - "Front Hermes Config"
 Cohesion: 0.13
@@ -797,12 +791,12 @@ Cohesion: 0.33
 Nodes (6): allowed_chats, disable_link_previews, gateway, platforms, telegram, extra
 
 ### Community 125 - "MCP Server Apps, Token Middleware and Row Models (server.py, proposals.py)"
-Cohesion: 0.07
-Nodes (10): _Auth, create_app(), submit(), main(), ProposedFile, _Auth, Installment, locked() (+2 more)
+Cohesion: 0.06
+Nodes (9): _Auth, ProposedFile, load(), SameDetectionAsVault, _Auth, Installment, locked(), main() (+1 more)
 
-### Community 126 - "Deploy Rsync and Build-Context Tests (test_deploy.py)"
-Cohesion: 0.22
-Nodes (4): BuildContexts, deploy_rsync(), read(), Rsync
+### Community 126 - "Recurring Payments and Rows Left Out of Cashflow (mutations.py)"
+Cohesion: 0.33
+Nodes (3): excluded(), recurring(), recurring_payments()
 
 ### Community 127 - "Hermes Agent Block"
 Cohesion: 0.50
@@ -816,17 +810,17 @@ Nodes (4): memory, memory_enabled, user_profile_enabled, write_approval
 Cohesion: 0.50
 Nodes (3): description, name, version
 
-### Community 130 - "Approvals, Control Zone and Applier (Contract and Runbook)"
-Cohesion: 0.15
-Nodes (18): Applier (services/applier, a root host unit; installed 2026-11-01 23:23 WIB): applies an approved front change and writes applier/outcome/<id>.json, Approvals flow (M3): front submit -> proposals-inbox -> control re-validates, posts its own diff against the installed files, then the card -> the owner's tap recorded in control-state -> the applier applies an approved front change and writes applier/outcome/<id>.json, which control reports once, Control posts the diff it computes itself against the installed files (read-only mounts of services/hermes/front/ and config/squid/), then the card, control-state folder (control only writes; the applier reads approved/ and control.db read-only), proposals-inbox folder (change-proposals writes, control reads and empties it), One-time Setujui/Tolak buttons, Since control v3 (deployed 2026-11-01 23:22 WIB) control posts the diff it computed itself before every card, Proposal card (summary, permission change, files, risk, rollback; Setujui/Tolak work once) (+10 more)
+### Community 130 - "Approvals, Control Bot and Applier: Contract, Install, Deploys and Shared Folders"
+Cohesion: 0.08
+Nodes (49): Applier (services/applier, a root host unit; installed 2026-11-01 23:23 WIB): applies an approved front change and writes applier/outcome/<id>.json, applier/outcome folder (the applier, a root host unit, writes; control reads it read-only), Approvals flow (M3): front submit -> proposals-inbox -> control re-validates, posts its own diff against the installed files, then the card -> the owner's tap recorded in control-state -> the applier applies an approved front change and writes applier/outcome/<id>.json, which control reports once, Control commands /status (counts, with the applier's outcomes), /usulan (re-post waiting proposals with their buttons), /ping, Control posts the diff it computes itself against the installed files (read-only mounts of services/hermes/front/ and config/squid/), then the card, control-state folder (control only writes; the applier reads approved/ and control.db read-only), scripts/data-dirs.sh (creates the M3 folders), proposals-inbox folder (change-proposals writes, control reads and empties it) (+41 more)
 
 ### Community 131 - "Hermes Session Store and Telegram Delivery"
 Cohesion: 0.12
 Nodes (23): Bundled Hermes skills (12 categories; the skills toolset is disabled, so the model cannot load them), Gateway session keys (agent:main:local:dm 38, agent:main:telegram:dm 1, plus _README), sessions/sessions.json (gateway session key to session, with token and cost counters; 39 keys), sessions.retention_days 90 (same as the default: inactive days of ended-session history kept), .skills_prompt_snapshot.json (cached skills index for the system prompt; 68-entry manifest, written 2026-10-27), SOUL.md (the bot's persona and rules; read-only bind mount of services/hermes/vault/SOUL.md, identical to the repo), state.db (sessions, messages, model usage, delivery obligations, routing, admissions, system prompts; SQLite WAL), state.db gateway_heartbeats table (22 rows) (+15 more)
 
-### Community 132 - "Progress: Plan in Force, Daily-Money Pace and transfer_selesai Fixes"
-Cohesion: 0.10
-Nodes (39): balance_reports table (bank-app balance reported by the owner), BELUM DIHITUNG line (outgoing mutations waiting for a category) in ringkasan_data, belum dihitung in /anggaran, an info finding in health_check, _by_balance (holds the UNSORTED_ELSEWHERE fragment; dropping it undoes the rule), /anggaran report command (budgets), daily_allowance (stored salary part; stored plans not rewritten, never shown), Daily money alerts (80% and over 100%) stay, health_check (feeds the spending pace), les Mandarin transfer (left in Mandiri on 30 Oct; paid that day, still unmarked in the 30 Oct plan on 2 Nov) (+31 more)
+### Community 132 - "Progress: Daily-Money Pace, Uncategorized Payday Transfers and Report Commands"
+Cohesion: 0.15
+Nodes (24): BELUM DIHITUNG line (outgoing mutations waiting for a category) in ringkasan_data, belum dihitung in /anggaran, an info finding in health_check, _by_balance (holds the UNSORTED_ELSEWHERE fragment; dropping it undoes the rule), /anggaran report command (budgets), /bantuan report command (help), /cicilan report command (instalments), /data report command, /kondisi report command, Daily money alerts (80% and over 100%) stay (+16 more)
 
 ### Community 133 - "Front Auxiliary Models"
 Cohesion: 0.20
@@ -836,49 +830,37 @@ Nodes (10): auxiliary, compression, title_generation, vision, model, provider, m
 Cohesion: 0.20
 Nodes (10): connect_timeout, headers, timeout, tools, url, Authorization, mcp_servers, change_proposals (+2 more)
 
-### Community 138 - "Daily Account Re-Anchor (saldo_rekening)"
-Cohesion: 0.28
-Nodes (7): jago-harian account alias, living_reserve (protected living money, the owner's choice since 2026-10-28), saldo_rekening tool (re-anchors the month's daily money to the balance given), Anchor correction (difference with the records), health.living_anchor, jago-harian daily account, saldo_rekening tool (a read balance of the daily account re-anchors the month)
-
 ### Community 139 - "Bot Activity: Sessions, Context Compression and /new Resets"
 Cohesion: 0.17
 Nodes (16): Compression summary call and aux_model telemetry, background_review model task, busy_input_mode demoted while compression is in flight, Child sessions (a compaction or /new continues the chat), claude-sonnet-5-5 (vault bot model), Compression blocked (ineffective, structural_backoff), Compression folded away the just-delivered reply, Context compression (compaction) (+8 more)
-
-### Community 140 - "Front Agent Persona and Setup"
-Cohesion: 0.20
-Nodes (5): Asisten umum pemilik (front), Gaya jawaban, Keamanan, Mengubah dirimu sendiri, Yang kamu kerjakan
 
 ### Community 142 - "Front Telegram Chat Filter"
 Cohesion: 0.33
 Nodes (6): allowed_chats, disable_link_previews, gateway, platforms, telegram, extra
 
-### Community 143 - "Card Spending Summary and Per-Card Detail (belanja_kartu)"
-Cohesion: 0.33
-Nodes (4): PerCard, card_detail(), format_detail(), belanja_kartu()
+### Community 143 - "Gmail API Client and Its Errors (client.py)"
+Cohesion: 0.15
+Nodes (3): GmailClient, GmailError, TokenError
 
 ### Community 144 - "Front Memory Settings"
 Cohesion: 0.40
 Nodes (5): memory, memory_enabled, nudge_interval, user_profile_enabled, write_approval
 
 ### Community 145 - "Applied-Pull Tests (test_applied_pull.py)"
-Cohesion: 0.41
+Cohesion: 0.33
 Nodes (3): AppliedPull, committed(), sha()
 
-### Community 146 - "Vault Tools Module (tools.py)"
-Cohesion: 0.07
-Nodes (28): PotBalance, dana_darurat(), saldo_pot(), autodebit_check(), card_advice(), card_bills(), card_rate(), collect_obligations() (+20 more)
-
-### Community 148 - "Cashflow Summary and Recurring Payments (mutations.py)"
-Cohesion: 0.18
-Nodes (7): show(), cashflow(), excluded(), _month_rows(), recurring(), cashflow_summary(), recurring_payments()
+### Community 146 - "Vault Tools Module (tools.py) with Payday Windows, Holidays, Sinking Funds and Plan in Force"
+Cohesion: 0.04
+Nodes (54): Holidays, cash_spent(), next_payday(), Plan, horizon(), pot_projection(), _rata_deposit(), autodebit_check() (+46 more)
 
 ### Community 149 - "Front Agent Limits"
 Cohesion: 0.50
 Nodes (4): agent, disabled_toolsets, image_input_mode, max_turns
 
-### Community 150 - "Graph-First Hook, Fetch-Cuti and Gmail Token-Check Scripts"
-Cohesion: 0.08
-Nodes (21): behind(), ignore_patterns(), ignored(), main(), md5(), snapshot(), wib(), cuti() (+13 more)
+### Community 150 - "Graph-First Prompt Hook (graph_first.py)"
+Cohesion: 0.26
+Nodes (7): behind(), ignore_patterns(), ignored(), main(), md5(), snapshot(), wib()
 
 ### Community 151 - "Hermes Engine Tools, Tool Search and Kanban/Cron Stores"
 Cohesion: 0.14
@@ -904,13 +886,9 @@ Nodes (25): change-proposals healthcheck (Python TCP connect to 127.0.0.1:8000, 
 Cohesion: 0.07
 Nodes (46): /opt/personal-agent-data/hermes-vault (rw at /opt/data), /opt/personal-agent-data/ingest (read-only at /ingest), canary.txt (root-owned file in the data dir, mode 0644), front.env (root-only env file, mode 0600), hermes-front data dir (mode 0700, no longer empty), hermes-vault data dir (mode 0700), nousresearch/hermes-agent image (no tag, created 2026-10-23), ingest data dir (mode 0755) (+38 more)
 
-### Community 165 - "Hermes Telegram Adapter, Plugins and Delivery"
-Cohesion: 0.27
-Nodes (8): Log line 'Cold boot: dropping Telegram updates' (Telegram adapter), Logger hermes_plugins.platforms__telegram.adapter (879 INFO, 287 WARNING, 2 ERROR), Logger plugins.platforms.telegram.telegram_network (66 INFO), state.db conversation_generations table (1 row, source telegram), state.db delivery_obligations table (196 Telegram deliveries, all delivered, 2026-10-27 to 2026-11-01), gateway.platforms.telegram.extra.disable_link_previews true (read by the Telegram adapter), Telegram platform adapter (plugins/platforms/telegram/adapter.py; state connected), telegram_update_receipts JSON file in HERMES_HOME
-
-### Community 166 - "Progress: Recalibration v2, Payday Plans and Daily Money Rules"
-Cohesion: 0.05
-Nodes (94): fee_estimate (simulation fees after cycle 1: one per fixed cost, instalment paid by transfer, card with a bill now, pot, emergency fund and the living money), PROGRESS.md: progress and resume point (finance / vault), Accuracy layers (owner: 99.99% accuracy, no miscalculation), Admin fees (/usulan #4: the owner's estimates per card payment and per other transfer; the Mandiri card via the bank-app menu and the auto-debits cost nothing), atur_jadwal_pot (saves the pot schedule after the owner agrees; pola, pakai_gaji_hari_tenggat), periksa_data audit rule 8: the ledger gap reported as a MASALAH, Auto-debits from Mandiri (car instalment MTF, SPayLater), biaya_admin_mulai (fees count from the 30 Nov payday, 20261130) (+86 more)
+### Community 166 - "Progress: Payday Plans, Admin Fees, Daily Money Rules and the 30 Nov Rehearsal"
+Cohesion: 0.07
+Nodes (56): Accuracy layers (owner: 99.99% accuracy, no miscalculation), Admin fees (/usulan #4: the owner's estimates per card payment and per other transfer; the Mandiri card via the bank-app menu and the auto-debits cost nothing), Auto-debits from Mandiri (car instalment MTF, SPayLater), balance_reports table (bank-app balance reported by the owner), biaya_admin_mulai (fees count from the 30 Nov payday, 20261130), card_advice (no longer offers cutting the living money), DBS card, Mandiri card (paid via the app menu) (+48 more)
 
 ### Community 168 - "Fixed Expenses and Children's Fees"
 Cohesion: 0.15
@@ -928,17 +906,13 @@ Nodes (28): Hermes API server (127.0.0.1:8642, model hermes-agent), logs/contain
 Cohesion: 0.50
 Nodes (3): description, name, version
 
-### Community 174 - "Change-Proposals Service: Submit Tool and Requirements"
-Cohesion: 0.53
-Nodes (6): change-proposals (front zone, M3, submit tool), change-proposals (one tool submit, bearer token change_proposals_mcp_token, inbox mount only; caps five waiting and ten per 24 hours), change-proposals requirements.txt, mcp==1.30.0, uvicorn==0.54.0, submit tool (change-proposals): one proposal = one whole change with full file contents, all fields honest
+### Community 174 - "Architecture: Front and Comms Zones and the Change-Proposals Service"
+Cohesion: 0.16
+Nodes (15): brokers (comms zone, M4), card-bus MCP (replaces Kanban, M4), change-proposals (front zone, M3, submit tool), Comms zone (email and calendar, net-comms; comms, brokers, card-bus in M4), front (Hermes on Haiku, compose profile front, started once the owner's front secrets exist), Front zone (general and web, net-front), notion-mcp (front zone, later), sandbox (front zone, later) (+7 more)
 
-### Community 175 - "Expense Edit and Corrected-Source Tests (test_corrections.py)"
-Cohesion: 0.14
-Nodes (5): CorrectedSourceFindsItsStatementRow, Edit, log(), pho(), world()
-
-### Community 176 - "Vault SOUL: Persona, Data and Card Rules"
-Cohesion: 0.14
-Nodes (17): ingest folder (ingest-gmail writes, vault-tools reads read-only; statement drop), ingest-gmail (timer job on net-vault, writes the ingest folder), SOUL.md: vault bot persona (personal finance advisor and planner), Card instalment recording (x/y lines, record_card_installments, card_installments_status), Card payment method rules (Jenius and BCA to an account, Mandiri via the app menu, others to the card number), Card tokens [[CARD:num-xxxx]] map to stored cards by last 4 digits; then link_card_payees, Chat uploads (list_uploads, ingest_statement, record_mutations; BARIS KURANG means resend with replace=true), Undoing a wrong instalment record (repeat the record, wait for ya, then cicilan_dibayar(alias, jumlah, batal=true); jatuh_tempo when not the last record) (+9 more)
+### Community 175 - "Corrected-Source Merge Tests (test_corrections.py)"
+Cohesion: 0.25
+Nodes (3): CorrectedSourceFindsItsStatementRow, pho(), world()
 
 ### Community 178 - "Ledger Accounts, Payee Secrets and Sinking Funds"
 Cohesion: 0.15
@@ -952,41 +926,29 @@ Nodes (5): Names, normalize_ref(), safe_name(), list_uploads(), list_uploads()
 Cohesion: 0.28
 Nodes (14): Bank admin fees (estimates given by the owner, kept as thresholds through set_threshold), cicilan_dibayar (record one debt installment already paid, e.g. a car loan or SPayLater), cicilan_dibayar batal flag (optional boolean, default false: cancel a debt installment recorded as paid), generate_payday_plan (deterministic payday plan; without a payday it plans the running one), cache/mcp_schema_cache.json (vault_tools tool-schema cache: 57 tools, no utility tools), next_payday (next payday: the last working day of the month, WIB), sisa_uang_harian (record last month's leftover daily money the owner still holds just before the salary arrives), status_gajian (progress of the running payday plan according to the ledger: paid, unpaid, paid outside the plan) (+6 more)
 
-### Community 181 - "Roadmap Date Helpers (add_months, next_due)"
-Cohesion: 0.60
-Nodes (4): Dates, add_months(), _clamp(), next_due()
-
 ### Community 182 - "Front Compression Settings"
 Cohesion: 0.67
 Nodes (3): compression, min_tail_user_messages, threshold_tokens
 
-### Community 184 - "Hermes Config Key Lines Probe (key_lines)"
-Cohesion: 0.50
-Nodes (3): key_lines(), doc(), walk()
-
 ### Community 185 - "Bank Admin Fee Estimates and Rules"
-Cohesion: 0.33
-Nodes (8): Admin fees (estimates, 2026-11-01: a bank fee per transfer out of the salary account), biaya_admin:<alias> (sets one item's fee; 0: none), biaya_admin_kartu (estimated fee per payment to a card number, capped), biaya_admin_mulai (payday from which fees count, YYYYMMDD; 20261130 live), biaya_admin_transfer (estimated fee per other transfer, capped), tests/test_admin_fees.py (the admin fees section), Admin fee settings, changed only on the owner's decision (set_threshold biaya_admin_kartu or biaya_admin_transfer; biaya_admin:<alias pos> for one item, 0 = no fee), Bank admin fees (owner's estimates; the code counts them once per destination and sets them aside in the plan: BIAYA ADMIN line in generate_payday_plan, status_gajian, saldo_rekening)
-
-### Community 186 - "Set Category, Text Cleaning and Unsorted-Elsewhere Tests"
 Cohesion: 0.25
-Nodes (5): UnsortedElsewhere, _reason(), clean_text(), set_category(), set_category()
+Nodes (9): Admin fees (estimates, 2026-11-01: a bank fee per transfer out of the salary account), biaya_admin:<alias> (sets one item's fee; 0: none), biaya_admin_kartu (estimated fee per payment to a card number, capped), biaya_admin_mulai (payday from which fees count, YYYYMMDD; 20261130 live), biaya_admin_transfer (estimated fee per other transfer, capped), Tier 5: savings, tests/test_admin_fees.py (the admin fees section), Admin fee settings, changed only on the owner's decision (set_threshold biaya_admin_kartu or biaya_admin_transfer; biaya_admin:<alias pos> for one item, 0 = no fee) (+1 more)
 
-### Community 187 - "Ledger connect() and Vault-Tools Test Module Imports"
-Cohesion: 0.10
-Nodes (10): Migration, make_pdf(), Migration, SubscriptionLog, ThroughTheTools, Migration, UsulanReport, _backfill_v13() (+2 more)
+### Community 187 - "Ledger connect() and Migrations, and the Subscriptions Store with Tests"
+Cohesion: 0.07
+Nodes (20): Migration, Migration, SubscriptionLog, Ledger, Migration, world(), Fund, Recurring (+12 more)
 
-### Community 188 - "Vault SOUL: Number Rules, Pots, Simulations and Usulan"
-Cohesion: 0.13
-Nodes (9): /internal/* surface (plugin only: store_payee, rincian), catat_usulan (records a missing capability or number for /usulan), health_check verdict (decided by the tool, not changed or softened; 2-3 concrete options), Frequently asked numbers, always labelled (no defisit unless tool output), Pot shortfall options (cut games or non-mandatory apps, count the due-day salary, talk to the friend), each tested with simulasi_skenario, saldo_pot (records the pot balance the owner reads in the bank app), simulasi_skenario (what-if: bayar_ekstra_sekarang, hemat_per_bulan, belanja_kartu_per_bulan, pola_pot), Bound fund: the friend's debt pot (deadline 31 Jan 2028, Jago pot account, sinking:<fund alias>, upsert_sinking_fund) (+1 more)
+### Community 188 - "Vault SOUL: Persona, Data and Card Rules, Expenses, Living Reserve and One-Off Bills"
+Cohesion: 0.08
+Nodes (28): /internal/* surface (plugin only: store_payee, rincian), SOUL.md: vault bot persona (personal finance advisor and planner), Card instalment recording (x/y lines, record_card_installments, card_installments_status), Card payment method rules (Jenius and BCA to an account, Mandiri via the app menu, others to the card number), Card tokens [[CARD:num-xxxx]] map to stored cards by last 4 digits; then link_card_payees, Category scheme (wajib:, sinking:, transfer_internal, sekali:, perantara:, berhenti:, free daily spending), Chat uploads (list_uploads, ingest_statement, record_mutations; BARIS KURANG means resend with replace=true), Undoing a wrong instalment record (repeat the record, wait for ya, then cicilan_dibayar(alias, jumlah, batal=true); jatuh_tempo when not the last record) (+20 more)
+
+### Community 189 - "Budgets: Status, Setting and Tests, and Receipt-Merge Tests (Merge)"
+Cohesion: 0.17
+Nodes (6): Budgets, Merge, budget_status(), set_budget(), budget_status(), set_budget()
 
 ### Community 193 - "Vault Model Setting"
 Cohesion: 0.67
 Nodes (3): model, default, provider
-
-### Community 198 - "Control Proposal Validation"
-Cohesion: 0.18
-Nodes (4): path_allowed(), quiet(), validate(), ValidateTests
 
 ### Community 199 - "Deploy 2 Script"
 Cohesion: 1.00
@@ -996,45 +958,51 @@ Nodes (3): idle(), mask(), deploy.sh script
 Cohesion: 0.50
 Nodes (4): projects.db (projects store; every table empty), projects.db discovered_repos table (0 rows), projects.db project_meta table (0 rows), projects.db projects table (0 rows)
 
-### Community 201 - "Admin Fees, Indonesian Holidays and Fee Tests (admin_fee, id_holidays)"
-Cohesion: 0.09
-Nodes (10): bills_of(), fees_world(), Rule, Simulation, Holidays, next_payday(), admin_fee(), _cuti_bersama() (+2 more)
+### Community 202 - "M4 Comms Question (Open Question 18) and Its Follow-Ups"
+Cohesion: 0.29
+Nodes (9): card-bus (the Kanban replacement in docs/ARCHITECTURE.md for one zone to hand work to another; still wanted?), Comms' Anthropic key from a third workspace with its own limit, as front has, Comms Google OAuth client (consent on the owner's laptop like the ingest token; gmail.modify, plus calendar.readonly or calendar.events), Comms permissions choice (read and label mail, write drafts, or also send; calendar read only or create events too), Follow-up: after a week, front's cost per day from its state.db against its own spend limit, M4 comms (remaining milestone; nothing built, waits for the owner's answers to open question 18), net-comms network (in the repo for the comms zone), Open question 18: M4 comms, nothing built (what it may do, Google consent, its own bot, which Anthropic key, card-bus) (+1 more)
 
-### Community 202 - "M4 Comms Question, Front First Start and Telegram Allowlist"
-Cohesion: 0.09
-Nodes (29): Bot model config (reasoning_effort high, claude-sonnet-5-5 vision and compression, Haiku titles), BotFather Allow Groups (the owner reports it off for the vault, control and front bots on 2026-11-01; comms' own bot gets it off too), card-bus (the Kanban replacement in docs/ARCHITECTURE.md for one zone to hand work to another; still wanted?), Comms' Anthropic key from a third workspace with its own limit, as front has, Comms Google OAuth client (consent on the owner's laptop like the ingest token; gmail.modify, plus calendar.readonly or calendar.events), Comms permissions choice (read and label mail, write drafts, or also send; calendar read only or create events too), approvals.destructive_slash_confirm: false (vault config.yaml), Follow-up: after a week, front's cost per day from its state.db against its own spend limit (+21 more)
+### Community 203 - "Gmail Ingest Entry Point and Sender Config (__main__.py)"
+Cohesion: 0.38
+Nodes (3): load_senders(), main(), SenderConfig
 
-### Community 203 - "Hermes Socket Inode Probes (socket_inodes)"
-Cohesion: 0.67
-Nodes (3): socket_inodes(), socket_inodes_as(), sockets()
+### Community 204 - "PDF Passwords Set Script (pdf-passwords-set.py)"
+Cohesion: 0.47
+Nodes (3): collect(), main(), merge()
 
 ### Community 205 - "Ledger Categories and Thresholds"
 Cohesion: 0.31
 Nodes (9): mandiri-utama (Mandiri main account), wajib:cicilan category (9 rules), wajib:spaylater category (3 rules), cicilan-mobil (debt to MTF, autodebit from mandiri-utama, due day 2), spaylater (debt to Shopee SPayLater, autodebit from mandiri-utama, due day 1), debt_payments (ledger table, 2 rows), debts (ledger table, 2 rows), net_snapshots (ledger table, 2 rows) (+1 more)
+
+### Community 214 - "Statement Ingest: File Parts, References and Passwords (ingest_statement)"
+Cohesion: 0.15
+Nodes (6): ingest_statement(), record_statement(), ingest_file_parts(), load_passwords(), resolve_ref(), split_parts()
 
 ## Ambiguous Edges - Review These
 - `System prompts and tool-schema snapshots` → `tagihan_sekali tool (one-off bills: arrears, repairs)`  [AMBIGUOUS]
   docs/runtime/bot-activity.md · relation: conceptually_related_to
 - `Turn machinery warmed (59 tool schemas materialized)` → `tagihan_sekali tool (one-off bills: arrears, repairs)`  [AMBIGUOUS]
   docs/runtime/bot-activity.md · relation: conceptually_related_to
-- `belanja_kartu (per-card statement lines, long numbers masked)` → `Ended subscriptions (Catchplay, GoPro, AWS, Steam, PlayStation)`  [AMBIGUOUS]
-  docs/PROGRESS.md · relation: conceptually_related_to
-- `Card statement recording and reconciliation (7 cards)` → `/kondisi report command`  [AMBIGUOUS]
-  docs/PROGRESS.md · relation: conceptually_related_to
-- `Open question 7: GoPro charge on the CIMB October statement (annual, stop or move?)` → `Ended subscriptions (Catchplay, GoPro, AWS, Steam, PlayStation)`  [AMBIGUOUS]
-  docs/PROGRESS.md · relation: conceptually_related_to
-- `cardguard TTL file (ttl/rincian.jsonl: /rincian messages to delete after expiry; 0 lines)` → `belanja_kartu (card spending breakdown per cycle from statement lines already read by code; never read the PDF for this)`  [AMBIGUOUS]
-  docs/runtime/hermes.md · relation: conceptually_related_to
-- `Gateway multiplex standalone (only one profile exists, nothing to multiplex)` → `state.db hosted_room tables (14 hosted-room tables, all empty)`  [AMBIGUOUS]
-  docs/runtime/hermes.md · relation: conceptually_related_to
 - `Coway arrears expense (paid 30 Oct from the Mandiri balance; receipt on mandiri-utama, category sekali:coway-tunggakan like the 13 Oct rows)` → `Open question 4: Google One and Coway on Mega vs recorded, check on the November statements`  [AMBIGUOUS]
   docs/PROGRESS.md · relation: conceptually_related_to
+- `Number guard remembers amounts from the gateway's photo description (English number format)` → `image_input_mode: native (photos go to the model as images)`  [AMBIGUOUS]
+  docs/PROGRESS.md · relation: conceptually_related_to
+- `Ended subscriptions (Catchplay, GoPro, AWS, Steam, PlayStation)` → `belanja_kartu (per-card statement lines, long numbers masked)`  [AMBIGUOUS]
+  docs/PROGRESS.md · relation: conceptually_related_to
+- `Ended subscriptions (Catchplay, GoPro, AWS, Steam, PlayStation)` → `Open question 7: GoPro charge on the CIMB October statement (annual, stop or move?)`  [AMBIGUOUS]
+  docs/PROGRESS.md · relation: conceptually_related_to
+- `Hitting a limit: catat_usulan, then sudah kucatat di /usulan` → `/usulan (posts the waiting proposals again with their buttons)`  [AMBIGUOUS]
+  services/hermes/vault/SOUL.md · relation: semantically_similar_to
+- `telegram_update_receipts JSON file in HERMES_HOME` → `Messages sent while the bot restarts are dropped (platforms.telegram.extra.drop_pending_on_cold_boot, default true)`  [AMBIGUOUS]
+  docs/runtime/hermes.md · relation: conceptually_related_to
 - `cache/schema_columns.json (schema hash plus versions for 17 tables)` → `state.db (sessions, messages, model usage, delivery obligations, routing, admissions, system prompts; SQLite WAL)`  [AMBIGUOUS]
   docs/runtime/hermes.md · relation: conceptually_related_to
 - `cache/tool_discovery_cache.json (tool discovery cache, 287 keys, written 2026-10-27)` → `Engine tools besides MCP (only clarify and vision_analyze; the row still counts 56 vault_tools tools from the latest tool-schema snapshot while the schema cache section lists 57)`  [AMBIGUOUS]
   docs/runtime/hermes.md · relation: conceptually_related_to
-- `/usulan (posts the waiting proposals again with their buttons)` → `Hitting a limit: catat_usulan, then sudah kucatat di /usulan`  [AMBIGUOUS]
-  services/hermes/vault/SOUL.md · relation: semantically_similar_to
+- `state.db hosted_room tables (14 hosted-room tables, all empty)` → `Gateway multiplex standalone (only one profile exists, nothing to multiplex)`  [AMBIGUOUS]
+  docs/runtime/hermes.md · relation: conceptually_related_to
+- `/kondisi report command` → `Card statement recording and reconciliation (7 cards)`  [AMBIGUOUS]
+  docs/PROGRESS.md · relation: conceptually_related_to
 - `Engine tools besides MCP (only clarify and vision_analyze; the row still counts 56 vault_tools tools from the latest tool-schema snapshot while the schema cache section lists 57)` → `tagihan_sekali (a bill paid once, outside subscriptions and fixed expenses, such as arrears or a repair; aksi picks the action, with optional alias, name, amount, due date, pay-to, method, date and note)`  [AMBIGUOUS]
   docs/runtime/hermes.md · relation: conceptually_related_to
 - `ingest-gmail job (services/ingest-gmail/Dockerfile, own ingest user)` → `pdf_passwords secret`  [AMBIGUOUS]
@@ -1047,10 +1015,6 @@ Nodes (9): mandiri-utama (Mandiri main account), wajib:cicilan category (9 rules
   docs/runtime/infra-files.md · relation: conceptually_related_to
 - `pa-backup.service + timer (restic backup, daily 02:00 WIB)` → `canary.txt (root-owned file in the data dir, mode 0644)`  [AMBIGUOUS]
   docs/runtime/host.md · relation: conceptually_related_to
-- `telegram_update_receipts JSON file in HERMES_HOME` → `Messages sent while the bot restarts are dropped (platforms.telegram.extra.drop_pending_on_cold_boot, default true)`  [AMBIGUOUS]
-  docs/runtime/hermes.md · relation: conceptually_related_to
-- `Number guard remembers amounts from the gateway's photo description (English number format)` → `image_input_mode: native (photos go to the model as images)`  [AMBIGUOUS]
-  docs/PROGRESS.md · relation: conceptually_related_to
 - `Denied: AWS IMDSv2 credential probes to the instance-metadata address (/latest/api/token, iam/security-credentials)` → `squid-vault (vault zone egress proxy; allows api.anthropic.com, api.notion.com, api.telegram.org, gmail.googleapis.com, oauth2.googleapis.com)`  [AMBIGUOUS]
   docs/runtime/proxies.md · relation: conceptually_related_to
 - `Denied: Hermes model-catalog and provider refreshes (hermes-agent.nousresearch.com, raw.githubusercontent.com, openrouter.ai, portal.nousresearch.com)` → `squid-vault (vault zone egress proxy; allows api.anthropic.com, api.notion.com, api.telegram.org, gmail.googleapis.com, oauth2.googleapis.com)`  [AMBIGUOUS]
@@ -1071,6 +1035,8 @@ Nodes (9): mandiri-utama (Mandiri main account), wajib:cicilan category (9 rules
   docs/runtime/vault-tools.md · relation: conceptually_related_to
 - `ledger.db.bak-pre-plan-in-force (ledger copy taken before the plan-in-force step, 2026-11-02, no -shm or -wal sidecars)` → `living_* thresholds (living_balance_mark, living_balance_report, living_leftover, living_leftover_at, living_leftover_payday, living_leftover_spent, living_reserve)`  [AMBIGUOUS]
   docs/runtime/vault-tools.md · relation: conceptually_related_to
+- `cardguard TTL file (ttl/rincian.jsonl: /rincian messages to delete after expiry; 0 lines)` → `belanja_kartu (card spending breakdown per cycle from statement lines already read by code; never read the PDF for this)`  [AMBIGUOUS]
+  docs/runtime/hermes.md · relation: conceptually_related_to
 - `Closed: skip plus a direct Bot API reply writes nothing to the session store (closed by spike 11)` → `Spike 11: /rincian reply stays out of the session store (pass)`  [AMBIGUOUS]
   docs/assumptions.md · relation: conceptually_related_to
 - `Closed: Telegram-side copy of the raw message (closed by spike 10, deleteMessage ok)` → `Spike 10: deleteMessage on the owner's incoming message (pass)`  [AMBIGUOUS]
@@ -1087,23 +1053,23 @@ Nodes (9): mandiri-utama (Mandiri main account), wajib:cicilan category (9 rules
   docs/runtime/state.md · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **154 isolated node(s):** `AWS_DEFAULT_REGION`, `make runtime-map`, `mcp__vault_tools__add_owner_name`, `mcp__vault_tools__atur_jadwal_pot`, `mcp__vault_tools__belanja_kartu` (+149 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 997 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **43 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **153 isolated node(s):** `AWS_DEFAULT_REGION`, `make runtime-map`, `mcp__vault_tools__add_owner_name`, `mcp__vault_tools__atur_jadwal_pot`, `mcp__vault_tools__belanja_kartu` (+148 more)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 999 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **42 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Laptop token flow (token piped over SSH into the VPS)` connect `Gmail OAuth and Sender Allowlist` to `Applied-Pull Host Script and Ops Script Test Modules`, `Runbook (M1-M3): VPS Setup and Front Start`, `Security (M1): Infrastructure Invariants, Secrets and Front Limits`?**
-  _High betweenness centrality (0.190) - this node is a cross-community bridge._
+- **Why does `State snapshot` connect `State Snapshot: Timers, Jobs, Restic and Runs` to `Egress, Containers and Telegram Polling (State)`, `Payday Plan, Debts, Balances and Usulan (State Snapshot)`, `Bot Activity: Gateway Lifecycle, Shutdowns and Restarts`, `Runtime Map Collector`, `Card, Statement and Instalment Tables (State Snapshot)`?**
+  _High betweenness centrality (0.108) - this node is a cross-community bridge._
 - **Are the 3 inferred relationships involving `create_app()` (e.g. with `report()` and `rincian()`) actually correct?**
   _`create_app()` has 3 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `AWS_DEFAULT_REGION`, `make runtime-map`, `mcp__vault_tools__add_owner_name` to the rest of the system?**
-  _154 weakly-connected nodes found - possible documentation gaps or missing edges._
-- **Should `Hermes Runtime Probes` be split into smaller, more focused modules?**
-  _Cohesion score 0.13655761024182078 - nodes in this community are weakly interconnected._
-- **Why does `State snapshot` connect `State Snapshot: Timers, Jobs, Restic and Runs` to `Egress, Containers and Telegram Polling (State)`, `Payday Plan, Debts, Balances and Usulan (State Snapshot)`, `Bot Activity: Gateway Lifecycle, Shutdowns and Restarts`, `Runtime Map Collector`, `Card, Statement and Instalment Tables (State Snapshot)`?**
-  _High betweenness centrality (0.131) - this node is a cross-community bridge._
+  _153 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **Should `Payday Status, Plan Summaries, Bill Status and Card Payment Recording (tools.py)` be split into smaller, more focused modules?**
+  _Cohesion score 0.07692307692307693 - nodes in this community are weakly interconnected._
+- **Why does `up -d --build (the rebuild step of make deploy)` connect `Calibration Runbook: Owner Rules, Change-and-Verify, Reviews and the Deploy Procedure` to `Compose Service: squid-vault`?**
+  _High betweenness centrality (0.087) - this node is a cross-community bridge._
 
 ### Low-confidence Hints
 _AMBIGUOUS edges — the extractor was unsure. Verify before acting on these._

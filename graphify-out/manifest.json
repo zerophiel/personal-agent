@@ -84,16 +84,16 @@
     "semantic_hash": "af537215737aec04aeca72a0964c965e"
   },
   "scripts/gmail-auth.py": {
-    "mtime": 1793082140.6141453,
-    "seen": 1793424620.1616402,
-    "ast_hash": "4e7d0f5985758713152293206ee8e0af",
-    "semantic_hash": "4e7d0f5985758713152293206ee8e0af"
+    "mtime": 1793587309.9098594,
+    "seen": 1793588805.5708423,
+    "ast_hash": "8998c8e71c9f4837da679284e20bdf5a",
+    "semantic_hash": "8998c8e71c9f4837da679284e20bdf5a"
   },
   "scripts/gmail-token-check.py": {
-    "mtime": 1793082140.6581452,
-    "seen": 1793424620.1616406,
-    "ast_hash": "f63d37ce99c50fece433b37de32d1ab8",
-    "semantic_hash": "f63d37ce99c50fece433b37de32d1ab8"
+    "mtime": 1793587310.0378592,
+    "seen": 1793588805.5708447,
+    "ast_hash": "df6b2c2feaf1584049f4cdb915dfa6c6",
+    "semantic_hash": "df6b2c2feaf1584049f4cdb915dfa6c6"
   },
   "scripts/install-timers.sh": {
     "mtime": 1793084651.089664,
@@ -606,16 +606,16 @@
     "semantic_hash": "cd16f21b81c4256f989dbbcacf6918cb"
   },
   "docs/GMAIL_OAUTH.md": {
-    "mtime": 1793082153.7541428,
-    "seen": 1793424620.1616886,
-    "ast_hash": "9a618bdc62e8f09780bb02bd79cc63e9",
-    "semantic_hash": "9a618bdc62e8f09780bb02bd79cc63e9"
+    "mtime": 1793587310.1898594,
+    "seen": 1793588805.5709126,
+    "ast_hash": "dce35fad606540b6f7b68f0ed2ca84de",
+    "semantic_hash": "dce35fad606540b6f7b68f0ed2ca84de"
   },
   "docs/PROGRESS.md": {
-    "mtime": 1793557842.3958325,
-    "seen": 1793559946.4053717,
-    "ast_hash": "cc24185b954e49b4ec64df75712f3350",
-    "semantic_hash": "cc24185b954e49b4ec64df75712f3350"
+    "mtime": 1793587338.133858,
+    "seen": 1793588805.5709133,
+    "ast_hash": "bf2de2aa8a18908d9b235816ffc4dc2e",
+    "semantic_hash": "bf2de2aa8a18908d9b235816ffc4dc2e"
   },
   "docs/RUNBOOK.md": {
     "mtime": 1793550497.2138956,
@@ -964,5 +964,17 @@
     "seen": 1793559946.4053662,
     "ast_hash": "8ec1ef375beee3d6fbc512fe1075522e",
     "semantic_hash": "8ec1ef375beee3d6fbc512fe1075522e"
+  },
+  "scripts/gmail-renew.sh": {
+    "mtime": 1793587200.009868,
+    "seen": 1793588805.5708437,
+    "ast_hash": "040808b4c3113a7d7ac9394c441880c2",
+    "semantic_hash": "040808b4c3113a7d7ac9394c441880c2"
+  },
+  "tests/test_gmail_renew.py": {
+    "mtime": 1793587175.9538682,
+    "seen": 1793588805.5709076,
+    "ast_hash": "476975ffe68c541702ad17cc84c4dad2",
+    "semantic_hash": "476975ffe68c541702ad17cc84c4dad2"
   }
 }
