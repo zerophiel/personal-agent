@@ -9,7 +9,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `99c2c961`
+- Built from commit: `cf4e7e13`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -744,7 +744,7 @@ Nodes (30): Sanitized snapshot (no secrets, balances or message text), docs/runt
 
 ### Community 110 - "Progress: Plan in Force, transfer_selesai Asking Which Payday and the Open 30 Oct Lesson Fee"
 Cohesion: 0.29
-Nodes (15): les Mandarin transfer (left in Mandiri on 30 Oct; not paid yet on 2 Nov, its money set aside, still open in the 30 Oct plan), Finding (latent since the bot went live): three readers took the newest row of plans as the plan in force (spending_pace, _living_balance, _open_transfers), Next step done 2 Nov morning: the owner's /new to vault after the 2 Nov 01:23 WIB deploy (transfer_selesai has gajian); the 30 Oct lesson fee is not paid yet, its money set aside: tell the bot once it is paid, _open_transfers (the auto-debit check of a reported balance; reads the plan of current_payday(today)), PAYDAY_LOOKBACK_DAYS (7 days after a payday current_payday turns to the coming one), Payday window (current_payday, 7 days after payday), plan_in_force(conn, today): the latest payday's plan on or before today, Plan-in-force fix (live since 2 Nov 01:23 WIB): spending_pace and _living_balance read the plan in force, only while today is before its next payday; _open_transfers reads the plan of current_payday(today) (+7 more)
+Nodes (15): les Mandarin transfer (left in Mandiri on 30 Oct; not paid yet on 2 Nov, its money set aside outside the daily account, still open in the 30 Oct plan), Finding (latent since the bot went live): three readers took the newest row of plans as the plan in force (spending_pace, _living_balance, _open_transfers), Next step done 2 Nov morning: the owner's /new to vault after the 2 Nov 01:23 WIB deploy (transfer_selesai has gajian); the 30 Oct lesson fee is not paid yet, its money set aside outside the daily account (no correction): tell the bot once it is paid, _open_transfers (the auto-debit check of a reported balance; reads the plan of current_payday(today)), PAYDAY_LOOKBACK_DAYS (7 days after a payday current_payday turns to the coming one), Payday window (current_payday, 7 days after payday), plan_in_force(conn, today): the latest payday's plan on or before today, Plan-in-force fix (live since 2 Nov 01:23 WIB): spending_pace and _living_balance read the plan in force, only while today is before its next payday; _open_transfers reads the plan of current_payday(today) (+7 more)
 
 ### Community 112 - "Admin Fee Rules and Fee Tests (admin_fee, test_admin_fees.py)"
 Cohesion: 0.18
