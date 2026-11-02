@@ -613,8 +613,10 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   catalog shows `gajian`.
 - Owner: `/new` to the vault bot once (a new tool parameter; sent on the morning of 2 Nov). The lesson fee of the 30
   Oct plan is not paid yet: the owner set the money aside (2 Nov morning; this section first said it was paid on 30
-  Oct, which was wrong), and the ledger keeps it open. When it is paid, tell the bot: up to 6 Nov it marks the 30 Oct
-  plan without asking (`current_payday` keeps a payday for 7 days); from 7 Nov it asks, answer "gajian 30 Oktober".
+  Oct, which was wrong), and the ledger keeps it open. The money sits outside the daily account `jago-harian` (the
+  owner, 2 Nov ~10:30 WIB), so the daily money needs no correction. When it is paid, tell the bot: up to 6 Nov it
+  marks the 30 Oct plan without asking (`current_payday` keeps a payday for 7 days); from 7 Nov it asks, answer
+  "gajian 30 Oktober".
 
 ## Deployed 2 Nov 01:23 WIB: the plan in force, the daily-money pace, transfer_selesai, q21 (under the owner's delegation)
 - Backup `ledger.db.bak-pre-plan-in-force` (01:22, integrity ok). Both bots idle (the vault's last log line was the
@@ -643,6 +645,10 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 - Tests: tests/test_gmail_renew.py with a fake python and ssh. On the VPS, once against a fake token in /tmp: a
   cancelled login kept the old token, a finished one rewrote it with the same inode; the folder was removed.
 - The pa-gmail-token messages name the new script from the next deploy.
+- First real renewal, 2 Nov 10:28 WIB (the owner, on the laptop): on the VPS the token file was rewritten at 10:28:53,
+  is not empty, and no temporary file is left (`test -s` and `stat` only, the token never read), so the new token
+  passed the script's check. The 3 Nov 06:00 ingest is the first to use it with Google. It runs out on 9 Nov around
+  10:28 WIB; the 08:00 check stays silent until 8 Nov, when it warns (2 days or less left).
 
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
@@ -696,9 +702,10 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 
 ## Next steps
 - (done 2 Nov morning) Owner `/new` to vault after the 2 Nov 01:23 WIB deploy (`transfer_selesai` has `gajian`). The
-  30 Oct lesson fee is not paid yet, its money set aside: tell the bot once it is paid. October's categorizing goes
-  on; each categorized payday row leaves "belum dihitung".
-- Owner, before 3 Nov ~13:00 WIB: `bash scripts/gmail-renew.sh` on the laptop (see "Renewing the Gmail token" above).
+  30 Oct lesson fee is not paid yet, its money set aside outside the daily account (no correction): tell the bot once
+  it is paid. October's categorizing goes on; each categorized payday row leaves "belum dihitung".
+- (done 2 Nov 10:28 WIB) Owner: `bash scripts/gmail-renew.sh` on the laptop (see "Renewing the Gmail token" above).
+  Next renewal before 9 Nov ~10:28 WIB; the control bot warns on 8 Nov at 08:00.
 - (done 2026-11-01 20:13 WIB) The doubled-rows fix. Owner: `/new` once to vault, whose session still holds the 186,8
   juta reply. Bank files over an already recorded period are fine again: same-day same-amount rows match, and BUKU
   TIDAK COCOK flags a row the second file dates otherwise.

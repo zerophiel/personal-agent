@@ -56,4 +56,4 @@ ssh ubuntu@43.157.242.194 'sudo bash -c "umask 077; cat > /opt/personal-agent-se
 
 ## Catatan keamanan
 - `gmail.readonly` memungkinkan membaca **seluruh** email, bukan hanya label Keuangan. Pembatasan ke label dilakukan di kode ingest-gmail, bukan oleh Google. Karena itu job ini deterministik, tanpa LLM, dan tidak punya jalur keluar selain `gmail.googleapis.com` dan `oauth2.googleapis.com`.
-- Skrip `scripts/gmail-auth.py` belum diuji dengan client asli. Jalankan di laptop dan laporkan hasilnya.
+- Kedua skrip sudah dipakai dengan client asli: token pertama dibuat 27 Okt 2026 dengan `scripts/gmail-auth.py`, dan perpanjangan pertama lewat `scripts/gmail-renew.sh` berhasil 2 Nov 2026.
