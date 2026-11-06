@@ -60,8 +60,8 @@ print(f"{BASE}: {registry(BASE)['digest']} (Python {version[0] if version else '
 for name in ("vault-tools", "control", "ingest-gmail", "change-proposals"):
     built = json.loads(run("docker", "image", "inspect", f"personal-agent-{name}", "--format", "{{json .RootFS.Layers}}"))
     print(f"  personal-agent-{name} built on it: {'yes' if built[:len(layers)] == layers else 'no'}")
-local = json.loads(run("docker", "image", "inspect", SQUID, "--format", "{{json .RepoDigests}}"))
-print(f"{SQUID}: local {' '.join(local)}; registry now {registry(SQUID)['digest']}")
+running = run("docker", "inspect", "-f", "{{.Image}}", "personal-agent-squid-vault-1").strip()   # by digest, a host has no tag
+print(f"{SQUID}: running {running}; registry now {registry(SQUID)['digest']}")
 EOF
 )
 

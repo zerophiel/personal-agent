@@ -30,8 +30,8 @@ case "$1 $2" in
     else
       echo '{"digest":"sha256:indeks-'"${4%%:*}"'"}'
     fi ;;
-  "image inspect")
-    if [[ "$3" == *squid* ]]; then echo '["ubuntu/squid@sha256:lokal"]'; else echo "${LAYERS:-[\"sha256:a\",\"sha256:b\"]}"; fi ;;
+  "image inspect") echo "${LAYERS:-[\"sha256:a\",\"sha256:b\"]}" ;;
+  "inspect -f") echo sha256:lokal ;;
 esac
 """
 FAKE_DPKG_QUERY = r"""#!/bin/bash
@@ -116,7 +116,7 @@ class Capture(unittest.TestCase):
         out = self.run_capture().stdout
         self.assertIn("python:3.12-slim: sha256:indeks-python (Python 3.12.16)", out)
         self.assertIn("personal-agent-vault-tools built on it: yes", out)
-        self.assertIn("ubuntu/squid:6.6-24.04_edge: local ubuntu/squid@sha256:lokal; registry now sha256:indeks-ubuntu/squid", out)
+        self.assertIn("ubuntu/squid:6.6-24.04_edge: running sha256:lokal; registry now sha256:indeks-ubuntu/squid", out)
 
     def test_it_says_when_the_tag_moved(self):
         out = self.run_capture(LAYERS=json.dumps(["sha256:lain", "sha256:b"])).stdout
