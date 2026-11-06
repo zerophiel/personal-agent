@@ -3,6 +3,14 @@
   "env": {
     "GRAPHIFY_HOOK_STRICT": "1"
   },
+  "permissions": {
+    "deny": [
+      "Read(~/personal-agent/private/**)",
+      "Edit(~/personal-agent/private/**)",
+      "Read(/private/**)",
+      "Edit(/private/**)"
+    ]
+  },
   "hooks": {
     "UserPromptSubmit": [
       {

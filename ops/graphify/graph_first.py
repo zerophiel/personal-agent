@@ -16,7 +16,8 @@ from datetime import datetime, timezone
 
 ENGINE_GRAPH = "~/.graphify/repos/NousResearch/hermes-agent-v0.22.5/graphify-out/graph.json"
 DOC_SUFFIXES = {".md", ".mdx", ".rst", ".txt", ".pdf"}
-SKIP_DIRS = {".git", ".claude", "graphify-out", "__pycache__", "node_modules", ".venv", "venv"}
+# private/: make mirror's plaintext copy; its file names never reach the context
+SKIP_DIRS = {".git", ".claude", "graphify-out", "__pycache__", "node_modules", ".venv", "venv", "private"}
 SENSITIVE = re.compile(r"(?i)token|secret|passw|credential|\.env\b")   # names graphify skips; never reported as new
 SHOW = 6
 WIB = 7 * 3600

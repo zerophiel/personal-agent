@@ -3,7 +3,9 @@ import importlib.util
 import itertools
 import os
 import re
+import tempfile
 import unittest
+from unittest import mock
 
 _p = os.path.join(os.path.dirname(__file__), "..", "ops", "runtime-map", "collect.py")
 _s = importlib.util.spec_from_file_location("collect", _p)
@@ -17,6 +19,18 @@ def digest_with_digit_run(start=0):
         h = hashlib.sha256(str(i).encode()).hexdigest()
         if re.search(r"\d{9,}", h):
             return i, h
+
+
+class LocalTree(unittest.TestCase):
+    def test_the_plaintext_copy_is_never_walked(self):
+        # local_tree() hashes every file and render_drift() writes names into the tracked docs/runtime
+        with tempfile.TemporaryDirectory() as root:
+            for rel in ("compose/a.yml", "private/vps/secrets/restic.env", "private/.new/data/x"):
+                os.makedirs(os.path.dirname(os.path.join(root, rel)), exist_ok=True)
+                with open(os.path.join(root, rel), "w", encoding="utf-8") as f:
+                    f.write("x")
+            with mock.patch.object(rm, "ROOT", root):
+                self.assertEqual(list(rm.local_tree()), ["compose/a.yml"])
 
 
 class Scrub(unittest.TestCase):

@@ -23,7 +23,7 @@ PROBES = {
     "hermes": ("sudo docker exec -i personal-agent-vault-1 /opt/hermes/.venv/bin/python -", "probe_hermes.py"),
     "vault_tools": ("sudo docker exec -i personal-agent-vault-tools-1 python -", "probe_vault_tools.py"),
 }
-SKIP_DIRS = {".git", ".claude", "graphify-out", "__pycache__"}
+SKIP_DIRS = {".git", ".claude", "graphify-out", "__pycache__", "private"}   # private/: make mirror's plaintext copy
 RUNTIME_PREFIXES = ("compose/", "config/", "host/", "scripts/", "services/", "Makefile")
 UNIT_DIRS = ("host/", "services/applier/systemd/")   # make deploy installs host/; the applier's install.sh its own
 TOKEN = re.compile(r"\b\d{8,10}:[A-Za-z0-9_-]{30,}|sk-ant-[A-Za-z0-9_-]+|\bntn_[A-Za-z0-9]+|\bsecret_[A-Za-z0-9]{20,}"

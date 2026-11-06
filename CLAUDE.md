@@ -3,6 +3,14 @@
 Owner-only personal finance bot on Hermes Agent v0.22.5, deployed from this repo to the VPS. State and decisions:
 docs/PROGRESS.md; security rules: docs/SECURITY.md.
 
+## private/: never read or list it
+
+`~/personal-agent/private/` is the full plaintext copy of the VPS data and secrets, by the owner's decision of
+2026-11-06 (docs/SECURITY.md). It is git-ignored and never leaves the laptop through this repo. The assistant, its
+subagents and any other AI working in this folder never read, list, search or print anything under it, with any tool:
+even its file names hold private details. It moves only through `make mirror` and `make restore`, whose output holds
+counts and statuses only. `.claude/settings.json` denies Read and Edit there; Bash is covered by this rule alone.
+
 ## Project map: read it before doing anything
 
 The owner's standing rule (2026-10-31): every task starts from the map, not from a fresh scan.

@@ -24,7 +24,7 @@ echo "== 2/7 ledger backup (no data change, the way back all the same)"
 ssh -o BatchMode=yes "$H" 'sudo docker exec -i personal-agent-vault-tools-1 python -I -' < "$D/backup.py" | mask
 
 echo "== 3/7 sync the repo (the rsync of make deploy)"
-rsync -az --delete --exclude .git --exclude .claude --exclude 'secrets/*.dec*' --exclude graphify-out --exclude CLAUDE.md ./ "$H:/opt/personal-agent/"
+rsync -az --delete --exclude .git --exclude .claude --exclude 'secrets/*.dec*' --exclude graphify-out --exclude CLAUDE.md --exclude /private/ ./ "$H:/opt/personal-agent/"
 
 echo "== 4/7 rebuild vault-tools only, wait until healthy"
 ssh -o BatchMode=yes "$H" "cd /opt/personal-agent && $COMPOSE up -d --build --wait --wait-timeout 180 vault-tools" 2>&1 | tail -4

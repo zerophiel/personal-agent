@@ -22,7 +22,7 @@ echo "== 2/6 ledger backup + data fix (on the code still deployed)"
 ssh -o BatchMode=yes "$H" 'sudo docker exec -i personal-agent-vault-tools-1 python -I -' < "$D/fix_data.py" | mask
 
 echo "== 3/6 sync the repo (the rsync of make deploy)"
-rsync -az --delete --exclude .git --exclude .claude --exclude 'secrets/*.dec*' --exclude graphify-out --exclude CLAUDE.md ./ "$H:/opt/personal-agent/"
+rsync -az --delete --exclude .git --exclude .claude --exclude 'secrets/*.dec*' --exclude graphify-out --exclude CLAUDE.md --exclude /private/ ./ "$H:/opt/personal-agent/"
 
 echo "== 4/6 rebuild vault-tools only, wait until healthy"
 ssh -o BatchMode=yes "$H" "cd /opt/personal-agent && $COMPOSE up -d --build --wait --wait-timeout 180 vault-tools" 2>&1 | tail -4

@@ -29,7 +29,7 @@ class Rsync(unittest.TestCase):
     def test_caches_secrets_and_the_map_stay_here(self):
         args = deploy_rsync()
         excluded = {args[i + 1] for i, a in enumerate(args) if a == "--exclude"}
-        self.assertLessEqual({".git", ".claude", "secrets/*.dec*", "graphify-out", "CLAUDE.md", "__pycache__"},
+        self.assertLessEqual({".git", ".claude", "secrets/*.dec*", "graphify-out", "CLAUDE.md", "__pycache__", "/private/"},
                              excluded)
 
     def test_delete_never_reaches_what_is_excluded(self):

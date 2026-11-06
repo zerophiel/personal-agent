@@ -27,7 +27,7 @@ ssh -o BatchMode=yes "$H" 'sudo docker exec -i personal-agent-vault-tools-1 pyth
 
 echo "== 3/8 sync the repo (the rsync of make deploy), check compose"
 rsync -az --delete --exclude .git --exclude .claude --exclude 'secrets/*.dec*' --exclude graphify-out --exclude CLAUDE.md \
-  --exclude __pycache__ ./ "$H:/opt/personal-agent/"
+  --exclude __pycache__ --exclude /private/ ./ "$H:/opt/personal-agent/"
 ssh -o BatchMode=yes "$H" "cd /opt/personal-agent && $COMPOSE config -q && echo compose ok"
 
 echo "== 4/8 rebuild vault-tools only, wait until healthy"

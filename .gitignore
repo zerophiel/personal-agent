@@ -5,6 +5,8 @@ __pycache__/
 .claude/*
 !.claude/settings.json
 .env
+# The plaintext copy of the VPS data and secrets (make mirror; docs/SECURITY.md): on the laptop only, never in git
+/private/
 # graphify-out/: only the shared map is committed; caches, dated backups, HTML and machine-local paths stay local
 graphify-out/*
 !graphify-out/graph.json

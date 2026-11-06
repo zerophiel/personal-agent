@@ -7,3 +7,5 @@ graphify-out/
 CLAUDE.md
 # encrypted secrets
 secrets/
+# the plaintext copy of the VPS data and secrets (make mirror): file names alone hold private details
+private/
