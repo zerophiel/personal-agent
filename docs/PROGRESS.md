@@ -1,8 +1,9 @@
 # Progress and resume point (finance / vault)
 
-Last updated: 2026-11-02. Branch `worktree-m1-skeleton`, draft PR #1. 765 tests pass (480 in vault-tools, 64 in the
-comms brokers).
-No secrets or personal amounts are recorded here; the numbers live in the ledger on the VPS.
+Last updated: 2026-11-06. Branch `worktree-m1-skeleton`, which merges into `main` as the last step of the rebuild work. PR #1 was
+merged on 2026-10-27; notes calling it a draft were wrong. 1042 tests pass (480 in vault-tools, 64 in the comms brokers).
+No secrets or personal amounts are recorded here; the numbers live in the ledger on the VPS and its copy in the git-ignored
+`private/`.
 
 ## Done
 - M1 platform and M2 vault deployed; 40 MCP tools; Hermes vault bot uses them (`tools.tool_search.enabled: "off"`).
@@ -707,6 +708,27 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   characters of its strip pattern literally (it works; `brokers/common.py` builds the same set from code points).
   Rewriting it means a control deploy.
 
+## This folder is the base for a rebuild (2026-11-06, owner: "directory ini digunakan sebagai source of truth untuk rebuild ke VPS provider lain tanpa harus tuning ulang lagi")
+- The owner's decisions: data "full semuanya di ada di directory ~/personal-agent"; `restic.env` "di ~/personal-agent tanpa
+  enkripsi"; "Gabung ke main, saya izinkan"; no rehearsal on a second host, "pastikan saja semuanya ada di ~/personal-agent".
+  Read as plaintext in a git-ignored `private/` on the laptop, never on GitHub; the approved plan said so. This replaces the
+  brief's section 2 (the git remote as the source of truth) and section 4.3 (sops+age, never built).
+- Built: the fence around `private/` (`.gitignore`, rsync excludes, graph and runtime-map skips, Read and Edit denied); `make
+  mirror`, a consistent copy of every database with nothing left on the VPS, all secrets, owners and modes, host facts, checks,
+  and a swap only after they pass; `make capture`; `make restore`, `make snapshots`, `make restore-restic`; `config/data.manifest`,
+  `config/secrets.manifest`, `make secrets-check`, and the pieces of a deploy as targets; `config/vps.env` as the one place of the
+  address; `make bootstrap` and a real `make preflight`; every image and Python package pinned; `make verify`; `docs/REBUILD.md`
+  and `docs/LAPTOP.md`.
+- Proven on the real VPS: two `make mirror` runs (exit 0, every database clean, every secret named in the manifest, services
+  untouched), `make preflight`, `make verify`. Proven only on fakes, since no second host exists: `make bootstrap`, `make restore`,
+  `make restore-restic`, and the applier's check on a new host. The first real move may need small fixes there.
+- The first successful `restic check` ran on 6 Nov: the R2 repository is sound. The failures of `pa-check` and `pa-forget` on 1 Nov
+  were two jobs colliding on restic's lock, and `scripts/backup.sh` now waits (`--retry-lock`, on the VPS after the next `make sync`).
+  `pa-forget.service` stays failed until its run on 8 Nov 04:00, so `make verify` shows one note until then.
+- Learned writing `docs/REBUILD.md`: `make snapshots` opens R2 with the copy's `restic.env`, so a new R2 key goes into the copy
+  before that check; Hermes discards Telegram messages queued while it was offline, so what is sent to vault and front during a
+  move is lost.
+
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
 2. Closing the pot gap without the children's needs: games (owner's own), apps not marked `wajib`, or talking to the friend.
@@ -767,6 +789,9 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
     payday, or leave the salary account out of the trend? A manual calibration for the owner; nothing changed.
 
 ## Next steps
+- Rebuild work, in order: `make sync` and the deploy of the pins (each with the owner's OK), the close, the merge to `main`.
+  Then the owner, in `~/personal-agent`: `git pull --ff-only origin main` and `bash scripts/finish-merge.sh`. Not before the
+  merge: `origin/main` is still the M1 tree, and its deploy would not leave `private/` out.
 - (done 2 Nov morning) Owner `/new` to vault after the 2 Nov 01:23 WIB deploy (`transfer_selesai` has `gajian`). The
   30 Oct lesson fee is not paid yet, its money set aside outside the daily account (no correction): tell the bot once
   it is paid. October's categorizing goes on; each categorized payday row leaves "belum dihitung".
@@ -826,7 +851,7 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   steps in `docs/RUNBOOK.md`, "Comms zone".
 
 ## Operating notes
-- Deploy: `rsync` from the worktree ROOT (never a subfolder: `--delete` wipes the server tree), back up `ledger.db` first, rebuild `vault-tools`, restart `vault`. Owner must `/new` in Telegram after tool or SOUL changes (owner plans to do it once data and system are done). Since 2026-11-01 23:23 WIB the applier is installed: `make deploy` refuses while the VPS has an applied front change this checkout lacks (`make applied-pull`, push, deploy again).
+- Deploy: `make deploy` or `make sync` from the repo ROOT (never a subfolder: `--delete` wipes the server tree), back up `ledger.db` first, rebuild `vault-tools`, restart `vault`. Owner must `/new` in Telegram after tool or SOUL changes (owner plans to do it once data and system are done). Since 2026-11-01 23:23 WIB the applier is installed: `make deploy` refuses while the VPS has an applied front change this checkout lacks (`make applied-pull`, push, deploy again).
 - `make deploy` never builds the `jobs` profile and `pa-ingest.service` runs without `--build`: after an ingest-gmail
   change, run `--profile jobs build ingest-gmail` on the VPS (as on 2 Nov 01:23 WIB).
 - Never start `pa-ingest`, `pa-gmail-token` or `pa-ingest-alert` by hand to try them: each can message the owner.

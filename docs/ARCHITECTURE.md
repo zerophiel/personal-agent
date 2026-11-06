@@ -47,7 +47,8 @@ broker tokens (`scripts/render-comms-env.sh`), and reaches Anthropic and Telegra
 ## Deviations from the original brief (see plan file)
 - Kanban replaced by a `card-bus` MCP (Hermes docs do not cover Kanban across containers); not built with M4
   (2026-11-02): comms reports to the owner through its own bot until zones should hand work to each other.
-- Hermes cron jobs are seeded by deploy (`hermes cron create`), not defined in config.
+- Hermes's own cron is not used: the `cronjob` toolset is disabled and no job exists (`docs/runtime/hermes.md`). The timers in
+  `host/` do the scheduling, so a new host gets them from `make timers`.
 - `/rincian` handled in `pre_gateway_dispatch` with `skip` plus direct Bot API send.
 
 ## Hermes pin

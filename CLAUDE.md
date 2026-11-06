@@ -11,6 +11,28 @@ subagents and any other AI working in this folder never read, list, search or pr
 even its file names hold private details. It moves only through `make mirror` and `make restore`, whose output holds
 counts and statuses only. `.claude/settings.json` denies Read and Edit there; Bash is covered by this rule alone.
 
+## Working rules
+
+The owner's standing rules. The security ones are in docs/SECURITY.md, section "What a session may see".
+
+- Language: every line the owner sees is in Bahasa Indonesia, right after a context compaction too; the owner is "kamu".
+  Code, configs, commits and docs are in English (docs/GMAIL_OAUTH.md is Indonesian). Bot SOULs and every message a bot
+  sends the owner are in Indonesian.
+- Authority: no deploy, no change on the VPS, no merge to `main` and no project decision without the owner's OK. An OK
+  covers the step it was given for, not the next. The owner's own money choices stay the owner's. Work on a branch; no
+  force-push.
+- The repo is the recipe: no manual change on the VPS without the same change in the repo, since what only the VPS knows
+  is lost at the next rebuild. `make capture` brings host config and versions back after one made there. Back up the
+  ledger before any data change (docs/calibration.md).
+- The copy: `make mirror` before a migration and after work worth keeping; the folder is only as fresh as its last run. A
+  move follows docs/REBUILD.md.
+- The address: the VPS address and login live only in `config/vps.env`. Read them from there, never type one from memory,
+  never repeat the address in visible text, and use `make -s` for targets that would echo it.
+- The bots: anything for the children is never proposed as a cut. Money is computed by deterministic code in integer
+  Rupiah; living money is read from the ledger. No proactive messages to the owner: never start `pa-gmail-token`,
+  `pa-ingest` or `pa-ingest-alert` by hand. At most one or two one-shot tests of a bot, never writing real data. The owner
+  sends `/new` after a SOUL or tool change. The Gmail allowlist changes only with the owner. No Opus or Fable for a bot.
+
 ## Project map: read it before doing anything
 
 The owner's standing rule (2026-10-31): every task starts from the map, not from a fresh scan.

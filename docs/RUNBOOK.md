@@ -1,22 +1,27 @@
-# Runbook (M1)
+# Runbook
 
-## First-time VPS setup (each step needs owner approval)
-1. `make preflight` - read-only: must show KVM (not openvz/lxc), Ubuntu 24.04, enough disk.
-2. Harden SSH (keys only, no root login), ufw default-deny inbound except 22, unattended-upgrades, Docker from Docker's apt repo, 4 GB swap, journald + Docker log caps.
-3. Create bots in BotFather. Usernames must end in `bot`. Disable "Allow Groups" for each (Bot Settings -> Allow Groups
+A new host, from the copy in `private/` or a backup in R2: `docs/REBUILD.md`.
+
+## First install, with no copy to restore
+Only when `private/` and R2 are both gone. Each step needs the owner's OK.
+1. `make bootstrap BOOTSTRAP_USER=<the provider's first login>`, `make preflight`, `make sync`.
+2. Create bots in BotFather. Usernames must end in `bot`. Disable "Allow Groups" for each (Bot Settings -> Allow Groups
    -> off). On 2026-11-01 getMe showed it still on for `@danoevault_agent` and `@danoecontrol_bot`; the Hermes configs
    drop groups (`allowed_chats: "none"`) and control drops them in code, so this closes it at Telegram as well.
-4. `make secret-set NAME=telegram_control_token` (prompted on the VPS, never in chat).
-5. R2 backup: create `/opt/personal-agent-secrets/restic.env` on the VPS (see `scripts/backup.sh`).
-6. `make deploy`, then `make status`.
+3. `make secrets-check` names each missing secret and how to make it (prompted on the VPS, never in chat). The first
+   `vault_tools_key` only: `make secret-gen NAME=vault_tools_key TYPE=key FIRST_INSTALL=1`.
+4. R2 backup: create `/opt/personal-agent-secrets/restic.env` on the VPS (see `scripts/backup.sh`).
+5. On the VPS, `cd /opt/personal-agent && sudo bash scripts/data-dirs.sh`. Then `make render-envs`, `make up`, `make front`,
+   `make applier`, `make timers`, `make verify`.
 
-## Host state (done 2026-10-27)
-KVM, Ubuntu 24.04.4, sshd drop-in `/etc/ssh/sshd_config.d/00-hardening.conf` (no root, no password), ufw deny-in/allow 22, unattended-upgrades, Docker 29.9.2 + Compose v5.6.1 from Docker apt repo, daemon log rotation 10m x3, journald 500M cap, swap ~6 GB, TZ Asia/Jakarta. `ubuntu` is NOT in the docker group; use `sudo docker`.
+## Host state
+`scripts/bootstrap-host.sh` makes it from `host/etc/` and `config/host-packages.txt`; `make capture` refreshes both from the live host, read-only there. KVM, Ubuntu 24.04, sshd drop-in `/etc/ssh/sshd_config.d/00-hardening.conf` (no root, no password), ufw deny-in/allow 22, unattended-upgrades, Docker and Compose from Docker's apt repo, daemon log rotation 10m x3, journald 500M cap, at least 4 GB of swap, TZ Asia/Jakarta. The login is NOT in the docker group; use `sudo docker`.
 
-## Gate checks for M1
+## Checks
 - Blocked-domain egress test: from the control container, `https://example.com` via squid-ctl must return 403.
 - `make prune-dry` keeps images of the current compose and `releases/previous.txt`; no volume is touched.
-- Restore test: `restic restore latest --target /tmp/restore-test` then inspect.
+- Backups: `pa-check` proves the R2 repository on the 1st of each month and `make snapshots` lists the snapshots.
+- `make verify` says whether the host is as the recipe says.
 
 ## Control bot (M3, live since 2026-11-01)
 - `@danoecontrol_bot`, owner only: `/status` (waiting, approved, rejected, invalid counts), `/usulan` (posts the waiting
@@ -26,7 +31,7 @@ KVM, Ubuntu 24.04.4, sshd drop-in `/etc/ssh/sshd_config.d/00-hardening.conf` (no
   applies it. Since control v3 (deployed 2026-11-01 23:22 WIB) control posts the diff it computed itself before every
   card.
 - Folders: `sudo bash scripts/data-dirs.sh` (also run by `make deploy`) before the first start.
-- Deploy only control: rsync as `make deploy` does, then
+- Deploy only control: `make sync`, then
   `sudo docker compose -f compose/docker-compose.yml --env-file config/stack.env up -d --build --wait control`.
 - Read its state without printing nonces: `sudo docker exec -i personal-agent-control-1 python -I -` with a short
   read-only script on `file:/state/control.db?mode=ro` (counts and statuses only).
@@ -53,7 +58,7 @@ on 1 Nov; 1 and 6 are the owner's):
   root-only, so use `sudo` with absolute paths (`cd` into it fails).
 - Memory: a fact front wants to keep waits for the owner in its own chat: `/memory pending` lists them,
   `/memory approve <id>` keeps one, `/memory reject <id>` drops it.
-- After a change to `services/hermes/front/`: rsync as `make deploy` does, then the step 5 command with `front` only.
+- After a change to `services/hermes/front/`: `make sync`, then the step 5 command with `front` only.
 - Stop: the same compose command with `--profile front stop front change-proposals`.
 
 ## Comms zone (M4, built 2026-11-02, never started)
@@ -84,7 +89,7 @@ builds, starts or stops comms. What is built are conservative defaults; the owne
 8. Send `/start` to the comms bot, then ask for this week's mail and tomorrow's events: a bank email must not come up.
 - Logs: `/opt/personal-agent-data/hermes-comms/logs/` (root-only, `sudo` with absolute paths, as front); the brokers log
   errors only (`sudo docker logs personal-agent-gmail-broker-1`, `personal-agent-calendar-broker-1`).
-- After a change to `services/hermes/comms/` or `services/comms-brokers/`: rsync as `make deploy` does, then the step 7
+- After a change to `services/hermes/comms/` or `services/comms-brokers/`: `make sync`, then the step 7
   command with the changed services; `/new` to the comms bot after a change to its `config.yaml` or `SOUL.md`.
 - Google tokens: in Testing mode both run out 7 days after their consent. Renew both with step 1's commands before
   then; each broker reads its token file again before every refresh, so no restart. A refused token reaches the owner
@@ -102,7 +107,7 @@ in `services/applier/systemd/`, not `host/`, so `make deploy` never enables them
   only with the owner's go-ahead):
   1. `make deploy`: it carries the applier, control with its diff and new mounts, and the data folders
      (`scripts/data-dirs.sh` creates `applier/` and `applier/outcome/`).
-  2. On the VPS: `cd /opt/personal-agent && sudo bash services/applier/install.sh`. The host check runs first, changes
+  2. `make applier` (on the VPS, `sudo bash services/applier/install.sh`). The host check runs first, changes
      nothing and stops at the first FAIL; then the install time is recorded, `pa-applier.path` and `pa-applier.timer`
      are enabled and one run skips the approvals from before (the test #1). A FAIL on `tests/test_zones.py` with
      `No module named 'yaml'`: `sudo apt install python3-yaml` (present on 2026-11-01: PyYAML 6.0.1).
@@ -113,7 +118,7 @@ in `services/applier/systemd/`, not `host/`, so `make deploy` never enables them
   `backup/` holds the old files (root only; do not print).
 - Deploying while it is installed: when `make deploy` refuses with "applied on the VPS but not in this checkout", run
   `make applied-pull` (one commit per applied change), push, then `make deploy` again. A deploy that stopped halfway
-  leaves the hold: `bash scripts/deploy-guard.sh end ubuntu@<vps>` (the applier ignores a hold older than 30 minutes).
+  leaves the hold: `bash scripts/deploy-guard.sh end <login>@<vps>`, both in `config/vps.env` (the applier ignores a hold older than 30 minutes).
 - "pengembaliannya juga gagal ... perlu manusia" (rollback_failed): `sudo cat
   /opt/personal-agent-data/applier/failed/<id>.json` lists each file's `sha256_before` and `sha256_after`; compare them
   with `sudo sha256sum /opt/personal-agent/<path>`. From `/opt/personal-agent`, with

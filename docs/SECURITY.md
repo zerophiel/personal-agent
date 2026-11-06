@@ -1,4 +1,4 @@
-# Security (M1)
+# Security
 
 Invariants are enforced in infrastructure, not prompts.
 - Egress: internal-only networks + per-zone Squid default-deny allowlists (`config/squid/`).
@@ -12,6 +12,28 @@ Invariants are enforced in infrastructure, not prompts.
   and a direct connection has no route (ENETUNREACH from every zone container), so neither DNS nor Telegram's
   DNS-over-HTTPS fallback is a way out; the read-only config mount holds (spike #1). Hermes does not bound hooks by its
   hook timeout; every blocking call in the plugins has its own.
+
+## What a session may see
+The rules for a person or an AI working on this repo. The runtime map's own sanitization is in `docs/runtime/README.md`.
+- **Never opened or printed**: `private/` (`CLAUDE.md`). On the VPS: a Hermes home's `.env` and `auth.json`, `/opt/personal-agent-secrets/*`
+  (listing the names is fine), `restic.env`, `pdf_passwords`, `/run/secrets/*`, image and document bytes, a gateway's
+  `/proc/<pid>/environ`, message content in `state.db` (counts, tool names, token usage and timestamps are fine), `applier/backup/`, and
+  the nonces in `control.db` (counts and statuses are fine).
+- **Checking without reading**: a secret with `sudo test -s` and its mtime, no hash. `front.env` by its names only. `docker compose
+  config` is never printed, since it interpolates secrets; `-q`, `--images`, `--profiles` and `--services` are fine. Logs only as normalized
+  templates. A `pa-check` run by `Result` and `ExecMainStatus`, never its journal, which can hold the repository URL.
+- **Secrets from the owner**: tokens with `make secret-set NAME=...`, prompted on the VPS, never through chat. Card numbers go only to the
+  vault bot, whose cardguard tokenizes them. Account and VA numbers go only through `/rekening <alias> <bank> <nomor>` or `/va`, which
+  delete the message and store the number encrypted, out of the model's sight. A full number pasted in chat anyway is neither stored nor
+  repeated. A command that exports a secret is never suggested with a session's `!` prefix, since its output lands in the conversation.
+- **Numbers**: the last 4 digits at most. Longer digit runs and grouped numbers are masked in anything shown.
+- **Names**: the names of people in transaction text are never repeated. The owner's legal name and the spouse's name stay out of visible
+  text, reports, memory and docs; `[owner]` stands for the first. Payee aliases hold the children's names, so visible text says "les dan
+  sekolah anak" and probes shorten them to `les-*` and `sekolah-*`. Statement file names hold the owner's name and account fragments: they
+  stay out of chat and git.
+- **Amounts**: never in `docs/runtime`, `graphify-out`, or code comments and docstrings; in chat and `docs/PROGRESS.md` only as far as needed.
+- **Subagents**: read only the files named in their prompt, and their prompt carries these rules.
+- **Tools**: `ops/privacy/mask.py` on any output that can hold the above, `ops/privacy/diff_scan.py` before every commit (`docs/LAPTOP.md`).
 
 ## Approvals (M3)
 No LLM can approve anything. The chain is model -> `change-proposals` -> inbox folder -> `control` -> the owner's tap.

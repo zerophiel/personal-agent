@@ -38,6 +38,13 @@ rsync -rlpt --ignore-existing private/knowledge/graphify-out/ graphify-out/
 - **`hermes-agent-v0.22.5`**: the engine's source and its graph, which `CLAUDE.md` queries. It is too big for git.
 - **`graphify-out/`**: what git does not hold, such as the extraction cache. `--ignore-existing` leaves the committed graph as it is.
 
+## Before a commit, and on any output
+
+- `git add <files> && git diff --cached -U0 | python3 -I ops/privacy/diff_scan.py` reports added lines that look like a secret or personal
+  data, masked. Hits known to be harmless: image digests in the compose files and Dockerfiles, the owner's Telegram ID in control's test, the
+  public test numbers in the cardguard, cardblock and runtime-map tests, and hashes and times in `graphify-out/` and `docs/runtime/`.
+- `<command> 2>&1 | python3 -I ops/privacy/mask.py` on any output that can hold a secret, a number, a name or the address.
+
 ## Keeping the copy safe
 
 The folder holds every key in plaintext, and the Windows side can read WSL files. Both of these are the owner's own decision:

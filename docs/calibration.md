@@ -6,7 +6,7 @@ vault-tools (tested, reconciled, audited); the model routes tools and relays res
 the model or the data drifted.
 
 ## 1. Read the state
-- `docs/PROGRESS.md` (open questions, last calibration), open PR, `git log`.
+- `docs/PROGRESS.md` (open questions, last calibration), `git log`.
 - Owner's rules that are not negotiable (also in `services/hermes/vault/SOUL.md`): anything for the children (school, lessons,
   Rockstar Gym = Gracia's gym) is never proposed as a cut; games are the owner's own spending; apps: ask per app; living money
   (`living_reserve`, the owner's choice: Rp 7.546.005 since 2026-10-28) is protected; the owner pays everything on the 1st and wants no proactive reminders.
@@ -33,11 +33,11 @@ the model or the data drifted.
 - `ops/calibration/dry_run.py` on a copy of the live ledger: every statement must re-read as `cocok`; read the audit and the
   plan for the coming 1st.
 
-## 5. Deploy (from the worktree root, committed and pushed)
+## 5. Deploy (from the repo root, committed and pushed)
 1. Ledger backup with the SQLite backup API (consistent under WAL), before vault-tools is rebuilt (it migrates the
    schema when it starts), e.g.
    `sudo docker exec personal-agent-vault-tools-1 python -c "import sqlite3; s=sqlite3.connect('/data/ledger.db'); d=sqlite3.connect('/data/ledger.db.bak-<name>'); s.backup(d)"`
-2. `make deploy`: the deploy guard, the rsync (it leaves `.git`, `.claude`, decrypted secrets, `graphify-out`,
+2. `make deploy`: the deploy guard, the rsync (it leaves `.git`, `.claude`, `private/`, decrypted secrets, `graphify-out`,
    `CLAUDE.md` and `__pycache__` here), timers, data folders and `up -d --build`. Never a bare `rsync --delete`: it
    would undo a front change the applier made on the owner's Setujui. When the guard refuses, `make applied-pull`,
    push, then deploy again.
