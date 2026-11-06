@@ -1,7 +1,7 @@
 """Hermes side of the runtime map: engine build, effective config against DEFAULT_CONFIG, the /opt/data layout, plugins,
 skills, pending approvals, cron, gateway platforms and listeners, MCP tools, state.db schema and activity, log templates.
 Runs inside the vault container with the engine's own interpreter (collect.py pipes it):
-  ssh ubuntu@43.157.242.194 'sudo docker exec -i personal-agent-vault-1 /opt/hermes/.venv/bin/python -' < ops/runtime-map/probe_hermes.py
+  ssh ubuntu@<vps> 'sudo docker exec -i personal-agent-vault-1 /opt/hermes/.venv/bin/python -' < ops/runtime-map/probe_hermes.py
 Read-only: databases are opened with mode=ro. Never opens .env, auth.json or uploaded files. Message text never leaves the
 container: only counts, tool names, token usage and timestamps do, and log lines are reduced to masked templates."""
 import ast

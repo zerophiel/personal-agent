@@ -34,9 +34,9 @@ bash scripts/gmail-renew.sh ~/client_secret_ingest.json
 - Token lama baru diganti setelah token baru lengkap (JSON dengan refresh token dan tanggal terbit) dan dibuat dengan client yang sama dengan yang tersimpan di VPS untuk token itu. Penggantiannya menulis ulang file yang sama (inode tetap, karena compose me-mount file ini ke ingest-gmail). Login yang gagal, kehabisan waktu, atau dibatalkan membiarkan token lama tetap dipakai, jadi file lama tidak perlu dihapus dulu.
 - Jangan menjalankan `scripts/gmail-auth.py` sendirian: tanpa pipa token akan tercetak di layar, dan skrip menolak bila keluarannya terminal.
 
-Simpan juga `client_secret_ingest.json` ke VPS dengan cara yang sama (`gmail_ingest_client`), karena ingest-gmail memakainya untuk menukar refresh token:
+Simpan juga `client_secret_ingest.json` ke VPS dengan cara yang sama (`gmail_ingest_client`), karena ingest-gmail memakainya untuk menukar refresh token. Ganti `<vps>` dengan alamat di `config/vps.env`:
 ```
-ssh ubuntu@43.157.242.194 'sudo bash -c "umask 077; cat > /opt/personal-agent-secrets/gmail_ingest_client && chmod 0444 /opt/personal-agent-secrets/gmail_ingest_client"' < ~/client_secret_ingest.json
+ssh ubuntu@<vps> 'sudo bash -c "umask 077; cat > /opt/personal-agent-secrets/gmail_ingest_client && chmod 0444 /opt/personal-agent-secrets/gmail_ingest_client"' < ~/client_secret_ingest.json
 ```
 
 ## 5. Label dan allowlist
@@ -65,9 +65,9 @@ Asisten email dan kalender (comms) butuh dua token Google lagi: `gmail_comms_tok
 1. Proyek Google Cloud baru `personal-agent-comms`, bukan proyek ingest, supaya scope dan pencabutannya terpisah. Di **APIs & Services -> Library**, aktifkan **Gmail API** dan **Google Calendar API**.
 2. Layar persetujuan seperti bagian 2: **External**, nama aplikasi `personal-agent-comms`, status **Testing**, dan email Gmail Anda sendiri sebagai test user. Scope: **`https://www.googleapis.com/auth/gmail.modify`** dan **`https://www.googleapis.com/auth/calendar.events.readonly`** saja.
 3. Client OAuth seperti bagian 3: **Desktop app**, nama `comms-desktop`. Simpan JSON-nya sebagai `~/client_secret_comms.json` di laptop. Jangan commit file ini.
-4. Simpan client itu ke VPS sebagai `google_comms_client`. Pakai alamat VPS yang sama seperti perintah `gmail_ingest_client` di bagian 4 sebagai pengganti `<VPS>`:
+4. Simpan client itu ke VPS sebagai `google_comms_client`. Ganti `<vps>` dengan alamat di `config/vps.env`:
    ```
-   ssh ubuntu@<VPS> 'sudo bash -c "umask 077; cat > /opt/personal-agent-secrets/google_comms_client && chmod 0444 /opt/personal-agent-secrets/google_comms_client"' < ~/client_secret_comms.json
+   ssh ubuntu@<vps> 'sudo bash -c "umask 077; cat > /opt/personal-agent-secrets/google_comms_client && chmod 0444 /opt/personal-agent-secrets/google_comms_client"' < ~/client_secret_comms.json
    ```
 5. Dua persetujuan, satu per token, dari folder repo:
    ```

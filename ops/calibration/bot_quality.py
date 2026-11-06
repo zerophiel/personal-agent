@@ -1,6 +1,6 @@
 """Bot answer quality from the owner's real Telegram sessions: tool calls, tool errors, and replies that apologise or
 correct themselves (each one is a calibration lead: find the root cause, fix code or SOUL with a regression test).
-Run: ssh ubuntu@43.157.242.194 'sudo docker exec -i personal-agent-vault-1 python3 -' < ops/calibration/bot_quality.py
+Run: ssh ubuntu@<vps> 'sudo docker exec -i personal-agent-vault-1 python3 -' < ops/calibration/bot_quality.py
 Read-only. Long digit runs are masked in the excerpts."""
 import json
 import re

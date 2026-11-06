@@ -8,7 +8,7 @@
 set -euo pipefail
 D=ops/datafix/2026-11-01-deploy2
 IDLE=ops/datafix/2026-10-31-pace-fix/idle_check.py
-H=ubuntu@43.157.242.194
+H='ubuntu@<vps>'   # history, ran once: ops/datafix/README.md
 COMPOSE="sudo docker compose -f compose/docker-compose.yml --env-file config/stack.env"
 mask() { sed -E 's/[0-9]{9,}/[angka]/g'; }
 idle() { ssh -o BatchMode=yes "$H" 'sudo docker exec -i personal-agent-vault-1 /opt/hermes/.venv/bin/python -I -' < "$IDLE" | mask; }

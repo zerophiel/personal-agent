@@ -9,8 +9,9 @@ The repo files graphify has no parser for (Makefile, Dockerfiles, squid, systemd
 
 ```makefile
 SHELL := /bin/bash
-VPS_HOST ?= 43.157.242.194
-VPS_USER ?= ubuntu
+# config/vps.env is the one place the address lives; make <target> VPS_HOST=... VPS_USER=... reaches another host
+VPS_HOST ?= $(shell sed -n 's/^VPS_HOST=//p' config/vps.env)
+VPS_USER ?= $(shell sed -n 's/^VPS_USER=//p' config/vps.env)
 REMOTE_DIR ?= /opt/personal-agent
 SSH := ssh $(VPS_USER)@$(VPS_HOST)
 COMPOSE := sudo docker compose -f compose/docker-compose.yml --env-file config/stack.env

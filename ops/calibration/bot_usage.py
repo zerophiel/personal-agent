@@ -1,6 +1,6 @@
 """Bot cost and usage per WIB day and source (telegram = the owner, oneshot = calibration tests), priced at list rates.
 Hermes reports cost_status=unknown for claude-sonnet-5-5, so this is the only spend view besides the Console limit.
-Run: ssh ubuntu@43.157.242.194 'sudo docker exec -i personal-agent-vault-1 python3 -' < ops/calibration/bot_usage.py
+Run: ssh ubuntu@<vps> 'sudo docker exec -i personal-agent-vault-1 python3 -' < ops/calibration/bot_usage.py
 Read-only (state.db opened with mode=ro). Prints token counts only, never message text."""
 import sqlite3
 from datetime import datetime, timedelta, timezone

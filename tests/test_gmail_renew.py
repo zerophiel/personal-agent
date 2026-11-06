@@ -30,7 +30,7 @@ esac
 """
 # Stands in for ssh to the VPS: runs the remote command string with bash here, without sudo, and leaves a mark.
 FAKE_SSH = """#!/bin/bash
-touch "$MARK"
+printf '%s' "$1" > "$MARK"
 cmd="$2"
 exec bash -c "${cmd#sudo -n }"
 """
@@ -78,6 +78,14 @@ class Renew(unittest.TestCase):
         self.assertIn("Token Gmail di VPS diperbarui", r.stderr)
         self.assertEqual(self.auth_args(), [self.client, "gmail_ingest_token"])   # the default is the ingest token
         self.assertNotIn("new-test-value", r.stdout + r.stderr)     # the token is never printed
+
+    def test_the_address_comes_from_the_one_address_file(self):
+        del self.env["GMAIL_RENEW_VPS"]
+        self.assertEqual(self.run_renew("ok").returncode, 0)
+        with open(os.path.join(ROOT, "config", "vps.env"), encoding="utf-8") as f:
+            vps = dict(line.strip().split("=", 1) for line in f if "=" in line and not line.startswith("#"))
+        with open(self.mark, encoding="utf-8") as f:
+            self.assertEqual(f.read(), f"{vps['VPS_USER']}@{vps['VPS_HOST']}")
 
     def test_cancelled_login_keeps_old_token(self):
         r = self.run_renew("cancel")

@@ -12,7 +12,9 @@
 #        bash scripts/gmail-renew.sh ~/client_secret_comms.json calendar_comms_token   (comms: Calendar)
 set -euo pipefail
 
-VPS=${GMAIL_RENEW_VPS:-ubuntu@43.157.242.194}
+HERE=$(cd "$(dirname "$0")" && pwd)
+ADDRESS=$HERE/../config/vps.env
+VPS=${GMAIL_RENEW_VPS:-$(sed -n 's/^VPS_USER=//p' "$ADDRESS")@$(sed -n 's/^VPS_HOST=//p' "$ADDRESS")}
 CLIENT=${1:-$HOME/client_secret_ingest.json}
 NAME=${2:-gmail_ingest_token}
 case "$NAME" in   # the tokens gmail-auth.py has a scope for (no other secret), each with the client that refreshes it
@@ -24,7 +26,6 @@ esac
 TOKEN=${GMAIL_RENEW_DIR:-/opt/personal-agent-secrets}/$NAME
 OWN=${GMAIL_RENEW_DIR:-/opt/personal-agent-secrets}/$OWN
 PY=${GMAIL_PY:-$HOME/.venv-gmail/bin/python}
-HERE=$(cd "$(dirname "$0")" && pwd)
 
 [ -s "$CLIENT" ] || { echo "File client OAuth tidak ada: $CLIENT (docs/GMAIL_OAUTH.md langkah 3)." >&2; exit 2; }
 "$PY" -c "import google_auth_oauthlib" 2>/dev/null || {

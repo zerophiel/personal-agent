@@ -1,6 +1,6 @@
 """vault-tools side of the runtime map: the live ledger schema (DDL from sqlite_master), what is recorded (entity catalog,
 coverage, /usulan, plans, change_log) and the /data and /ingest layout. Runs inside the vault-tools container:
-  ssh ubuntu@43.157.242.194 'sudo docker exec -i personal-agent-vault-tools-1 python -' < ops/runtime-map/probe_vault_tools.py
+  ssh ubuntu@<vps> 'sudo docker exec -i personal-agent-vault-tools-1 python -' < ops/runtime-map/probe_vault_tools.py
 Read-only (ledger opened with mode=ro). No money column leaves the container: the entity catalog is a whitelist of
 non-money columns, coverage is counts and dates, free text (/usulan) has amounts masked. Secrets: names only."""
 import json

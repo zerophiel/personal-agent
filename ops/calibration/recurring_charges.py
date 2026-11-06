@@ -1,6 +1,6 @@
 """Recurring card charges per statement month (subscriptions, apps, games, instalment-like lines) next to the recorded
 subscriptions, to confirm with the owner what is recurring, ended, or one-off.
-Run: ssh ubuntu@43.157.242.194 'sudo docker exec -i personal-agent-vault-tools-1 python -' < ops/calibration/recurring_charges.py
+Run: ssh ubuntu@<vps> 'sudo docker exec -i personal-agent-vault-tools-1 python -' < ops/calibration/recurring_charges.py
 Read-only."""
 import re
 import sqlite3

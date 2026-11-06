@@ -7,6 +7,7 @@ Nothing is written on the VPS. No secret, balance or message text reaches the do
 dates and masked templates only, and every string is scrubbed again here before it is rendered."""
 import argparse
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -16,7 +17,6 @@ from collections import Counter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
-HOST = "ubuntu@43.157.242.194"
 HERMES_SRC = os.path.expanduser("~/.graphify/repos/NousResearch/hermes-agent-v0.22.5")   # local engine copy (graph + grep)
 PROBES = {
     "host": ("sudo python3 -", "probe_host.py"),
@@ -32,6 +32,7 @@ TOKEN = re.compile(r"\b\d{8,10}:[A-Za-z0-9_-]{30,}|sk-ant-[A-Za-z0-9_-]+|\bntn_[
 OWNER = re.compile(r"(?i)\bdanuarta(?:\s+wiratama)?\b|\bwiratama\b")   # the owner's legal name (statement holder name)
 MONEY = re.compile(r"(?i:rp)\.?\s*\d(?:[\d.,]*\d)?(?:\s*(?i:jt|juta|rb|ribu|k)\b)?|\b\d{1,3}(?:\.\d{3})+\b(?!\.\d)")
 DIGEST = re.compile(r"(?=[0-9a-f]*[a-f])(?:[0-9a-f]{40}|[0-9a-f]{64})")   # a whole sha1/sha256 value (file hashes for drift)
+IPV4 = re.compile(r"(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?![\d.])")
 PURPOSE = {   # /opt/data inside the vault container (HERMES_HOME)
     "config.yaml": "our Hermes profile; read-only bind mount of services/hermes/vault/config.yaml",
     "SOUL.md": "the bot's persona and rules; read-only bind mount of services/hermes/vault/SOUL.md",
@@ -128,12 +129,28 @@ def mixed(word):
     return any(c.isdigit() for c in word) and any(c.isupper() for c in word) and any(c.islower() for c in word)
 
 
+def vps_address():
+    """VPS_USER@VPS_HOST from config/vps.env, the one place the address lives."""
+    with open(os.path.join(ROOT, "config", "vps.env"), encoding="utf-8") as fh:
+        vps = dict(line.strip().split("=", 1) for line in fh if "=" in line and not line.startswith("#"))
+    return f"{vps['VPS_USER']}@{vps['VPS_HOST']}"
+
+
+def no_public_ip(match):
+    """The address of the VPS, and any other public one (a login's source), stays out of the map; the private ones explain it."""
+    try:
+        return "[ip]" if ipaddress.ip_address(match.group()).is_global else match.group()
+    except ValueError:   # 999.1.2.3: looks like one, is not
+        return match.group()
+
+
 def scrub(s):
     if DIGEST.fullmatch(s):   # a hash is compared, not shown: masking its digit runs made a quarter of all hashes "differ"
         return s
     s = TOKEN.sub("[token]", s)
     s = re.sub(r"[A-Za-z0-9_\-]{20,}", lambda m: "[blob]" if mixed(m.group()) else m.group(), s)
-    s = re.sub(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,}\b", "[email]", s)   # not user@<ip>: the ssh target stays readable
+    s = re.sub(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,}\b", "[email]", s)
+    s = IPV4.sub(no_public_ip, s)
     s = OWNER.sub("[owner]", s)
     s = re.sub(r"\b\d{3,4}(?:[ -]\d{3,4}){2,}\b", "[nomor]", s)
     return re.sub(r"\d{9,}", "[angka]", s)
@@ -313,7 +330,7 @@ the bot behaves unexpectedly. Then refresh the project graph (`make graph`, and 
 
 def render_host(h):
     o, u, s = h["os"], h["usage"], h["security"]
-    out = [header("Host (VPS)", "The Tencent Cloud VPS that runs the stack (`ubuntu@43.157.242.194`).", h)]
+    out = [header("Host (VPS)", "The VPS that runs the stack (`<vps>`, config/vps.env).", h)]
     out.append("## Machine\n\n" + table(["item", "value"], [
         ("OS", o["pretty"]), ("kernel", o["kernel"]), ("CPUs", o["cpus"]), ("memory (MB)", o["mem_total_mb"]),
         ("timezone", o["timezone"]), ("docker", o["docker"]), ("compose", o["compose"]),
@@ -330,7 +347,7 @@ def render_host(h):
     out.append("## SSH\n\n" + table(["sshd -T key", "value"], sorted(s["sshd"].items())) +
                "\n\nauthorized_keys entries: " + cell(s["ssh_authorized_keys"]))
     out.append("## Unattended upgrades\n\n" + table(["key", "value"], sorted(s["auto_upgrades"].items())))
-    out.append("## Cron (outside systemd)\n\nRoot crontab (Tencent Cloud agents, not ours):\n\n" + fence("\n".join(s["root_crontab"]) or "(empty)")
+    out.append("## Cron (outside systemd)\n\nRoot crontab (the provider's agents, not ours):\n\n" + fence("\n".join(s["root_crontab"]) or "(empty)")
                + "\n\n/etc/cron.d: " + cell(s["cron_d"]) + ". The stack's own schedules are systemd timers (timers.md).")
     out.append("## /opt/personal-agent-data\n\nPersistent state, root-owned. Backed up by restic (pa-backup).\n\n" + table(
         ["entry", "type", "mode", "owner", "bytes"], [(r["name"], r["type"], r["mode"], r["owner"], r["bytes"]) for r in h["opt"]["data"]]))
@@ -665,7 +682,7 @@ def render_state(h, he, vt, drift_md, local):
 
 
 def render_infra():
-    files = ["Makefile", ".gitignore", "config/stack.env"] + sorted(
+    files = ["Makefile", ".gitignore", "config/stack.env", "config/vps.env"] + sorted(
         os.path.relpath(os.path.join(folder, f), ROOT) for d in ("config/squid", "host")   # host/etc: make capture's host config
         for folder, _, names in os.walk(os.path.join(ROOT, d)) for f in names) + sorted(
         f"services/{s}/Dockerfile" for s in os.listdir(os.path.join(ROOT, "services")) if os.path.exists(os.path.join(ROOT, "services", s, "Dockerfile")))
@@ -705,7 +722,7 @@ def run_probe(host, name):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--host", default=HOST)
+    ap.add_argument("--host", default=vps_address())
     ap.add_argument("--out", default=os.path.join(ROOT, "docs", "runtime"))
     ap.add_argument("--raw", help="also save the scrubbed probe JSON here (outside the repo)")
     ap.add_argument("--from-raw", help="render from JSON saved by --raw instead of probing")

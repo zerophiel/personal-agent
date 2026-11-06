@@ -1,6 +1,6 @@
 """Host side of the runtime map: OS, listening ports, firewall, containers, networks, volumes, pa-* timers, squid zones,
 the deployed tree. Runs as root on the VPS (collect.py pipes it):
-  ssh ubuntu@43.157.242.194 'sudo python3 -' < ops/runtime-map/probe_host.py
+  ssh ubuntu@<vps> 'sudo python3 -' < ops/runtime-map/probe_host.py
 Read-only. Never opens a secret: env values only for SAFE_ENV keys, secret files by name and mode only, no `docker compose
 config` (it interpolates secrets into the output). Prints one JSON object; free text is reduced to masked templates."""
 import hashlib

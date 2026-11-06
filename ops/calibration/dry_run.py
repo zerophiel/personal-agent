@@ -1,11 +1,11 @@
 """Dry run of NEW vault-tools code on a COPY of the live ledger: migration, re-reading every statement's lines, the audit,
 the payday plan for the coming 1st and the pot projection. The live ledger is never written.
 Run (from the worktree root):
-  ssh ubuntu@43.157.242.194 'mkdir -p dry-vt' && rsync -az --delete services/vault-tools/vault_tools/ ubuntu@43.157.242.194:dry-vt/vault_tools/
-  ssh ubuntu@43.157.242.194 'sudo docker exec personal-agent-vault-tools-1 rm -rf /tmp/dry && sudo docker exec personal-agent-vault-tools-1 mkdir -p /tmp/dry \
+  ssh ubuntu@<vps> 'mkdir -p dry-vt' && rsync -az --delete services/vault-tools/vault_tools/ ubuntu@<vps>:dry-vt/vault_tools/
+  ssh ubuntu@<vps> 'sudo docker exec personal-agent-vault-tools-1 rm -rf /tmp/dry && sudo docker exec personal-agent-vault-tools-1 mkdir -p /tmp/dry \
     && tar -C dry-vt -cf - vault_tools | sudo docker exec -i personal-agent-vault-tools-1 tar -C /tmp/dry -xf - \
     && sudo docker exec -i personal-agent-vault-tools-1 python -' < ops/calibration/dry_run.py
-  then: ssh ubuntu@43.157.242.194 'rm -rf dry-vt'   (docker cp cannot write into the container's /tmp; tar can)
+  then: ssh ubuntu@<vps> 'rm -rf dry-vt'   (docker cp cannot write into the container's /tmp; tar can)
 Every statement must come back 'cocok' before a deploy."""
 import sqlite3
 import sys

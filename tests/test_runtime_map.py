@@ -37,15 +37,30 @@ class Infra(unittest.TestCase):
     def test_the_host_config_in_a_subfolder_is_on_the_map(self):
         # make capture puts it in host/etc/; an open() of the folder itself used to crash the whole collector
         with tempfile.TemporaryDirectory() as root:
-            for rel in ("Makefile", ".gitignore", "config/stack.env", "config/squid/a.conf", "host/pa-x.timer",
+            for rel in ("Makefile", ".gitignore", "config/stack.env", "config/vps.env", "config/squid/a.conf", "host/pa-x.timer",
                         "host/etc/docker/daemon.json", "services/s/Dockerfile"):
                 os.makedirs(os.path.dirname(os.path.join(root, rel)) or root, exist_ok=True)
                 with open(os.path.join(root, rel), "w", encoding="utf-8") as f:
                     f.write("x\n")
             with mock.patch.object(rm, "ROOT", root):
                 text = rm.render_infra()
-        for rel in ("config/squid/a.conf", "host/pa-x.timer", "host/etc/docker/daemon.json", "services/s/Dockerfile"):
+        for rel in ("config/vps.env", "config/squid/a.conf", "host/pa-x.timer", "host/etc/docker/daemon.json", "services/s/Dockerfile"):
             self.assertIn(f"## {rel}\n", text)
+
+
+class Address(unittest.TestCase):
+    def test_a_public_address_never_reaches_the_map(self):
+        kept = "lokal 127.0.0.1 10.0.0.2 172.18.0.2 169.254.169.254, bukan alamat 999.1.2.3"
+        one, other = ".".join("8" * 4), ".".join("1" * 4)   # in pieces: tests/test_address.py allows no public address here
+        self.assertEqual(rm.scrub(f"ssh ubuntu@{one} dari {other}, {kept}"), f"ssh ubuntu@[ip] dari [ip], {kept}")
+
+    def test_the_collector_takes_its_host_from_the_one_address_file(self):
+        with tempfile.TemporaryDirectory() as root:
+            os.mkdir(os.path.join(root, "config"))
+            with open(os.path.join(root, "config", "vps.env"), "w", encoding="utf-8") as f:
+                f.write("# catatan=abaikan\nVPS_HOST=alamat\nVPS_USER=pemilik\n")
+            with mock.patch.object(rm, "ROOT", root):
+                self.assertEqual(rm.vps_address(), "pemilik@alamat")
 
 
 class Scrub(unittest.TestCase):

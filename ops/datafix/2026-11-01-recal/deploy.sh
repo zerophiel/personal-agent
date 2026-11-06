@@ -7,7 +7,7 @@
 set -euo pipefail
 D=ops/datafix/2026-11-01-recal
 IDLE=ops/datafix/2026-10-31-pace-fix/idle_check.py
-H=ubuntu@43.157.242.194
+H='ubuntu@<vps>'   # history, ran once: ops/datafix/README.md
 COMPOSE="sudo docker compose -f compose/docker-compose.yml --env-file config/stack.env"
 mask() { sed -E 's/[0-9]{9,}/[angka]/g'; }
 cd "$(dirname "$0")/../../.."
