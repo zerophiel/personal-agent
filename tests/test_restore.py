@@ -29,6 +29,7 @@ PIECES = ("scripts/restore.sh", "scripts/restore-facts.py", "scripts/apply-owner
 FAKES = {
     "setpriv": '#!/bin/bash\nshift 5\nexec "$@"\n',
     "restic": r"""#!/bin/bash
+[ "$1" != --retry-lock ] || shift 2
 case "$1" in
   snapshots)
     [ -z "${RESTIC_FAIL:-}" ] || { echo "Fatal: s3:https://rahasia.example/bucket" >&2; exit 1; }

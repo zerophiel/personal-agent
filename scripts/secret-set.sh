@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prompt for a secret value on the VPS (not echoed, never in chat) and store it root-owned 0400.
+# Prompt for a secret value on the VPS (not echoed, never in chat) and store it root-owned 0444 in the 0700 folder.
 set -euo pipefail
 name="${1:?secret name required}"
 [[ "$name" =~ ^[a-z0-9_]+$ ]] || { echo "invalid name"; exit 1; }

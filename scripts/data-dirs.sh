@@ -1,17 +1,12 @@
 #!/usr/bin/env bash
-# Run with sudo on the VPS before the services that write them first start (make deploy runs it): each folder owned by
-# the uid its writer runs as. Safe to run again; never deletes or empties anything.
-#   control-state    control (uid 10001) only: control.db, decided/, approved/
-#   proposals-inbox  change-proposals writes, control reads and empties (both uid 10001)
-#   hermes-front     the front Hermes data dir (the image's uid 10000, as hermes-vault)
-#   hermes-comms     the comms Hermes data dir (M4, uid 10000); empty until the comms zone is started
-#   applier          the applier (root, services/applier) only; applier/outcome is mounted read-only into control. Both
-#                    exist before the applier is installed; until then nothing writes there
+# Run with sudo on the VPS before the services that write them first start (make deploy and make up run it): the folders of
+# config/data.manifest, each owned by the uid its writer runs as. Safe to run again; never deletes or empties anything.
 set -euo pipefail
-D=/opt/personal-agent-data
-install -d -o 10001 -g 10001 -m 0700 "$D/control-state" "$D/proposals-inbox"
-install -d -o 10000 -g 10000 -m 0700 "$D/hermes-front" "$D/hermes-comms"
-install -d -o 0 -g 0 -m 0700 "$D/applier"
-install -d -o 0 -g 0 -m 0755 "$D/applier/outcome"
-stat -c '%n %u:%g %a' "$D/control-state" "$D/proposals-inbox" "$D/hermes-front" "$D/hermes-comms" "$D/applier" \
-  "$D/applier/outcome"
+D=${PA_DATA_DIR:-/opt/personal-agent-data}
+here=$(cd "$(dirname "$0")/.." && pwd)
+if [ ! -d "$D" ]; then install -d -o 0 -g 0 -m 0700 "$D"; fi   # as the live host: root's alone, each service mounts its own folder
+while read -r path uid gid mode; do
+  case "$path" in ''|'#'*) continue ;; esac
+  install -d -o "$uid" -g "$gid" -m "$mode" "$D/$path"
+  stat -c '%n %u:%g %a' "$D/$path"
+done < "$here/config/data.manifest"

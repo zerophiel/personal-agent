@@ -659,7 +659,7 @@ class Target(unittest.TestCase):
     def test_make_mirror_is_a_target(self):
         with open(os.path.join(ROOT, "Makefile"), encoding="utf-8") as f:
             text = f.read()
-        self.assertIn("\nmirror:\n\tbash scripts/mirror.sh $(VPS_USER)@$(VPS_HOST)\n", text)
+        self.assertIn("\nmirror:\n\tMIRROR_PY=$${MIRROR_PY:-$(PY)} bash scripts/mirror.sh $(VPS_USER)@$(VPS_HOST)\n", text)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,23 @@
+# Every folder under /opt/personal-agent-data a service needs before it starts: path, uid, gid, mode. scripts/data-dirs.sh
+# makes them, each owned by the uid its writer runs as, and tests/test_deploy.py holds this list to the bind mounts of both
+# compose files. A folder comes before the folders inside it.
+#   vault-tools      vault-tools only: ledger.db and its backups
+#   ingest           the statement drop folder: ingest-gmail writes, vault-tools (another uid) reads it read-only
+#   ingest-state     ingest-gmail's ingest.db
+#   hermes-vault     the vault Hermes data dir (the image's uid 10000)
+#   control-state    control only: control.db, decided/, approved/
+#   proposals-inbox  change-proposals writes, control reads and empties (both uid 10001)
+#   hermes-front     the front Hermes data dir (the image's uid 10000, as hermes-vault)
+#   hermes-comms     the comms Hermes data dir (M4, uid 10000); empty until the comms zone is started
+#   applier          the applier (root, services/applier) only; applier/outcome is mounted read-only into control. Both
+#                    exist before the applier is installed; until then nothing writes there
+vault-tools      10001 10001 0700
+ingest           10002 10002 0755
+ingest-state     10002 10002 0755
+hermes-vault     10000 10000 0700
+control-state    10001 10001 0700
+proposals-inbox  10001 10001 0700
+hermes-front     10000 10000 0700
+hermes-comms     10000 10000 0700
+applier          0     0     0700
+applier/outcome  0     0     0755
