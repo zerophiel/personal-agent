@@ -129,8 +129,9 @@ in `services/applier/systemd/`, not `host/`, so `make deploy` never enables them
   `sudo systemctl daemon-reload`, then `sudo rm /opt/personal-agent-data/applier/outcome/applier.json`: control says
   again that nothing is applied automatically. The records stay.
 
-## Restore
-Always restore to a scratch directory, verify the ledger, then copy deliberately.
+## Restore and a new host
+`docs/REBUILD.md` holds the whole way: the local copy (`make mirror`, `make restore`), R2 (`make snapshots`,
+`make restore-restic`) and the check at the end (`make verify`).
 
 ## Secrets rotation
-Telegram: BotFather `/revoke`, then `make secret-set`.
+Telegram: BotFather `/revoke`, then `make secret-set`. R2: `docs/REBUILD.md`, section Rotating the R2 key.

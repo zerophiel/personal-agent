@@ -95,6 +95,10 @@ class Targets(unittest.TestCase):
         self.assertIn("sudo bash scripts/install-timers.sh", steps("timers")[0])
         self.assertIn("sudo bash services/applier/install.sh", steps("applier")[0])
 
+    def test_verify_reads_the_host_and_takes_the_snapshot_flag(self):
+        self.assertEqual(steps("verify")[0].strip(), "python3 -I scripts/verify.py pemilik@alamat")
+        self.assertEqual(steps("verify", R2="1")[0].strip(), "python3 -I scripts/verify.py pemilik@alamat --r2")
+
     def test_docker_and_the_journal_need_sudo_on_the_vps(self):
         # the login account is not in the docker group: `make status` stopped at its last command
         for target in ("status", "logs", "backup", "up", "deploy", "front", "prune", "prune-dry"):

@@ -9,7 +9,7 @@ COMPOSE := sudo docker compose -f compose/docker-compose.yml --env-file config/s
 VENV ?= $(HOME)/.venv-personal-agent
 PY ?= $(firstword $(wildcard $(VENV)/bin/python) python3)
 
-.PHONY: help bootstrap preflight deploy sync up front render-envs secrets-check timers applier venv applied-pull status logs secret-set secret-gen pdf-passwords prune prune-dry backup restore snapshots restore-restic mirror capture test runtime-map graph
+.PHONY: help bootstrap preflight deploy sync up front render-envs secrets-check timers applier venv applied-pull verify status logs secret-set secret-gen pdf-passwords prune prune-dry backup restore snapshots restore-restic mirror capture test runtime-map graph
 
 help:
 	@grep -E '^[a-z-]+:' Makefile | cut -d: -f1 | tr '\n' ' '; echo
@@ -73,6 +73,11 @@ venv:
 # The front changes the applier made on the VPS on the owner's tap (services/applier), as one commit each in this checkout
 applied-pull:
 	python3 -I scripts/applied-pull.py $(VPS_USER)@$(VPS_HOST)
+
+# Is the bot up as the recipe says: containers, the ledger against private/'s copy, exact packages, timers. Read-only there,
+# counts and statuses only. R2=1 after make restore-restic, where a snapshot may rightly differ from the copy.
+verify:
+	python3 -I scripts/verify.py $(VPS_USER)@$(VPS_HOST) $(if $(R2),--r2)
 
 status:
 	$(SSH) 'cd $(REMOTE_DIR) && $(COMPOSE) ps && df -h / && free -m && sudo docker system df'
