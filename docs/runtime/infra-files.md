@@ -15,31 +15,87 @@ VPS_USER ?= $(shell sed -n 's/^VPS_USER=//p' config/vps.env)
 REMOTE_DIR ?= /opt/personal-agent
 SSH := ssh $(VPS_USER)@$(VPS_HOST)
 COMPOSE := sudo docker compose -f compose/docker-compose.yml --env-file config/stack.env
+# make venv's Python when it exists (outside the repo, so it is never synced), else the system's
+VENV ?= $(HOME)/.venv-personal-agent
+PY ?= $(firstword $(wildcard $(VENV)/bin/python) python3)
 
-.PHONY: help preflight deploy applied-pull status logs secret-set secret-gen pdf-passwords prune prune-dry backup restore test runtime-map graph
+.PHONY: help bootstrap preflight deploy sync images up front render-envs secrets-check timers applier venv applied-pull verify status logs secret-set secret-gen pdf-passwords prune prune-dry backup restore snapshots restore-restic mirror capture test runtime-map graph
 
 help:
 	@grep -E '^[a-z-]+:' Makefile | cut -d: -f1 | tr '\n' ' '; echo
 
-# Read-only VPS checks (KVM, Docker, disk, steal). Safe to run.
+# A new, empty Ubuntu 24.04 host, for the login of config/vps.env: packages, Docker, swap, the account, then ssh and the firewall.
+# BOOTSTRAP_USER is the provider's first login, which may ask for a password: a step for the owner's terminal (docs/REBUILD.md).
+# Refuses a host with the project's containers or a ledger.
+bootstrap:
+	bash scripts/bootstrap.sh "$(BOOTSTRAP_USER)" $(VPS_USER)@$(VPS_HOST)
+
+# Read-only checks of a host after make bootstrap: machine, Docker, ssh, firewall, the way out. Exit 0 only if all pass. Safe to run.
 preflight:
 	$(SSH) 'bash -s' < scripts/preflight.sh
 
-# Sync repo to VPS and apply compose + host timers. Plaintext secrets, the local project map and the Python caches of
-# local test runs are never synced. The guard holds the applier meanwhile and refuses while it has applied a change
-# this checkout lacks (make applied-pull).
+# Sync repo to VPS and apply compose + host timers. Plaintext secrets, private/ (make mirror's copy of the data and
+# secrets), the local project map and the Python caches of local test runs are never synced. The guard holds the
+# applier meanwhile and refuses while it has applied a change this checkout lacks (make applied-pull).
 deploy:
 	bash scripts/deploy-guard.sh start $(VPS_USER)@$(VPS_HOST)
-	rsync -az --delete --exclude .git --exclude .claude --exclude 'secrets/*.dec*' --exclude graphify-out --exclude CLAUDE.md --exclude __pycache__ ./ $(VPS_USER)@$(VPS_HOST):$(REMOTE_DIR)/
+	rsync -az --delete --exclude .git --exclude .claude --exclude 'secrets/*.dec*' --exclude graphify-out --exclude CLAUDE.md --exclude __pycache__ --exclude /private/ ./ $(VPS_USER)@$(VPS_HOST):$(REMOTE_DIR)/
 	$(SSH) 'cd $(REMOTE_DIR) && sudo bash scripts/install-timers.sh && sudo bash scripts/data-dirs.sh && $(COMPOSE) up -d --build'
 	bash scripts/deploy-guard.sh end $(VPS_USER)@$(VPS_HOST)
+
+# The pieces of make deploy, one at a time, for a new host (docs/REBUILD.md) or a change that should restart nothing.
+# Only the copy: what it carries takes effect when a service restarts or a timer next runs.
+sync:
+	bash scripts/deploy-guard.sh start $(VPS_USER)@$(VPS_HOST)
+	rsync -az --delete --exclude .git --exclude .claude --exclude 'secrets/*.dec*' --exclude graphify-out --exclude CLAUDE.md --exclude __pycache__ --exclude /private/ ./ $(VPS_USER)@$(VPS_HOST):$(REMOTE_DIR)/
+	bash scripts/deploy-guard.sh end $(VPS_USER)@$(VPS_HOST)
+
+# The always-on services, and the image of the morning job, so that a failed build shows now and not at 06:00
+up:
+	bash scripts/deploy-guard.sh start $(VPS_USER)@$(VPS_HOST)
+	$(SSH) 'cd $(REMOTE_DIR) && sudo bash scripts/data-dirs.sh && $(COMPOSE) up -d --build && $(COMPOSE) --profile jobs build ingest-gmail'
+	bash scripts/deploy-guard.sh end $(VPS_USER)@$(VPS_HOST)
+
+# The front zone, which make deploy and make up never start or stop (docs/RUNBOOK.md, Front zone)
+front:
+	$(SSH) 'cd $(REMOTE_DIR) && $(COMPOSE) --profile front up -d --build --wait change-proposals front'
+
+# Every image on the host and nothing started, with no env file or secret needed: a bad pin or a refused pull shows while the old bot
+# still runs (docs/REBUILD.md, step 3).
+images:
+	$(SSH) 'cd $(REMOTE_DIR) && $(COMPOSE) --profile front --profile jobs pull --ignore-buildable && $(COMPOSE) --profile front --profile jobs build'
+
+# The env files of vault and front from the secret files; the comms zone is not started, so its file is not made
+render-envs:
+	$(SSH) 'cd $(REMOTE_DIR) && sudo bash scripts/render-vault-env.sh && sudo bash scripts/render-front-env.sh'
+
+# Is every secret there with its mode, and how to make one that is not (names only)
+secrets-check:
+	$(SSH) 'cd $(REMOTE_DIR) && sudo bash scripts/secrets-check.sh'
+
+# Only the host timers; they start the morning jobs and the backups, so on a new host they come last
+timers:
+	$(SSH) 'cd $(REMOTE_DIR) && sudo bash scripts/install-timers.sh'
+
+# The applier (services/applier/install.sh): its host check needs front, squid-front and Telegram connected
+applier:
+	$(SSH) 'cd $(REMOTE_DIR) && sudo bash services/applier/install.sh'
+
+# The Python of make test and make mirror, with the exact packages of vault-tools
+venv:
+	bash scripts/make-venv.sh $(VENV)
 
 # The front changes the applier made on the VPS on the owner's tap (services/applier), as one commit each in this checkout
 applied-pull:
 	python3 -I scripts/applied-pull.py $(VPS_USER)@$(VPS_HOST)
 
+# Is the bot up as the recipe says: containers, the ledger against private/'s copy, exact packages, timers. Read-only there,
+# counts and statuses only. R2=1 after make restore-restic, where a snapshot may rightly differ from the copy.
+verify:
+	python3 -I scripts/verify.py $(VPS_USER)@$(VPS_HOST) $(if $(R2),--r2)
+
 status:
-	$(SSH) 'cd $(REMOTE_DIR) && $(COMPOSE) ps && df -h / && free -m && docker system df'
+	$(SSH) 'cd $(REMOTE_DIR) && $(COMPOSE) ps && df -h / && free -m && sudo docker system df'
 
 logs:
 	$(SSH) 'cd $(REMOTE_DIR) && $(COMPOSE) logs --tail=100 $(SVC)'
@@ -50,11 +106,11 @@ secret-set:
 	scp -q scripts/secret-set.sh $(VPS_USER)@$(VPS_HOST):/tmp/pa-secret-set.sh
 	$(SSH) -t 'sudo bash /tmp/pa-secret-set.sh $(NAME); rm -f /tmp/pa-secret-set.sh'
 
-# make secret-gen NAME=vault_tools_key TYPE=key   (random value created on the VPS)
+# make secret-gen NAME=vault_tools_mcp_token TYPE=token   (random value created on the VPS; vault_tools_key also takes FIRST_INSTALL=1)
 secret-gen:
 	@test -n "$(NAME)" -a -n "$(TYPE)" || (echo "NAME and TYPE required"; exit 1)
 	scp -q scripts/secret-gen.sh $(VPS_USER)@$(VPS_HOST):/tmp/pa-secret-gen.sh
-	$(SSH) 'sudo bash /tmp/pa-secret-gen.sh $(NAME) $(TYPE); rm -f /tmp/pa-secret-gen.sh'
+	$(SSH) 'sudo bash /tmp/pa-secret-gen.sh $(NAME) $(TYPE) $(if $(FIRST_INSTALL),--first-install); rm -f /tmp/pa-secret-gen.sh'
 
 # make pdf-passwords   (interactive, hidden input, runs on the VPS)
 pdf-passwords:
@@ -68,25 +124,45 @@ prune:
 	$(SSH) 'cd $(REMOTE_DIR) && sudo bash scripts/prune.sh'
 
 backup:
-	$(SSH) 'sudo systemctl start pa-backup.service && journalctl -u pa-backup -n 20 --no-pager'
+	$(SSH) 'sudo systemctl start pa-backup.service && sudo journalctl -u pa-backup -n 20 --no-pager'
 
+# private/ onto a new, empty VPS (docs/REBUILD.md). CONFIRM repeats the address; it refuses a host with this project on it.
 restore:
-	@echo "See docs/RUNBOOK.md#restore (restores to a scratch dir only)"
+	bash scripts/restore.sh mirror $(VPS_USER)@$(VPS_HOST) "$(CONFIRM)"
 
+# The snapshots in R2, and whether the newest is newer than private/. Opens them with private/'s restic.env, kept on no host.
+snapshots:
+	bash scripts/restore.sh snapshots $(VPS_USER)@$(VPS_HOST)
+
+# As make restore, from a snapshot, when R2 is newer than private/: SNAPSHOT=<id from make snapshots> CONFIRM=<address>
+restore-restic:
+	bash scripts/restore.sh restic $(VPS_USER)@$(VPS_HOST) "$(CONFIRM)" "$(SNAPSHOT)"
+
+# The full plaintext copy of the VPS data and secrets into private/ of the main checkout: read-only on the VPS, never in
+# git, never synced, counts and statuses only. ALLOW_SHRINK=1 accepts a ledger with fewer rows than the last copy.
+# KEEP_ONCE="<path> ..." also keeps what has no fixed place, in private/knowledge/kept/.
+mirror:
+	MIRROR_PY=$${MIRROR_PY:-$(PY)} bash scripts/mirror.sh $(VPS_USER)@$(VPS_HOST)
+
+# The hand-made host config and the exact Python packages, from the live VPS into this checkout to review and commit (read-only there)
+capture:
+	bash scripts/capture-recipe.sh $(VPS_USER)@$(VPS_HOST)
+
+# make venv first: without PyYAML, mcp and cryptography some suites skip their tests or fail on the import
 test:
-	python3 -I -m unittest discover -s tests -v
-	cd services/hermes/vault && python3 -I -m unittest discover -s tests -v   # the cardguard plugin
-	cd services/hermes/front && python3 -I -m unittest discover -s tests -v   # the cardblock plugin
-	cd services/control && python3 -I -m unittest discover -s tests -v
-	cd services/applier && python3 -I -m unittest discover -s tests -v   # a fake docker; its zone-rule test needs PyYAML
-	cd services/change-proposals && $${VAULT_PY:-python3} -I -m unittest discover -s tests -v   # needs mcp, as the vault-tools server tests
-	cd services/comms-brokers && $${VAULT_PY:-python3} -I -m unittest discover -s tests -v   # M4 brokers; the MCP server tests need mcp too
-	cd services/ingest-gmail && python3 -I -m unittest discover -s tests -v
-	cd services/vault-tools && $${VAULT_PY:-python3} -I -m unittest discover -s tests -v   # VAULT_PY=venv python to include server tests
+	$(PY) -I -m unittest discover -s tests -v
+	cd services/hermes/vault && $(PY) -I -m unittest discover -s tests -v   # the cardguard plugin
+	cd services/hermes/front && $(PY) -I -m unittest discover -s tests -v   # the cardblock plugin
+	cd services/control && $(PY) -I -m unittest discover -s tests -v
+	cd services/applier && $(PY) -I -m unittest discover -s tests -v   # a fake docker; its zone-rule test needs PyYAML
+	cd services/change-proposals && $(PY) -I -m unittest discover -s tests -v   # needs mcp, as the vault-tools server tests
+	cd services/comms-brokers && $(PY) -I -m unittest discover -s tests -v   # M4 brokers; the MCP server tests need mcp too
+	cd services/ingest-gmail && $(PY) -I -m unittest discover -s tests -v
+	cd services/vault-tools && $(PY) -I -m unittest discover -s tests -v   # the server tests need mcp
 
 # Read-only snapshot of the live bot into docs/runtime/ (names, counts, dates; no secrets, balances or message text)
 runtime-map:
-	python3 -I ops/runtime-map/collect.py
+	python3 -I ops/runtime-map/collect.py --host $(VPS_USER)@$(VPS_HOST)
 
 # Refresh the code side of graphify-out/ (AST only, no LLM cost); after doc edits run /graphify . --update in Claude Code
 graph:
@@ -105,6 +181,8 @@ __pycache__/
 .claude/*
 !.claude/settings.json
 .env
+# The plaintext copy of the VPS data and secrets (make mirror; docs/SECURITY.md): on the laptop only, never in git
+/private/
 # graphify-out/: only the shared map is committed; caches, dated backups, HTML and machine-local paths stay local
 graphify-out/*
 !graphify-out/graph.json
@@ -119,13 +197,115 @@ graphify-out/*
 
 
 ```
-# Non-secret stack settings. Secrets live in /opt/personal-agent-secrets on the VPS (sops+age in repo later).
+# Non-secret stack settings. Secrets live in /opt/personal-agent-secrets on the VPS and in the git-ignored private/ on the laptop (docs/SECURITY.md).
 MY_TELEGRAM_ID=[angka]
 TZ=Asia/Jakarta
 # Owner has Telegram Premium, which allows "_agent"-suffixed bot usernames.
 BOT_VAULT=danoevault_agent
 BOT_FRONT=danoefront_agent
 BOT_CONTROL=danoecontrol_bot
+```
+
+## config/vps.env
+
+
+
+```
+# The VPS this repo deploys to, and the one place its address lives: the Makefile, scripts/gmail-renew.sh and
+# ops/runtime-map/collect.py read it, tests/test_address.py keeps public addresses out of every other file, and the docs write
+# <vps> for VPS_USER@VPS_HOST. A move to a new VPS starts by changing these two lines (docs/REBUILD.md).
+VPS_HOST=[ip]
+VPS_USER=ubuntu
+```
+
+## config/data.manifest
+
+
+
+```
+# Every folder under /opt/personal-agent-data a service needs before it starts: path, uid, gid, mode. scripts/data-dirs.sh
+# makes them, each owned by the uid its writer runs as, and tests/test_deploy.py holds this list to the bind mounts of both
+# compose files. A folder comes before the folders inside it.
+#   vault-tools      vault-tools only: ledger.db and its backups
+#   ingest           the statement drop folder: ingest-gmail writes, vault-tools (another uid) reads it read-only
+#   ingest-state     ingest-gmail's ingest.db
+#   hermes-vault     the vault Hermes data dir (the image's uid 10000)
+#   control-state    control only: control.db, decided/, approved/
+#   proposals-inbox  change-proposals writes, control reads and empties (both uid 10001)
+#   hermes-front     the front Hermes data dir (the image's uid 10000, as hermes-vault)
+#   hermes-comms     the comms Hermes data dir (M4, uid 10000); empty until the comms zone is started
+#   applier          the applier (root, services/applier) only; applier/outcome is mounted read-only into control. Both
+#                    exist before the applier is installed; until then nothing writes there
+vault-tools      10001 10001 0700
+ingest           10002 10002 0755
+ingest-state     10002 10002 0755
+hermes-vault     10000 10000 0700
+control-state    10001 10001 0700
+proposals-inbox  10001 10001 0700
+hermes-front     10000 10000 0700
+hermes-comms     10000 10000 0700
+applier          0     0     0700
+applier/outcome  0     0     0755
+```
+
+## config/secrets.manifest
+
+
+
+```
+# Every secret file in /opt/personal-agent-secrets: name, how it is made, zone, mode. Names only, never a value.
+# how:  set        make secret-set NAME=<name>, typed by the owner
+#       gen:token  make secret-gen NAME=<name> TYPE=token, random, made on the VPS
+#       gen:key    make secret-gen NAME=<name> TYPE=key, random, made on the VPS; a new one orphans what it encrypted
+#       pdf        make pdf-passwords
+#       renew      scripts/gmail-renew.sh from the laptop
+#       client     the Google OAuth client file, copied once from the laptop (docs/GMAIL_OAUTH.md)
+#       hand       written by hand on the VPS, root 0600 (the format is at the top of scripts/backup.sh)
+# zone comms is built but not started (docs/RUNBOOK.md): its names may be missing.
+anthropic_vault_key          set        vault    0444
+telegram_vault_token         set        vault    0444
+vault_tools_key              gen:key    vault    0444
+vault_tools_mcp_token        gen:token  vault    0444
+vault_tools_internal_token   gen:token  vault    0444
+anthropic_front_key          set        front    0444
+telegram_front_token         set        front    0444
+change_proposals_mcp_token   gen:token  front    0444
+telegram_control_token       set        control  0444
+gmail_ingest_client          client     jobs     0444
+gmail_ingest_token           renew      jobs     0444
+pdf_passwords                pdf        jobs     0444
+notion_token                 set        jobs     0444
+restic.env                   hand       host     0600
+anthropic_comms_key          set        comms    0444
+telegram_comms_token         set        comms    0444
+google_comms_client          client     comms    0444
+gmail_comms_token            renew      comms    0444
+calendar_comms_token         renew      comms    0444
+gmail_broker_mcp_token       gen:token  comms    0444
+calendar_broker_mcp_token    gen:token  comms    0444
+```
+
+## config/host-packages.txt
+
+
+
+```
+# Package versions of the live host (make capture). scripts/bootstrap-host.sh installs the pin rows at exactly this version,
+# the note rows at what Ubuntu offers, and reports a difference. name version pin|note
+chrony 4.5-1ubuntu4.2 note
+containerd.io 2.4.2-3~ubuntu.24.04~noble pin
+curl 8.5.0-2ubuntu10.13 note
+docker-buildx-plugin 0.38.1-1~ubuntu.24.04~noble pin
+docker-ce 5:29.9.2-1~ubuntu.24.04~noble pin
+docker-ce-cli 5:29.9.2-1~ubuntu.24.04~noble pin
+docker-compose-plugin 5.6.1-1~ubuntu.24.04~noble pin
+python3 3.12.3-0ubuntu2.1 note
+python3-yaml 6.0.1-2build2 note
+restic 0.16.4-2ubuntu0.24.04.3 note
+rsync 3.2.7-1ubuntu1.4 note
+sudo 1.9.15p5-3ubuntu5.24.04.1 note
+ufw 0.36.2-6 note
+unattended-upgrades 2.9.1+nmu4ubuntu1 note
 ```
 
 ## config/squid/comms.conf
@@ -218,6 +398,73 @@ http_access allow allowed_domains
 http_access deny all
 access_log stdio:/var/log/squid/access.log
 cache deny all
+```
+
+## host/etc/apt/apt.conf.d/20auto-upgrades
+
+
+
+```ini
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+```
+
+## host/etc/apt/sources.list.d/docker.list
+
+
+
+```ini
+deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable
+```
+
+## host/etc/docker/daemon.json
+
+
+
+```ini
+{
+  "log-driver": "json-file",
+  "log-opts": {"max-size": "10m", "max-file": "3"}
+}
+```
+
+## host/etc/ssh/sshd_config.d/00-hardening.conf
+
+
+
+```ini
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+MaxAuthTries 3
+```
+
+## host/etc/sudoers.d/90-personal-agent-login
+
+
+
+```ini
+# The login account of config/vps.env runs Docker, systemctl and the scripts through sudo. On the first VPS this rule came from
+# cloud-init; on any other host scripts/bootstrap-host.sh fills in the account and checks the result with visudo.
+@LOGIN@ ALL=(ALL) NOPASSWD:ALL
+```
+
+## host/etc/sysctl.d/99-swappiness.conf
+
+
+
+```ini
+vm.swappiness=10
+```
+
+## host/etc/systemd/journald.conf.d/size.conf
+
+
+
+```ini
+[Journal]
+SystemMaxUse=500M
 ```
 
 ## host/pa-backup.service
@@ -521,11 +768,11 @@ WantedBy=timers.target
 
 ```dockerfile
 # Build context is services/ (compose): control.py comes along so the proposal rules are control's own.
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:6b25cbe[angka]d553cdd5a5da97d259348d8f6e45b527dd731caaba27a07
 RUN useradd --system --uid 10001 app
 WORKDIR /app
-COPY change-proposals/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY change-proposals/requirements.lock .
+RUN pip install --no-cache-dir -r requirements.lock
 COPY control/control.py change-proposals/proposals.py ./
 USER 10001
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
@@ -541,11 +788,11 @@ CMD ["python", "proposals.py"]
 ```dockerfile
 # The comms zone's two brokers (M4): one image, two containers; compose names each one's module (brokers.gmail,
 # brokers.gcal). policy.json is part of the code: what comms may see changes with a rebuild, never at run time.
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:6b25cbe[angka]d553cdd5a5da97d259348d8f6e45b527dd731caaba27a07
 RUN useradd --system --uid 10003 app
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.lock .
+RUN pip install --no-cache-dir -r requirements.lock
 COPY brokers ./brokers
 USER 10003
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
@@ -559,7 +806,7 @@ CMD ["python", "-m", "brokers.gmail"]
 
 
 ```dockerfile
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:6b25cbe[angka]d553cdd5a5da97d259348d8f6e45b527dd731caaba27a07
 RUN useradd --system --uid 10001 app
 WORKDIR /app
 COPY control.py .
@@ -572,7 +819,7 @@ CMD ["python", "-I", "control.py"]
 
 
 ```dockerfile
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:6b25cbe[angka]d553cdd5a5da97d259348d8f6e45b527dd731caaba27a07
 RUN useradd --system --uid 10002 ingest
 WORKDIR /app
 COPY ingest_gmail ./ingest_gmail
@@ -585,11 +832,11 @@ CMD ["python", "-m", "ingest_gmail"]
 
 
 ```dockerfile
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:6b25cbe[angka]d553cdd5a5da97d259348d8f6e45b527dd731caaba27a07
 RUN useradd --system --uid 10001 app
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.lock .
+RUN pip install --no-cache-dir -r requirements.lock
 COPY vault_tools ./vault_tools
 USER 10001
 ENV LEDGER_DB=/data/ledger.db
