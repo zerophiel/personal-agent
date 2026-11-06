@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from datetime import datetime, timezone
@@ -110,6 +111,25 @@ def snapshot(root):
     return f", collected {at.strftime('%Y-%m-%d %H:%M')} WIB ({age}; refresh with make runtime-map)"
 
 
+def mirror_age(root):
+    """One line on how old make mirror's copy is, or None outside git. private/ sits beside the shared .git, also seen from a
+    linked worktree, and only the time of its MIRROR.json is looked at: nothing there is opened or listed."""
+    try:
+        done = subprocess.run(["git", "-C", root, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                              capture_output=True, text=True, timeout=2)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if done.returncode != 0 or not done.stdout.strip():
+        return None
+    try:
+        at = os.stat(os.path.join(os.path.dirname(done.stdout.strip()), "private", "vps", "MIRROR.json")).st_mtime
+    except OSError:
+        return "No local copy of the VPS data and secrets yet (make mirror); never read or list private/."
+    days = int((time.time() - at) // 86400)
+    age = "today" if days < 1 else f"{days} day{'s' * (days > 1)} ago"
+    return f"Local copy of the VPS data and secrets in private/: pulled {wib(at)} ({age}; make mirror refreshes it); never read or list private/."
+
+
 def main():
     root = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
     graph = os.path.join(root, "graphify-out", "graph.json")
@@ -124,6 +144,9 @@ def main():
         more = f" and {len(stale) - SHOW} more" if len(stale) > SHOW else ""
         lines.append(f"Graph is behind the working tree ({len(stale)}): {', '.join(stale[:SHOW])}{more}."
                      " Code: graphify update . (free); docs: /graphify . --update.")
+    copy = mirror_age(root)
+    if copy:
+        lines.append(copy)
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "\n".join(lines)}}))
 
 

@@ -116,6 +116,52 @@ class GraphFirst(unittest.TestCase):
         self.assertEqual(p.returncode, 0)
         self.assertIn("Project map first", json.loads(p.stdout)["hookSpecificOutput"]["additionalContext"])
 
+    def git(self, *args):
+        subprocess.run(["git", "-C", self.root, *args], check=True, capture_output=True)
+
+    def test_no_copy_line_outside_git(self):
+        self.write("graphify-out/graph.json", "{}")
+        self.assertNotIn("private/", self.context())
+
+    def test_says_when_there_is_no_copy_yet(self):
+        self.git("init", "-q")
+        self.write("graphify-out/graph.json", "{}")
+        self.assertIn("No local copy of the VPS data and secrets yet (make mirror)", self.context())
+
+    def test_the_age_of_the_copy_and_nothing_from_inside_it(self):
+        self.git("init", "-q")
+        self.write("graphify-out/graph.json", "{}")
+        self.write("graphify-out/manifest.json", json.dumps({"a.md": {"mtime": 1, "semantic_hash": "x"}}))
+        self.write("private/vps/data/ingest/Rekening PEMILIK 1234.md", "rahasia")
+        marker = self.write("private/vps/MIRROR.json", '{"counts": {"rows": "NILAI-DI-DALAM"}}')
+        os.utime(marker, (1000000000, 1000000000))
+        ctx = self.context()
+        self.assertIn("in private/: pulled 2001-09-09 08:46 WIB", ctx)
+        self.assertIn("days ago; make mirror refreshes it", ctx)
+        self.assertIn("never read or list private/", ctx)
+        self.assertNotIn("PEMILIK", ctx)
+        self.assertNotIn("NILAI-DI-DALAM", ctx)
+
+    def test_a_copy_pulled_today(self):
+        self.git("init", "-q")
+        self.write("graphify-out/graph.json", "{}")
+        self.write("private/vps/MIRROR.json", "{}")
+        self.assertIn("(today; make mirror refreshes it)", self.context())
+
+    def test_a_linked_worktree_sees_the_copy_of_the_main_checkout(self):
+        self.git("init", "-q")
+        self.write("a.txt", "x")
+        self.git("add", "-A")
+        self.git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "x")
+        self.write("private/vps/MIRROR.json", "{}")
+        wt = os.path.join(self.root, "wt")
+        self.git("worktree", "add", "-q", "-b", "kerja", wt)
+        self.write("wt/graphify-out/graph.json", "{}")
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": wt}), contextlib.redirect_stdout(out):
+            gf.main()
+        self.assertIn("(today; make mirror refreshes it)", out.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
