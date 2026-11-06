@@ -12,6 +12,7 @@
 # private/mirror.log. Exit 0: all good. Exit 3: swapped, but a database is carried raw, a host fact
 # failed or a laptop file was not kept. Exit 1: no swap.
 # Usage: mirror.sh user@host   (ALLOW_SHRINK=1 accepts a ledger with fewer rows than the last copy)
+#        KEEP_ONCE="<path> ..."  paths without spaces, kept in private/knowledge/kept/, where they stay after this run
 set -euo pipefail
 umask 077
 host=${1:-}
@@ -214,6 +215,16 @@ for folder in "$HOME/.claude/projects/$project"--*; do
 done
 keep "$HOME/.graphify/repos/NousResearch/hermes-agent-v0.22.5" "$private/knowledge/hermes-engine"
 keep "$here/graphify-out" "$private/knowledge/graphify-out"
+# What has no fixed place here, such as the original brief. A path that is named and not there counts as failed, not as missing.
+for once in ${KEEP_ONCE:-}; do
+  if [ -d "$once" ]; then
+    keep "$once" "$private/knowledge/kept/$(basename "$once")"
+  elif [ -f "$once" ]; then
+    keep_file "$once" "$private/knowledge/kept"
+  else
+    laptop_failed=$((laptop_failed + 1))
+  fi
+done
 say "laptop part: $laptop_missing missing, $laptop_failed failed"
 
 if [ "$laptop_failed" != 0 ] && [ "$check" = 0 ]; then check=3; fi

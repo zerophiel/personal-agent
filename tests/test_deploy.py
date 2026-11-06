@@ -99,9 +99,16 @@ class Targets(unittest.TestCase):
         self.assertEqual(steps("verify")[0].strip(), "python3 -I scripts/verify.py pemilik@alamat")
         self.assertEqual(steps("verify", R2="1")[0].strip(), "python3 -I scripts/verify.py pemilik@alamat --r2")
 
+    def test_images_makes_every_image_and_starts_nothing(self):
+        # make restore refuses a host with containers, and a started bot would poll beside the old one
+        line = steps("images")[0]
+        self.assertIn("--profile front --profile jobs pull --ignore-buildable", line)
+        self.assertIn("--profile front --profile jobs build", line)
+        self.assertNotRegex(line, r"\bup\b")
+
     def test_docker_and_the_journal_need_sudo_on_the_vps(self):
         # the login account is not in the docker group: `make status` stopped at its last command
-        for target in ("status", "logs", "backup", "up", "deploy", "front", "prune", "prune-dry"):
+        for target in ("status", "logs", "backup", "up", "deploy", "front", "images", "prune", "prune-dry"):
             for line in steps(target):
                 for word in re.findall(r"(?:^|[\s'])(\S*\s?(?:docker|journalctl))\s", line):
                     self.assertTrue(word.startswith("sudo") or " sudo " in f" {word}", (target, line))

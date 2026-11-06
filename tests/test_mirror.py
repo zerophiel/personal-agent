@@ -722,6 +722,23 @@ class Laptop(Base):
         self.assertIn(f"knowledge/claude-projects/{project}--claude-worktrees-w/t.jsonl", got)
         self.assertEqual(got[f"knowledge/claude-projects/{project}/memory/MEMORY.md"], b"m2")
 
+    def test_what_is_named_for_this_run_is_kept_and_stays(self):
+        brief = self.write(os.path.join(self.home, "unduhan", "brief-asli.md"), b"isi brief")
+        helpers = os.path.join(self.home, "pembantu-sesi")
+        self.write(os.path.join(helpers, "dalam", "alat.py"), b"alat")
+        done = self.good(KEEP_ONCE=f"{brief} {helpers}")
+        got = tree(self.private)
+        self.assertEqual(got["knowledge/kept/brief-asli.md"], b"isi brief")
+        self.assertEqual(got["knowledge/kept/pembantu-sesi/dalam/alat.py"], b"alat")
+        self.assertEqual(stat.S_IMODE(os.stat(os.path.join(self.private, "knowledge", "kept", "brief-asli.md")).st_mode), 0o600)
+        self.assertNotIn("brief-asli", done.stdout + done.stderr)
+        self.assertNotIn("pembantu-sesi", done.stdout + done.stderr)
+        self.good()     # a later run names nothing, and they stay
+        self.assertIn("knowledge/kept/brief-asli.md", tree(self.private))
+
+    def test_a_named_path_that_is_not_there_warns(self):
+        self.assert_warned_and_finished(self.run_mirror(KEEP_ONCE=os.path.join(self.home, "tidak-ada")), 1)
+
     def test_missing_pieces_are_counted_not_fatal(self):
         done = self.good()
         self.assertRegex(done.stdout, r"laptop part: [1-9]\d* missing, 0 failed")

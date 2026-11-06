@@ -38,6 +38,9 @@ rsync -rlpt --ignore-existing private/knowledge/graphify-out/ graphify-out/
 - **`hermes-agent-v0.22.5`**: the engine's source and its graph, which `CLAUDE.md` queries. It is too big for git.
 - **`graphify-out/`**: what git does not hold, such as the extraction cache. `--ignore-existing` leaves the committed graph as it is.
 
+`private/knowledge/kept/` stays where it is: the original brief and the helper scripts of the session that built the rebuild work, for
+the owner to read. Nothing needs them to run. `make mirror KEEP_ONCE="<path> ..."` adds to them.
+
 ## Before a commit, and on any output
 
 - `git add <files> && git diff --cached -U0 | python3 -I ops/privacy/diff_scan.py` reports added lines that look like a secret or personal

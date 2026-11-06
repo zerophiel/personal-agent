@@ -10,8 +10,9 @@ Paste this to an AI working in `~/personal-agent`:
 > menampilkan isi `private/`.
 
 The way has run against test fakes and the live host, never on a real second host, by the owner's choice. `make bootstrap`,
-`make restore` and the applier's host check are proven only by the first real move, so small fixes may be needed there. Data,
-keys and config stay whole in this folder meanwhile, and the old bot stops only after bootstrap and preflight have passed.
+`make restore` and the applier's host check are proven only by the first real move, so small fixes may be needed there. On
+2026-11-06 the pinned images had not been built on any host, since the owner put that deploy off, so step 3 builds them first. Data,
+keys and config stay whole in this folder meanwhile, and the old bot stops only after bootstrap, preflight and that build have passed.
 
 ## What lives where
 
@@ -23,7 +24,7 @@ keys and config stay whole in this folder meanwhile, and the old bot stops only 
 | `private/vps/host/` | the live host config, package versions, image digests, `pip freeze`, the owner and mode of every path | no |
 | `private/vps/MIRROR.json` | when it was pulled, the commit, counts, check results; no values or file names | no |
 | `private/.prev/` | the copy before that | no |
-| `private/laptop/`, `private/knowledge/` | Google client secrets and the public key; Claude's memory and transcripts, the Hermes engine and its graph (`docs/LAPTOP.md`) | no |
+| `private/laptop/`, `private/knowledge/` | Google client secrets and the public key; Claude's memory and transcripts, the Hermes engine and its graph, the original brief (`docs/LAPTOP.md`) | no |
 
 The folder is only as fresh as the last `make mirror`; its age shows in the context of every session. R2 can be newer: see Disaster.
 
@@ -59,7 +60,7 @@ The folder is only as fresh as the last `make mirror`; its age shows in the cont
 | Cloudflare R2 | Nothing until step 18 | A token with an IP limit needs the new address before `make timers` |
 | Notion | Nothing: same token | Revoke only in the disaster path |
 | GitHub | Nothing: the VPS never pulls; `make sync` copies from the laptop | |
-| Docker Hub | Images are pulled by digest, anonymously | A shared address can hit the anonymous pull limit: wait and run `make up` again |
+| Docker Hub | Images are pulled by digest, anonymously | A shared address can hit the anonymous pull limit: wait and run `make images` again |
 
 ## The way
 
@@ -75,6 +76,8 @@ The folder is only as fresh as the last `make mirror`; its age shows in the cont
    - After a full run root and passwords are closed, so a second run is `make bootstrap BOOTSTRAP_USER=<login>`.
    - The apt log is `/var/log/personal-agent-bootstrap.log` on the host.
 3. `make preflight` must exit 0. If it cannot be made to, take another provider; the old bot has not been touched.
+   Then `make sync` and `make images`: every image is pulled or built on the new host and nothing starts. A bad pin or a refused pull
+   shows here, with the old bot still running.
 4. `make applied-pull VPS_HOST=<old address> VPS_USER=<old login>`, review, `git push`. A record that does not fit shows now, while
    the bot lives.
 

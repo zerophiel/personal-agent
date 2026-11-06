@@ -1,7 +1,7 @@
 # Progress and resume point (finance / vault)
 
 Last updated: 2026-11-06. Branch `worktree-m1-skeleton`, which merges into `main` as the last step of the rebuild work. PR #1 was
-merged on 2026-10-27; notes calling it a draft were wrong. 1042 tests pass (480 in vault-tools, 64 in the comms brokers).
+merged on 2026-10-27; notes calling it a draft were wrong. 1061 tests pass (480 in vault-tools, 64 in the comms brokers).
 No secrets or personal amounts are recorded here; the numbers live in the ledger on the VPS and its copy in the git-ignored
 `private/`.
 
@@ -725,6 +725,11 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 - The first successful `restic check` ran on 6 Nov: the R2 repository is sound. The failures of `pa-check` and `pa-forget` on 1 Nov
   were two jobs colliding on restic's lock, and `scripts/backup.sh` now waits (`--retry-lock`, on the VPS after the next `make sync`).
   `pa-forget.service` stays failed until its run on 8 Nov 04:00, so `make verify` shows one note until then.
+- The VPS side was put off the same day (owner: "fokus utamanya adalah supaya semua basis ada di directory sekarang yaitu
+  ~/personal-agent jadi urusan backup dll yang di server ga usah dipikirn dulu"): no `make sync`, no deploy. The VPS runs what it ran,
+  and the repo is ahead of it by the pins, the new `scripts/backup.sh` and the M4 files. No SOUL, config or bot code differs: a dry run
+  on 6 Nov showed nothing under `services/hermes/vault`, `services/hermes/front` or the code of `vault-tools` and `control`. The pinned
+  images have not been built on a real host, so `make images` in step 3 of `docs/REBUILD.md` builds them before the old bot stops.
 - Learned writing `docs/REBUILD.md`: `make snapshots` opens R2 with the copy's `restic.env`, so a new R2 key goes into the copy
   before that check; Hermes discards Telegram messages queued while it was offline, so what is sent to vault and front during a
   move is lost.
@@ -789,9 +794,10 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
     payday, or leave the salary account out of the trend? A manual calibration for the owner; nothing changed.
 
 ## Next steps
-- Rebuild work, in order: `make sync` and the deploy of the pins (each with the owner's OK), the close, the merge to `main`.
-  Then the owner, in `~/personal-agent`: `git pull --ff-only origin main` and `bash scripts/finish-merge.sh`. Not before the
-  merge: `origin/main` is still the M1 tree, and its deploy would not leave `private/` out.
+- Rebuild work: the close and the merge to `main`. Then the owner, in `~/personal-agent`: `git pull --ff-only origin main` and
+  `bash scripts/finish-merge.sh`. Not before the merge: `origin/main` is still the M1 tree, and its deploy would not leave `private/` out.
+- Open, only when the owner wants the VPS side, each with the owner's OK: `make sync`; then a ledger backup, `make up`, `make front`,
+  `make verify` for the pins (four squid containers recreated, `vault-tools`, `control` and `change-proposals` rebuilt, no `/new`).
 - (done 2 Nov morning) Owner `/new` to vault after the 2 Nov 01:23 WIB deploy (`transfer_selesai` has `gajian`). The
   30 Oct lesson fee is not paid yet, its money set aside outside the daily account (no correction): tell the bot once
   it is paid. October's categorizing goes on; each categorized payday row leaves "belum dihitung".

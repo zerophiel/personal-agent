@@ -9,7 +9,7 @@ COMPOSE := sudo docker compose -f compose/docker-compose.yml --env-file config/s
 VENV ?= $(HOME)/.venv-personal-agent
 PY ?= $(firstword $(wildcard $(VENV)/bin/python) python3)
 
-.PHONY: help bootstrap preflight deploy sync up front render-envs secrets-check timers applier venv applied-pull verify status logs secret-set secret-gen pdf-passwords prune prune-dry backup restore snapshots restore-restic mirror capture test runtime-map graph
+.PHONY: help bootstrap preflight deploy sync images up front render-envs secrets-check timers applier venv applied-pull verify status logs secret-set secret-gen pdf-passwords prune prune-dry backup restore snapshots restore-restic mirror capture test runtime-map graph
 
 help:
 	@grep -E '^[a-z-]+:' Makefile | cut -d: -f1 | tr '\n' ' '; echo
@@ -49,6 +49,11 @@ up:
 # The front zone, which make deploy and make up never start or stop (docs/RUNBOOK.md, Front zone)
 front:
 	$(SSH) 'cd $(REMOTE_DIR) && $(COMPOSE) --profile front up -d --build --wait change-proposals front'
+
+# Every image on the host and nothing started, with no env file or secret needed: a bad pin or a refused pull shows while the old bot
+# still runs (docs/REBUILD.md, step 3).
+images:
+	$(SSH) 'cd $(REMOTE_DIR) && $(COMPOSE) --profile front --profile jobs pull --ignore-buildable && $(COMPOSE) --profile front --profile jobs build'
 
 # The env files of vault and front from the secret files; the comms zone is not started, so its file is not made
 render-envs:
@@ -125,6 +130,7 @@ restore-restic:
 
 # The full plaintext copy of the VPS data and secrets into private/ of the main checkout: read-only on the VPS, never in
 # git, never synced, counts and statuses only. ALLOW_SHRINK=1 accepts a ledger with fewer rows than the last copy.
+# KEEP_ONCE="<path> ..." also keeps what has no fixed place, in private/knowledge/kept/.
 mirror:
 	MIRROR_PY=$${MIRROR_PY:-$(PY)} bash scripts/mirror.sh $(VPS_USER)@$(VPS_HOST)
 

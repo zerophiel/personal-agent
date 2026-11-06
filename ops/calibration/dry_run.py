@@ -1,6 +1,6 @@
 """Dry run of NEW vault-tools code on a COPY of the live ledger: migration, re-reading every statement's lines, the audit,
 the payday plan for the coming 1st and the pot projection. The live ledger is never written.
-Run (from the worktree root):
+Run (from the repo root):
   ssh ubuntu@<vps> 'mkdir -p dry-vt' && rsync -az --delete services/vault-tools/vault_tools/ ubuntu@<vps>:dry-vt/vault_tools/
   ssh ubuntu@<vps> 'sudo docker exec personal-agent-vault-tools-1 rm -rf /tmp/dry && sudo docker exec personal-agent-vault-tools-1 mkdir -p /tmp/dry \
     && tar -C dry-vt -cf - vault_tools | sudo docker exec -i personal-agent-vault-tools-1 tar -C /tmp/dry -xf - \

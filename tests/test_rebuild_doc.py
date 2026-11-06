@@ -68,6 +68,11 @@ class TheWay(unittest.TestCase):
                   "up", "front", "applier", "timers", "verify", "applied-pull", "runtime-map", "mirror"]
         self.assertTrue(in_order(wanted, targets(self.way)), targets(self.way))
 
+    def test_the_images_are_made_while_the_old_bot_lives(self):
+        """A pin meets a real build here at the latest, and a failure must not cost any downtime."""
+        before_the_freeze = self.way.split("### The move", 1)[0]
+        self.assertTrue(in_order(["preflight", "sync", "images", "applied-pull"], targets(before_the_freeze)), targets(before_the_freeze))
+
     def test_the_steps_are_numbered_one_to_eighteen(self):
         self.assertEqual([int(n) for n in re.findall(r"^(\d+)\. ", self.way, re.M)], list(range(1, 19)))
 
