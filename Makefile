@@ -5,7 +5,7 @@ REMOTE_DIR ?= /opt/personal-agent
 SSH := ssh $(VPS_USER)@$(VPS_HOST)
 COMPOSE := sudo docker compose -f compose/docker-compose.yml --env-file config/stack.env
 
-.PHONY: help preflight deploy applied-pull status logs secret-set secret-gen pdf-passwords prune prune-dry backup restore mirror capture test runtime-map graph
+.PHONY: help preflight deploy applied-pull status logs secret-set secret-gen pdf-passwords prune prune-dry backup restore snapshots restore-restic mirror capture test runtime-map graph
 
 help:
 	@grep -E '^[a-z-]+:' Makefile | cut -d: -f1 | tr '\n' ' '; echo
@@ -59,8 +59,17 @@ prune:
 backup:
 	$(SSH) 'sudo systemctl start pa-backup.service && journalctl -u pa-backup -n 20 --no-pager'
 
+# private/ onto a new, empty VPS (docs/REBUILD.md). CONFIRM repeats the address; it refuses a host with this project on it.
 restore:
-	@echo "See docs/RUNBOOK.md#restore (restores to a scratch dir only)"
+	bash scripts/restore.sh mirror $(VPS_USER)@$(VPS_HOST) "$(CONFIRM)"
+
+# The snapshots in R2, and whether the newest is newer than private/. Opens them with private/'s restic.env, kept on no host.
+snapshots:
+	bash scripts/restore.sh snapshots $(VPS_USER)@$(VPS_HOST)
+
+# As make restore, from a snapshot, when R2 is newer than private/: SNAPSHOT=<id from make snapshots> CONFIRM=<address>
+restore-restic:
+	bash scripts/restore.sh restic $(VPS_USER)@$(VPS_HOST) "$(CONFIRM)" "$(SNAPSHOT)"
 
 # The full plaintext copy of the VPS data and secrets into private/ of the main checkout: read-only on the VPS, never in
 # git, never synced, counts and statuses only. ALLOW_SHRINK=1 accepts a ledger with fewer rows than the last copy.
