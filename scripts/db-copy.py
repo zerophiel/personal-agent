@@ -26,6 +26,9 @@ LEDGER = "vault-tools/ledger.db"
 SIDE_FILES = ("-wal", "-shm", "-journal")
 ATTEMPTS = 3
 PAUSE = float(os.environ.get("MIRROR_DB_PAUSE", "4"))   # about ten seconds in all before a database is carried raw
+# The data root is root's alone (0700), so its own uid cannot reach a database without this. It lifts reading only: whatever
+# SQLite writes beside the file is still written as that uid, in that uid's folder.
+REACH = "--inh-caps=+dac_read_search --ambient-caps=+dac_read_search"
 INVENTORY = r"""
 import json, os, sqlite3, stat, sys
 root = sys.argv[1]
@@ -89,7 +92,7 @@ def copy_one(host, root, dest, row):
     final = os.path.join(dest, row["rel"])
     tmp = final + ".pa-tmp"
     os.makedirs(os.path.dirname(final), exist_ok=True)
-    remote = (f"cd / && exec setpriv --reuid={int(row['uid'])} --regid={int(row['gid'])} --clear-groups "
+    remote = (f"cd / && exec setpriv --reuid={int(row['uid'])} --regid={int(row['gid'])} --clear-groups {REACH} "
               f"/usr/bin/python3 -I -c {shlex.quote(COPY)} {shlex.quote(os.path.join(root, row['rel']))}")
     try:
         with open(tmp, "wb") as out:

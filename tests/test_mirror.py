@@ -30,7 +30,7 @@ while [ "$1" = "-o" ]; do shift 2; done
 shift
 cmd="$*"
 cmd=${cmd//sudo -n /}
-cmd=$(printf '%s' "$cmd" | sed -E 's/setpriv --reuid=[0-9]+ --regid=[0-9]+ --clear-groups //')
+cmd=$(printf '%s' "$cmd" | sed -E 's/setpriv --reuid=[0-9]+ --regid=[0-9]+ --clear-groups --inh-caps=\+dac_read_search --ambient-caps=\+dac_read_search //')
 cmd=${cmd//\/usr\/bin\/python3/$REMOTE_PY}
 exec bash -c "$cmd"
 """,
@@ -250,6 +250,13 @@ class Copy(Base):
         conn.execute("INSERT INTO entries VALUES ('baru')")
         conn.commit()
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0], 2)
+
+    def test_each_uid_can_reach_its_database_through_the_root_only_data_folder(self):
+        # The fake ssh strips exactly this: without the capability every database on the real VPS fails with EACCES
+        with open(os.path.join(ROOT, "scripts", "db-copy.py"), encoding="utf-8") as f:
+            self.assertIn('REACH = "--inh-caps=+dac_read_search --ambient-caps=+dac_read_search"', f.read())
+        self.assertEqual(self.good().returncode, 0)
+        self.assertTrue(self.doc()["clean"])
 
     def test_a_wildcard_in_a_name_still_keeps_side_files_out(self):
         self.good()
