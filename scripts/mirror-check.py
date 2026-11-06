@@ -17,6 +17,7 @@ import urllib.parse
 from datetime import datetime, timezone
 
 MAGIC = b"SQLite format 3\0"
+DB_SUFFIXES = (".db", ".sqlite", ".sqlite3")   # as scripts/db-copy.py
 LEDGER = "vault-tools/ledger.db"
 SIDE_FILES = ("-wal", "-shm", "-journal")
 TEMP_NAME = re.compile(r"(\.tmp[^/]*|\.pa-tmp|(^|/)tmp[^/]*)$")   # a live host's files that come and go between listings
@@ -40,6 +41,33 @@ def integrity_ok(path):
             conn.close()
     except (OSError, sqlite3.Error):
         return False
+
+
+def starts_as_sqlite(path):
+    try:
+        with open(path, "rb") as f:
+            return f.read(16) == MAGIC
+    except OSError:
+        return False
+
+
+def settle_report(new, report):
+    """scripts/db-copy.py listed the databases before its copies and before the pull, so its report can be behind the copy, and
+    this writes it back corrected. A database that appeared since came through rsync with its side files at different moments, so
+    it is raw, whatever the list called it. One that left was carried by nothing, so it is not raw, except the ledger: that stays
+    in the list for check_ledger to refuse the copy."""
+    data = os.path.join(new, "data")
+    report["raw"] = [rel for rel in report["raw"] if rel == LEDGER or os.path.lexists(os.path.join(data, rel))]
+    known = set(report["clean"]) | set(report["raw"])
+    for folder, _, files in os.walk(data):
+        for name in files:
+            path = os.path.join(folder, name)
+            rel = os.path.relpath(path, data)
+            if rel not in known and name.endswith(DB_SUFFIXES) and not os.path.islink(path) and starts_as_sqlite(path):
+                report["raw"].append(rel)
+                report["plain"] = [other for other in report["plain"] if other != rel]
+    with open(os.path.join(new, "host", "db-report.json"), "w", encoding="utf-8") as f:
+        json.dump(report, f)
 
 
 def check_databases(new, report):
@@ -120,6 +148,8 @@ def check_files(new, report, frozen):
 
 def check_ledger(new, report, prev_total):
     if LEDGER not in report["clean"]:
+        if not os.path.lexists(os.path.join(new, "data", LEDGER)):
+            return FAIL, "not in the copy: it left the host during the pull", None
         return NOTE, "carried raw, rows not counted", None
     conn = immutable(os.path.join(new, "data", LEDGER))
     try:
@@ -239,8 +269,10 @@ def main():
     a = ap.parse_args()
     with open(os.path.join(a.new, "host", "db-report.json"), encoding="utf-8") as f:
         report = json.load(f)
+    settle_report(a.new, report)
     results = {}
-    status, text, rows = check_ledger(a.new, report, previous_total(a.prev))
+    last_total = previous_total(a.prev)
+    status, text, rows = check_ledger(a.new, report, last_total)
     results["ledger"] = (status, text)
     results["databases"] = check_databases(a.new, report)
     results["secrets"] = check_secrets(a.new, a.repo)
@@ -259,7 +291,8 @@ def main():
            "counts": {"db_clean": len(report["clean"]), "db_raw": len(report["raw"]), "db_plain": len(report["plain"]),
                       "files_data": sum(k[0] == "data" for k in have) - 1,
                       "files_secrets": sum(k[0] == "secrets" for k in have) - 1,
-                      "ledger_rows_total": sum(rows.values()) if rows else None, "ledger_rows": rows},
+                      # a raw ledger is not counted, and the next run still compares with the last count
+                      "ledger_rows_total": sum(rows.values()) if rows is not None else last_total, "ledger_rows": rows},
            "checks": {name: {"status": status, "detail": text} for name, (status, text) in results.items()}}
     with open(os.path.join(a.new, "MIRROR.json"), "w", encoding="utf-8") as f:
         json.dump(doc, f, indent=1)

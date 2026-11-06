@@ -29,6 +29,11 @@ FAKES = {
 while [ "$1" = "-o" ]; do shift 2; done
 shift
 cmd="$*"
+case "$cmd" in
+  *setpriv*)                                         # the copy of one database, by scripts/db-copy.py
+    [ -z "${SSH_COPY_FAIL:-}" ] || exit 255
+    [ -z "${SSH_GONE:-}" ] || rm -f "$SSH_GONE" ;;
+esac
 cmd=${cmd//sudo -n /}
 cmd=$(printf '%s' "$cmd" | sed -E 's/setpriv --reuid=[0-9]+ --regid=[0-9]+ --clear-groups --inh-caps=\+dac_read_search --ambient-caps=\+dac_read_search //')
 cmd=${cmd//\/usr\/bin\/python3/$REMOTE_PY}
@@ -45,6 +50,9 @@ for a in "$@"; do
     *) args+=("$a") ;;
   esac
 done
+case "$remote ${args[-1]}" in
+  "1 "*/data/) [ -z "${RSYNC_PLANT:-}" ] || cp "$RSYNC_PLANT" "$RSYNC_PLANT_AS" ;;   # after the list of databases, before the pull
+esac
 rc=0
 "$REAL_RSYNC" "${args[@]}" || rc=$?
 if [ "$remote" = 1 ]; then
@@ -460,6 +468,26 @@ class Worktree(Base):
         self.git("worktree", "remove", "--force", wt)   # the copy outlives the worktree
         self.assertTrue(os.path.isfile(self.copy("MIRROR.json")))
 
+    def worktree_script(self):
+        wt = os.path.join(self.d, "wt")
+        self.git("worktree", "add", "-q", "-b", "kerja", wt)
+        return os.path.join(wt, "scripts", "mirror.sh")
+
+    def test_the_deploy_that_counts_is_the_main_checkouts(self):
+        script = self.worktree_script()    # its own Makefile has the exclude, and its ./ has no private/ to send anyway
+        self.write(os.path.join(self.repo, "Makefile"), b"deploy:\n\trsync -az ./ vps:/opt/\n")
+        done = self.run_mirror(script=script)
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertIn("main checkout", done.stderr)
+        self.assertFalse(os.path.exists(self.private))
+
+    def test_a_main_checkout_without_a_makefile_has_no_deploy_to_fear(self):
+        script = self.worktree_script()
+        os.unlink(os.path.join(self.repo, "Makefile"))
+        done = self.run_mirror(script=script)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertTrue(os.path.isfile(self.copy("MIRROR.json")))
+
 
 class Frozen(Base):
     def test_a_stopped_host_carries_the_versions_over(self):
@@ -531,6 +559,71 @@ class Raw(Base):
         self.write(os.path.join(self.data, "gen.txt"), b"4")
         self.good()                                                     # copy 4; 3 was clean, so .prev moves on
         self.assertEqual(open(os.path.join(self.private, ".prev", "data", "gen.txt")).read(), "3")
+
+    def test_the_shrink_guard_outlives_a_raw_ledger(self):
+        self.good()                                                     # copy 1, counted
+        counted = self.doc()["counts"]["ledger_rows_total"]
+        done = self.run_mirror(SSH_COPY_FAIL="1")                       # copy 2, the ledger raw and not counted
+        self.assertEqual(done.returncode, 3, done.stdout + done.stderr)
+        self.assertIn("ledger: note", done.stdout)
+        self.assertEqual(self.doc()["counts"]["ledger_rows_total"], counted)
+        self.writer.execute("DELETE FROM entries")
+        self.writer.commit()
+        before = tree(os.path.join(self.private, "vps"))
+        done = self.run_mirror()                                        # copy 3 lost rows: the count of copy 1 still stops it
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertIn("fewer than before", done.stdout)
+        self.assertEqual(tree(os.path.join(self.private, "vps")), before)
+        self.assertEqual(self.run_mirror(ALLOW_SHRINK="1").returncode, 0)
+        self.assertLess(self.doc()["counts"]["ledger_rows_total"], counted)
+
+    def database(self, *parts):
+        path = self.write(os.path.join(self.d, *parts), b"")
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE t(x)")
+        conn.commit()
+        conn.close()
+        return path
+
+    def report(self):
+        with open(self.copy("host", "db-report.json"), encoding="utf-8") as f:
+            return json.load(f)
+
+    def test_a_database_that_appears_during_the_pull_is_raw_not_clean(self):
+        late = os.path.join(self.data, "hermes-vault", "baru.db")
+        self.write(late + "-wal", b"sisi")
+        done = self.run_mirror(RSYNC_PLANT=self.database("tunggu", "baru.db"), RSYNC_PLANT_AS=late)
+        self.assertEqual(done.returncode, 3, done.stdout + done.stderr)
+        self.assertEqual(self.report()["raw"], ["hermes-vault/baru.db"])
+        self.assertFalse(self.doc()["clean"])
+        self.assertEqual(self.doc()["counts"]["db_raw"], 1)
+        self.assertTrue(os.path.isfile(self.copy("data", "hermes-vault", "baru.db")))
+        self.assertEqual(open(self.copy("data", "hermes-vault", "baru.db-wal"), "rb").read(), b"sisi")   # with its side file
+
+    def test_an_empty_file_that_became_a_database_during_the_pull_is_raw_not_plain(self):
+        empty = os.path.join(self.data, "hermes-vault", "empty.db")
+        done = self.run_mirror(RSYNC_PLANT=self.database("tunggu", "jadi.db"), RSYNC_PLANT_AS=empty)
+        self.assertEqual(done.returncode, 3, done.stdout + done.stderr)
+        self.assertEqual(self.report()["raw"], ["hermes-vault/empty.db"])
+        self.assertNotIn("hermes-vault/empty.db", self.report()["plain"])
+        self.assertIn("hermes-vault/notes.db", self.report()["plain"])
+
+    def test_a_database_gone_before_its_turn_was_carried_by_nothing(self):
+        gone = os.path.join(self.data, "hermes-vault", "sebentar.db")
+        shutil.copy(self.database("tunggu", "sebentar.db"), gone)
+        done = self.good(SSH_GONE=gone)
+        self.assertEqual(self.report()["raw"], [])
+        self.assertTrue(self.doc()["clean"])
+        self.assertFalse(os.path.exists(self.copy("data", "hermes-vault", "sebentar.db")))
+
+    def test_a_ledger_gone_before_its_turn_moves_no_copy(self):
+        self.good()
+        before = tree(os.path.join(self.private, "vps"))
+        done = self.run_mirror(SSH_GONE=self.ledger)
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertIn("ledger: fail", done.stdout)
+        self.assertEqual(tree(os.path.join(self.private, "vps")), before)
+        self.assertFalse(os.path.exists(os.path.join(self.private, ".new")))
 
 
 class Kill(Base):
@@ -631,7 +724,48 @@ class Laptop(Base):
 
     def test_missing_pieces_are_counted_not_fatal(self):
         done = self.good()
-        self.assertRegex(done.stdout, r"laptop part: [1-9]\d* missing")
+        self.assertRegex(done.stdout, r"laptop part: [1-9]\d* missing, 0 failed")
+
+    def assert_warned_and_finished(self, done, failed):
+        self.assertEqual(done.returncode, 3, done.stdout + done.stderr)
+        self.assertRegex(done.stdout, rf"laptop part: \d+ missing, {failed} failed")
+        self.assertIn("a laptop file was not kept", done.stderr)
+        self.assertIn("mirror: done", done.stdout)
+        self.assertTrue(os.path.isfile(self.copy("MIRROR.json")))
+
+    def unreadable(self, path):
+        self.write(path, b"t")
+        os.chmod(path, 0)
+        self.addCleanup(os.chmod, path, 0o600)
+
+    def test_a_folder_copy_that_fails_warns_and_the_rest_is_still_kept(self):
+        project = self.repo.replace("/", "-").replace(".", "-")
+        self.unreadable(os.path.join(self.home, ".claude", "projects", project, "t.jsonl"))
+        self.write(os.path.join(self.home, ".graphify", "repos", "NousResearch", "hermes-agent-v0.22.5", "e.py"), b"e")
+        self.assert_warned_and_finished(self.run_mirror(), 1)
+        self.assertIn("knowledge/hermes-engine/e.py", tree(self.private))
+
+    def test_a_file_that_cannot_be_kept_warns_and_the_rest_is_still_kept(self):
+        self.unreadable(os.path.join(self.home, "client_secret_ingest.json"))
+        self.write(os.path.join(self.home, ".ssh", "id_ed25519.pub"), b"kunci publik")
+        self.write(os.path.join(self.home, ".graphify", "repos", "NousResearch", "hermes-agent-v0.22.5", "e.py"), b"e")
+        self.assert_warned_and_finished(self.run_mirror(), 1)
+        got = tree(self.private)
+        self.assertIn("laptop/id_ed25519.pub", got)
+        self.assertIn("knowledge/hermes-engine/e.py", got)
+
+    def test_a_folder_that_cannot_be_made_warns_and_the_run_ends(self):
+        self.write(os.path.join(self.private, "laptop"))
+        self.write(os.path.join(self.private, "knowledge"))
+        self.write(os.path.join(self.home, ".ssh", "id_ed25519.pub"), b"kunci publik")
+        self.write(os.path.join(self.home, ".graphify", "repos", "NousResearch", "hermes-agent-v0.22.5", "e.py"), b"e")
+        self.assert_warned_and_finished(self.run_mirror(), 2)
+
+    def test_a_warning_never_hides_a_raw_database(self):
+        self.unreadable(os.path.join(self.home, "client_secret_ingest.json"))
+        done = self.run_mirror(SSH_COPY_FAIL="1")
+        self.assert_warned_and_finished(done, 1)
+        self.assertFalse(self.doc()["clean"])
 
 
 class HostChecks(Base):

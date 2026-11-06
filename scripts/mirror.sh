@@ -9,7 +9,8 @@
 #   private/laptop, private/knowledge  what lives only on this laptop; added to, never deleted from
 # Databases come from scripts/db-copy.py, everything else from rsync as root on the VPS. Read-only there. Prints counts and
 # statuses only: statement file names hold the owner's name and account fragments, so rsync's messages go to
-# private/mirror.log. Exit 0: all good. Exit 3: swapped, but a database is carried raw or a host fact failed. Exit 1: no swap.
+# private/mirror.log. Exit 0: all good. Exit 3: swapped, but a database is carried raw, a host fact
+# failed or a laptop file was not kept. Exit 1: no swap.
 # Usage: mirror.sh user@host   (ALLOW_SHRINK=1 accepts a ledger with fewer rows than the last copy)
 set -euo pipefail
 umask 077
@@ -36,7 +37,9 @@ new=$private/.new
 mkdir -p "$common/info"
 grep -qxF /private/ "$common/info/exclude" 2>/dev/null || printf '\n/private/\n' >> "$common/info/exclude"
 git -C "$root" check-ignore -q private/ || refuse "git does not ignore private/ in the main checkout"
-grep -q -e '--exclude /private/' "$here/Makefile" || refuse "make deploy in this checkout would send private/ to the VPS"
+# Only the main checkout's deploy has private/ under its ./, and until it holds this repo it has no deploy at all. A pull of
+# an older main after this check brings a deploy without the exclude: this run cannot see that, the next one refuses.
+[ ! -e "$root/Makefile" ] || grep -q -e '--exclude /private/' "$root/Makefile" || refuse "make deploy in the main checkout would send private/ to the VPS"
 install -d -m 0700 "$private"
 chmod 0700 "$private"
 say "fence ok"
@@ -181,20 +184,22 @@ say "swapped"
 # --- what lives only on this laptop: added to and refreshed, never deleted from, so transcripts outlive Claude Code's own
 # 30-day cleanup. The private SSH key stays out: it belongs to the laptop, and a new laptop makes a new one.
 laptop_missing=0
+laptop_failed=0   # a source that is there and was not kept: the swap is done, so it warns and the run goes on
 keep() {  # keep <source folder> <destination folder>
   if [ -d "$1" ]; then
     local rc=0
-    install -d -m 0700 "$2"
-    rsync -rlpt -q --chmod=D700,F600 "$1/" "$2/" 2>>"$log" || rc=$?
-    case $rc in 0|24) ;; *) laptop_missing=$((laptop_missing + 1)) ;; esac
+    install -d -m 0700 "$2" 2>>"$log" || rc=1
+    [ "$rc" != 0 ] || rsync -rlpt -q --chmod=D700,F600 "$1/" "$2/" 2>>"$log" || rc=$?
+    case $rc in 0|24) ;; *) laptop_failed=$((laptop_failed + 1)) ;; esac
   else
     laptop_missing=$((laptop_missing + 1))
   fi
 }
 keep_file() {  # keep_file <source file> <destination folder>
   if [ -f "$1" ]; then
-    install -d -m 0700 "$2"
-    install -m 0600 "$1" "$2/"
+    if ! { install -d -m 0700 "$2" && install -m 0600 "$1" "$2/"; } 2>>"$log"; then
+      laptop_failed=$((laptop_failed + 1))
+    fi
   else
     laptop_missing=$((laptop_missing + 1))
   fi
@@ -209,10 +214,11 @@ for folder in "$HOME/.claude/projects/$project"--*; do
 done
 keep "$HOME/.graphify/repos/NousResearch/hermes-agent-v0.22.5" "$private/knowledge/hermes-engine"
 keep "$here/graphify-out" "$private/knowledge/graphify-out"
-say "laptop part: $laptop_missing missing"
+say "laptop part: $laptop_missing missing, $laptop_failed failed"
 
+if [ "$laptop_failed" != 0 ] && [ "$check" = 0 ]; then check=3; fi
 if [ "$check" = 3 ]; then
-  echo "mirror: swapped with warnings: a database is carried raw or a host fact failed (private/mirror.log, MIRROR.json)" >&2
+  echo "mirror: swapped with warnings: a database is carried raw, a host fact failed or a laptop file was not kept (private/mirror.log, MIRROR.json)" >&2
 fi
 say "done"
 exit "$check"
