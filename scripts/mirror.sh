@@ -149,7 +149,7 @@ for service in vault-tools change-proposals; do
   if [ "$frozen" = 1 ]; then   # stopped on purpose: the versions are in requirements.lock and the last copy
     carry "pip-$service.txt"
   else
-    fact "pip-$service.txt" "docker exec personal-agent-$service-1 pip freeze"
+    fact "pip-$service.txt" "docker exec personal-agent-$service-1 pip --no-cache-dir freeze"
   fi
 done
 

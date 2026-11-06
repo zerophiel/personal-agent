@@ -5,7 +5,7 @@ REMOTE_DIR ?= /opt/personal-agent
 SSH := ssh $(VPS_USER)@$(VPS_HOST)
 COMPOSE := sudo docker compose -f compose/docker-compose.yml --env-file config/stack.env
 
-.PHONY: help preflight deploy applied-pull status logs secret-set secret-gen pdf-passwords prune prune-dry backup restore mirror test runtime-map graph
+.PHONY: help preflight deploy applied-pull status logs secret-set secret-gen pdf-passwords prune prune-dry backup restore mirror capture test runtime-map graph
 
 help:
 	@grep -E '^[a-z-]+:' Makefile | cut -d: -f1 | tr '\n' ' '; echo
@@ -66,6 +66,10 @@ restore:
 # git, never synced, counts and statuses only. ALLOW_SHRINK=1 accepts a ledger with fewer rows than the last copy.
 mirror:
 	bash scripts/mirror.sh $(VPS_USER)@$(VPS_HOST)
+
+# The hand-made host config and the exact Python packages, from the live VPS into this checkout to review and commit (read-only there)
+capture:
+	bash scripts/capture-recipe.sh $(VPS_USER)@$(VPS_HOST)
 
 test:
 	python3 -I -m unittest discover -s tests -v
