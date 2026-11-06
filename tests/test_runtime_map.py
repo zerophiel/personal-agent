@@ -37,15 +37,18 @@ class Infra(unittest.TestCase):
     def test_the_host_config_in_a_subfolder_is_on_the_map(self):
         # make capture puts it in host/etc/; an open() of the folder itself used to crash the whole collector
         with tempfile.TemporaryDirectory() as root:
-            for rel in ("Makefile", ".gitignore", "config/stack.env", "config/vps.env", "config/squid/a.conf", "host/pa-x.timer",
-                        "host/etc/docker/daemon.json", "services/s/Dockerfile"):
+            for rel in ("Makefile", ".gitignore", "config/stack.env", "config/vps.env", "config/data.manifest",
+                        "config/secrets.manifest", "config/host-packages.txt", "config/squid/a.conf", "host/pa-x.timer",
+                        "host/etc/docker/daemon.json", "host/etc/apt/keyrings/docker.asc", "services/s/Dockerfile"):
                 os.makedirs(os.path.dirname(os.path.join(root, rel)) or root, exist_ok=True)
                 with open(os.path.join(root, rel), "w", encoding="utf-8") as f:
                     f.write("x\n")
             with mock.patch.object(rm, "ROOT", root):
                 text = rm.render_infra()
-        for rel in ("config/vps.env", "config/squid/a.conf", "host/pa-x.timer", "host/etc/docker/daemon.json", "services/s/Dockerfile"):
+        for rel in ("config/vps.env", "config/data.manifest", "config/secrets.manifest", "config/host-packages.txt",
+                    "config/squid/a.conf", "host/pa-x.timer", "host/etc/docker/daemon.json", "services/s/Dockerfile"):
             self.assertIn(f"## {rel}\n", text)
+        self.assertNotIn("docker.asc", text)
 
 
 class Address(unittest.TestCase):

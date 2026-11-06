@@ -10,7 +10,8 @@ import unittest
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
 FILES = ("etc/ssh/sshd_config.d/00-hardening.conf", "etc/docker/daemon.json", "etc/systemd/journald.conf.d/size.conf",
-         "etc/sysctl.d/99-swappiness.conf", "etc/apt/apt.conf.d/20auto-upgrades")
+         "etc/sysctl.d/99-swappiness.conf", "etc/apt/apt.conf.d/20auto-upgrades", "etc/apt/sources.list.d/docker.list",
+         "etc/apt/keyrings/docker.asc")
 FAKE_SSH = r"""#!/bin/bash
 [ -z "${SSH_FAIL:-}" ] || exit 255
 while [ "$1" = "-o" ]; do shift 2; done
@@ -33,6 +34,13 @@ case "$1 $2" in
     if [[ "$3" == *squid* ]]; then echo '["ubuntu/squid@sha256:lokal"]'; else echo "${LAYERS:-[\"sha256:a\",\"sha256:b\"]}"; fi ;;
 esac
 """
+FAKE_DPKG_QUERY = r"""#!/bin/bash
+# dpkg-query -W -f=... NAMES: one line per name, sorted as the real one does; DROP_PACKAGE leaves one out
+shift 2
+for name in "$@"; do
+  [ "$name" = "${DROP_PACKAGE:-}" ] || echo "$name 1.$name"
+done | sort
+"""
 
 
 class Capture(unittest.TestCase):
@@ -41,6 +49,7 @@ class Capture(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.d, True)
         self.repo = os.path.join(self.d, "repo")
         os.makedirs(os.path.join(self.repo, "scripts"))
+        os.makedirs(os.path.join(self.repo, "config"))
         shutil.copy(os.path.join(ROOT, "scripts", "capture-recipe.sh"), os.path.join(self.repo, "scripts"))
         for service in ("vault-tools", "change-proposals", "comms-brokers"):
             os.makedirs(os.path.join(self.repo, "services", service))
@@ -49,7 +58,7 @@ class Capture(unittest.TestCase):
             self.write(os.path.join(self.rootfs, rel), f"isi {rel}\n")
         self.write(os.path.join(self.rootfs, "etc", "shadow"), "tidak boleh ikut\n")
         fake = os.path.join(self.d, "bin")
-        for name, body in (("ssh", FAKE_SSH), ("docker", FAKE_DOCKER)):
+        for name, body in (("ssh", FAKE_SSH), ("docker", FAKE_DOCKER), ("dpkg-query", FAKE_DPKG_QUERY)):
             self.write(os.path.join(fake, name), body)
             os.chmod(os.path.join(fake, name), stat.S_IRWXU)
         self.freeze = self.write(os.path.join(self.d, "freeze"), "Paket_A==1.2.3\nb.c==4.5+lokal\n")
@@ -85,6 +94,23 @@ class Capture(unittest.TestCase):
                 lines = f.read().splitlines()
             self.assertTrue(lines[0].startswith("# "))
             self.assertEqual(lines[1:], ["Paket_A==1.2.3", "b.c==4.5+lokal"])
+
+    def test_the_host_package_versions_arrive_with_docker_marked_as_pinned(self):
+        self.assertEqual(self.run_capture().returncode, 0)
+        with open(os.path.join(self.repo, "config", "host-packages.txt"), encoding="utf-8") as f:
+            rows = [line.split() for line in f if not line.startswith("#")]
+        how = {row[0]: row[2] for row in rows}
+        self.assertEqual(sorted(name for name, h in how.items() if h == "pin"),
+                         sorted(["docker-ce", "docker-ce-cli", "containerd.io", "docker-buildx-plugin", "docker-compose-plugin"]))
+        self.assertEqual(sorted(name for name, h in how.items() if h == "note"),
+                         sorted(["python3", "python3-yaml", "restic", "rsync", "curl", "sudo", "ufw", "unattended-upgrades", "chrony"]))
+        self.assertTrue(all(row[1] == "1." + row[0] for row in rows))
+
+    def test_an_incomplete_package_list_writes_nothing(self):
+        done = self.run_capture(DROP_PACKAGE="restic")
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("incomplete", done.stderr)
+        self.assertEqual(self.written(), [])
 
     def test_the_digests_to_pin_are_printed(self):
         out = self.run_capture().stdout

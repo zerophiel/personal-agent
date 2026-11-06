@@ -1,0 +1,16 @@
+# Package versions of the live host (make capture). scripts/bootstrap-host.sh installs the pin rows at exactly this version,
+# the note rows at what Ubuntu offers, and reports a difference. name version pin|note
+chrony 4.5-1ubuntu4.2 note
+containerd.io 2.4.2-3~ubuntu.24.04~noble pin
+curl 8.5.0-2ubuntu10.13 note
+docker-buildx-plugin 0.38.1-1~ubuntu.24.04~noble pin
+docker-ce 5:29.9.2-1~ubuntu.24.04~noble pin
+docker-ce-cli 5:29.9.2-1~ubuntu.24.04~noble pin
+docker-compose-plugin 5.6.1-1~ubuntu.24.04~noble pin
+python3 3.12.3-0ubuntu2.1 note
+python3-yaml 6.0.1-2build2 note
+restic 0.16.4-2ubuntu0.24.04.3 note
+rsync 3.2.7-1ubuntu1.4 note
+sudo 1.9.15p5-3ubuntu5.24.04.1 note
+ufw 0.36.2-6 note
+unattended-upgrades 2.9.1+nmu4ubuntu1 note

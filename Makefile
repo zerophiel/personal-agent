@@ -9,12 +9,18 @@ COMPOSE := sudo docker compose -f compose/docker-compose.yml --env-file config/s
 VENV ?= $(HOME)/.venv-personal-agent
 PY ?= $(firstword $(wildcard $(VENV)/bin/python) python3)
 
-.PHONY: help preflight deploy sync up front render-envs secrets-check timers applier venv applied-pull status logs secret-set secret-gen pdf-passwords prune prune-dry backup restore snapshots restore-restic mirror capture test runtime-map graph
+.PHONY: help bootstrap preflight deploy sync up front render-envs secrets-check timers applier venv applied-pull status logs secret-set secret-gen pdf-passwords prune prune-dry backup restore snapshots restore-restic mirror capture test runtime-map graph
 
 help:
 	@grep -E '^[a-z-]+:' Makefile | cut -d: -f1 | tr '\n' ' '; echo
 
-# Read-only VPS checks (KVM, Docker, disk, steal). Safe to run.
+# A new, empty Ubuntu 24.04 host, for the login of config/vps.env: packages, Docker, swap, the account, then ssh and the firewall.
+# BOOTSTRAP_USER is the provider's first login, which may ask for a password: a step for the owner's terminal (docs/REBUILD.md).
+# Refuses a host with the project's containers or a ledger.
+bootstrap:
+	bash scripts/bootstrap.sh "$(BOOTSTRAP_USER)" $(VPS_USER)@$(VPS_HOST)
+
+# Read-only checks of a host after make bootstrap: machine, Docker, ssh, firewall, the way out. Exit 0 only if all pass. Safe to run.
 preflight:
 	$(SSH) 'bash -s' < scripts/preflight.sh
 
