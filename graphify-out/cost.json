@@ -1,0 +1,103 @@
+{
+  "runs": [
+    {
+      "date": "2026-10-31T11:40:00+07:00",
+      "input_tokens": 925457,
+      "output_tokens": 0,
+      "files": 21,
+      "note": "phase 1: 5 extraction subagents over the 21 docs (deep mode); Claude Code reports only each subagent's total tokens, so the totals are recorded as input"
+    },
+    {
+      "date": "2026-10-31T05:30:20.164338+00:00",
+      "input_tokens": 211415,
+      "output_tokens": 0,
+      "files": 120
+    },
+    {
+      "date": "2026-11-01T01:34:24.885467+00:00",
+      "input_tokens": 16148467,
+      "output_tokens": 2990217,
+      "files": 19,
+      "note": "deep --update of the 19 docs changed since 31 Oct: a standard-depth pass (3 agents, discarded as thinner than the previous extraction), 8 deep agents (the usage limit stopped 7; group 7's output was not used) and 2 agents redoing group 7 (PROGRESS; calibration and payday). 13 agents; tokens summed per turn from their transcripts, input counts cache reads and writes"
+    },
+    {
+      "date": "2026-11-01T04:10:32.896290+00:00",
+      "input_tokens": 4009028,
+      "output_tokens": 284286,
+      "files": 12,
+      "note": "delta --update of the 12 docs changed since 7d6b54d (Deploy 2 PROGRESS and payday spec, vault SOUL, live-bot snapshot of 10:29): the previous deep extraction kept with line numbers moved; 4 deep agents read every line and wrote patches only (60 nodes and 299 edges added, 135 nodes corrected, 1 node and 6 edges dropped); tokens summed from the agents' transcripts; after re-clustering 33 new community names and 35 renames where a saved name had moved onto other members"
+    },
+    {
+      "date": "2026-11-01T05:13:35.341373+00:00",
+      "input_tokens": 4320472,
+      "output_tokens": 189031,
+      "files": 14,
+      "note": "delta --update of the 14 docs changed since bd5ad48 (front live: PROGRESS, RUNBOOK, SECURITY, front SOUL; live-bot snapshot 11:45 WIB), 5 agents; community names audited after the re-cluster (25 renamed, 49 named)"
+    },
+    {
+      "date": "2026-11-01T09:50:10.283723+00:00",
+      "input_tokens": 3514146,
+      "output_tokens": 207944,
+      "files": 5,
+      "note": "delta --update of the 5 docs changed since 2188d82 (the applier, built and not installed: SECURITY contract, RUNBOOK install and rollback, ARCHITECTURE outcome folder, PROGRESS section and open questions 17-18, assumptions M2 gate checks), 2 agents; make graph for the 16 changed code files; community names audited after the re-cluster (77 named, 13 renamed)"
+    },
+    {
+      "date": "2026-11-01T14:03:13.559310+00:00",
+      "input_tokens": 6126896,
+      "output_tokens": 339152,
+      "files": 13,
+      "note": "doc delta from 65e324f: PROGRESS, SECURITY, assumptions and 10 docs/runtime files after the doubled-rows deploy (5 patch agents)"
+    },
+    {
+      "date": "2026-11-01T17:16:23.001681+00:00",
+      "input_tokens": 6228705,
+      "output_tokens": 319617,
+      "files": 13,
+      "note": "doc delta from cee173a: PROGRESS, SECURITY, RUNBOOK, ARCHITECTURE and 9 docs/runtime files after M3"
+    },
+    {
+      "date": "2026-11-01T19:21:06.314125+00:00",
+      "input_tokens": 6389765,
+      "output_tokens": 356712,
+      "files": 12,
+      "note": "doc delta from e7c3382: PROGRESS, calibration and 10 docs/runtime files after the 2 Nov 01:23 deploy (5 patch agents)"
+    },
+    {
+      "date": "2026-11-02T03:21:11.761244+00:00",
+      "input_tokens": 2821485,
+      "output_tokens": 99176,
+      "files": 2,
+      "note": "doc delta from 1602b17: PROGRESS and GMAIL_OAUTH after 99c2c96 (gmail-renew, lesson fee not paid) (1 patch agent)"
+    },
+    {
+      "date": "2026-11-02T03:49:27.095173+00:00",
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "files": 2,
+      "note": "round 11: host-written patch from the diff of cf4e7e1 (PROGRESS.md, GMAIL_OAUTH.md), no LLM"
+    },
+    {
+      "date": "2026-11-02T05:06:08.687486+00:00",
+      "input_tokens": 6945658,
+      "output_tokens": 308286,
+      "files": 12,
+      "note": "doc delta from cf4e7e1 (PROGRESS, GMAIL_OAUTH) and e41db72 (10 docs/runtime files) after the 2 Nov 11:16 ingest-alert deploy (4 patch agents)"
+    },
+    {
+      "date": "2026-11-02T08:08:42.957114+00:00",
+      "input_tokens": 4209808,
+      "output_tokens": 233031,
+      "files": 8,
+      "note": "Round 14: M4 comms, 8 docs as a delta from f7f45c8 (two new: the comms SOUL and the brokers' requirements), every community named"
+    },
+    {
+      "date": "2026-11-07T03:45:04.720564+00:00",
+      "input_tokens": 14621950,
+      "output_tokens": 736921,
+      "files": 22,
+      "note": "Round 15: the rebuild work, 22 docs as a delta from 585126b (new: docs/REBUILD.md, docs/LAPTOP.md, ops/datafix/README.md, ops/graphify/README.md, config/host-packages.txt), every community named"
+    }
+  ],
+  "total_input_tokens": 76473252,
+  "total_output_tokens": 6064373
+}

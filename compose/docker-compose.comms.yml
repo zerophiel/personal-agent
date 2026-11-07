@@ -1,0 +1,115 @@
+# M4 comms zone (NOT deployed): the owner's email and calendar assistant. `make deploy` passes compose/docker-compose.yml
+# alone, so nothing here is built or started by it. Start it only after docs/RUNBOOK.md, "Comms zone" (the owner's OAuth
+# client and consents, the fourth bot, the comms workspace key, the secrets, scripts/render-comms-env.sh). First
+# recreate squid-comms (`up -d --no-deps --force-recreate squid-comms` with the main file), so it reads the comms.conf
+# of M4 (a file bind mount keeps the file it started with, and rsync writes a new one), then:
+#   sudo docker compose -f compose/docker-compose.yml -f compose/docker-compose.comms.yml --env-file config/stack.env \
+#     --profile comms up -d --build squid-google gmail-broker calendar-broker comms
+# Every service here waits for the comms profile. The file only adds services and secrets: the networks and squid-comms
+# are the main file's, and no main-file service is changed (tests/test_zones.py). YAML anchors do not cross files, so
+# the two blocks below repeat the main file's (a test keeps them equal).
+#
+# comms (Hermes) reaches Anthropic and Telegram through squid-comms and the two brokers over net-comms. Only the brokers
+# hold the Google tokens, and they reach Google through squid-google. All of them share net-comms, so the split is by
+# proxy, not by network: comms could reach squid-google, but has no Google token to use there.
+
+x-hardened: &hardened
+  restart: unless-stopped
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "3"}
+
+x-squid: &squid
+  <<: *hardened
+  image: ubuntu/squid@sha256:8a3baed477e2c282ab8aa5edad442f69873246964f225c5c2ae8364b6610963c   # tag 6.6-24.04_edge
+  # squid starts as root and drops to user `proxy`; it needs these caps after cap_drop ALL
+  cap_add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE]
+  tmpfs: ["/var/log/squid:uid=13,gid=13,mode=0755,size=32m"]
+  mem_limit: 128m
+  oom_score_adj: -500
+  cpus: 0.25
+
+services:
+  squid-google:   # the brokers' only way out (config/squid/google.conf)
+    <<: *squid
+    profiles: ["comms"]
+    volumes: ["../config/squid/google.conf:/etc/squid/squid.conf:ro"]
+    networks: [net-comms, egress]
+
+  gmail-broker:   # Gmail for comms: search, read, Comms labels, reply drafts. Nothing is sent; finance mail is hidden
+    <<: *hardened
+    profiles: ["comms"]
+    build: ../services/comms-brokers
+    command: ["python", "-m", "brokers.gmail"]
+    environment:
+      HTTPS_PROXY: http://squid-google:3128
+      NO_PROXY: localhost,127.0.0.1
+    secrets: [google_comms_client, gmail_comms_token, gmail_broker_mcp_token]
+    networks: [net-comms]
+    read_only: true
+    tmpfs: ["/tmp"]
+    mem_limit: 192m
+    cpus: 0.25
+    cpu_shares: 512
+    depends_on: [squid-google]
+
+  calendar-broker:   # Calendar for comms: events of the calendars in brokers/policy.json, read-only
+    <<: *hardened
+    profiles: ["comms"]
+    build: ../services/comms-brokers
+    command: ["python", "-m", "brokers.gcal"]
+    environment:
+      HTTPS_PROXY: http://squid-google:3128
+      NO_PROXY: localhost,127.0.0.1
+    secrets: [google_comms_client, calendar_comms_token, calendar_broker_mcp_token]
+    networks: [net-comms]
+    read_only: true
+    tmpfs: ["/tmp"]
+    mem_limit: 192m
+    cpus: 0.25
+    cpu_shares: 512
+    depends_on: [squid-google]
+
+  comms:   # Hermes with the brokers' six tools and nothing else (services/hermes/comms)
+    image: nousresearch/hermes-agent@sha256:9c5561579f3ffdf333401797094ac3a743738d6c25d40f4331c7bf77b694238d
+    profiles: ["comms"]
+    command: ["gateway", "run"]
+    restart: unless-stopped
+    stop_grace_period: 60s   # as vault: Hermes drains its sessions on SIGTERM
+    # as front: the image boots as root (s6: uid remap, chown of /opt/data), then runs Hermes as uid 10000
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE, FOWNER, KILL]
+    security_opt: ["no-new-privileges:true"]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    env_file:
+      - path: /opt/personal-agent-data/comms.env   # rendered on the VPS by scripts/render-comms-env.sh
+        required: false                           # so compose still parses before the comms secrets exist
+    volumes:
+      - /opt/personal-agent-data/hermes-comms:/opt/data
+      # read-only overlays: the agent cannot edit its own config, persona or plugin
+      - ../services/hermes/comms/config.yaml:/opt/data/config.yaml:ro
+      - ../services/hermes/comms/SOUL.md:/opt/data/SOUL.md:ro
+      - ../services/hermes/front/plugins/cardblock:/opt/data/plugins/cardblock:ro   # front's plugin, the same code
+    networks: [net-comms]
+    mem_limit: 1g
+    oom_score_adj: 300
+    cpus: 1.0
+    cpu_shares: 512
+    pids_limit: 256
+    depends_on: [squid-comms, gmail-broker, calendar-broker]
+
+secrets:
+  google_comms_client:         # the comms OAuth client JSON (docs/GMAIL_OAUTH.md, comms)
+    file: /opt/personal-agent-secrets/google_comms_client
+  gmail_comms_token:           # gmail.modify; laptop: bash scripts/gmail-renew.sh ~/client_secret_comms.json gmail_comms_token
+    file: /opt/personal-agent-secrets/gmail_comms_token
+  calendar_comms_token:        # calendar.events.readonly; the same script with calendar_comms_token
+    file: /opt/personal-agent-secrets/calendar_comms_token
+  gmail_broker_mcp_token:      # random; `make secret-gen NAME=gmail_broker_mcp_token TYPE=token`
+    file: /opt/personal-agent-secrets/gmail_broker_mcp_token
+  calendar_broker_mcp_token:   # random; `make secret-gen NAME=calendar_broker_mcp_token TYPE=token`
+    file: /opt/personal-agent-secrets/calendar_broker_mcp_token

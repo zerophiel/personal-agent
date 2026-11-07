@@ -12,7 +12,7 @@ x-hardened: &hardened
 
 x-squid: &squid
   <<: *hardened
-  image: ubuntu/squid:6.6-24.04_edge
+  image: ubuntu/squid@sha256:8a3baed477e2c282ab8aa5edad442f69873246964f225c5c2ae8364b6610963c   # tag 6.6-24.04_edge
   # squid starts as root and drops to user `proxy`; it needs these caps after cap_drop ALL
   cap_add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE]
   tmpfs: ["/var/log/squid:uid=13,gid=13,mode=0755,size=32m"]
@@ -46,6 +46,66 @@ services:
     volumes: ["../config/squid/ctl.conf:/etc/squid/squid.conf:ro"]
     networks: [net-ctl, egress]
 
+  vault-tools:
+    <<: *hardened
+    build: ../services/vault-tools
+    environment:
+      HTTPS_PROXY: http://squid-vault:3128   # Notion sync only (api.notion.com); everything else stays internal
+      NO_PROXY: localhost,127.0.0.1
+    secrets: [vault_tools_key, vault_tools_mcp_token, vault_tools_internal_token, pdf_passwords, notion_token]
+    volumes:
+      - /opt/personal-agent-data/vault-tools:/data
+      - /opt/personal-agent-data/ingest:/ingest:ro   # statement drop folder: ingest writes, vault-tools reads
+    networks: [net-vault]
+    read_only: true
+    tmpfs: ["/tmp"]
+    mem_limit: 384m
+    oom_score_adj: -500
+    cpus: 1.0
+    depends_on: [squid-vault]
+
+  ingest-gmail:   # one-shot job: `docker compose --profile jobs run --rm ingest-gmail` (timer pa-ingest)
+    <<: *hardened
+    restart: "no"
+    profiles: ["jobs"]
+    build: ../services/ingest-gmail
+    environment:
+      HTTPS_PROXY: http://squid-vault:3128   # allowlist: gmail.googleapis.com, oauth2.googleapis.com
+      NO_PROXY: localhost,127.0.0.1
+    secrets: [gmail_ingest_token, gmail_ingest_client]
+    volumes:
+      - /opt/personal-agent-data/ingest:/ingest          # rw here; vault-tools mounts it read-only
+      - /opt/personal-agent-data/ingest-state:/state
+    networks: [net-vault]
+    read_only: true
+    tmpfs: ["/tmp"]
+    mem_limit: 256m
+    cpus: 0.5
+    depends_on: [squid-vault]
+
+  vault:
+    image: nousresearch/hermes-agent@sha256:9c5561579f3ffdf333401797094ac3a743738d6c25d40f4331c7bf77b694238d
+    command: ["gateway", "run"]
+    restart: unless-stopped
+    stop_grace_period: 60s   # Hermes drains its sessions on SIGTERM; Docker's default 10 s killed it mid-cleanup (exited UNCLEANLY)
+    security_opt: ["no-new-privileges:true"]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    env_file: /opt/personal-agent-data/vault.env   # rendered on the VPS by scripts/render-vault-env.sh
+    volumes:
+      - /opt/personal-agent-data/hermes-vault:/opt/data
+      # read-only overlays: the agent cannot edit its own config, persona or plugins
+      - ../services/hermes/vault/config.yaml:/opt/data/config.yaml:ro
+      - ../services/hermes/vault/SOUL.md:/opt/data/SOUL.md:ro
+      - ../services/hermes/vault/plugins/cardguard:/opt/data/plugins/cardguard:ro
+    networks: [net-vault]
+    mem_limit: 1g
+    oom_score_adj: -500
+    cpus: 1.0
+    cpu_shares: 1024
+    depends_on: [squid-vault, vault-tools]
+
   control:
     <<: *hardened
     build: ../services/control
@@ -54,7 +114,18 @@ services:
       HTTPS_PROXY: http://squid-ctl:3128
       NO_PROXY: localhost
       TELEGRAM_TOKEN_FILE: /run/secrets/telegram_control_token
+      CONTROL_STATE_DIR: /state
+      PROPOSALS_INBOX_DIR: /inbox
+      CONTROL_REPO_DIR: /repo
+      APPLIER_OUTCOME_DIR: /outcome
     secrets: [telegram_control_token]
+    volumes:   # the first two owned by uid 10001 (scripts/data-dirs.sh); two folders, so an inbox file can never be an approval
+      - /opt/personal-agent-data/control-state:/state     # control only: control.db, decided/, approved/ (the applier's input)
+      - /opt/personal-agent-data/proposals-inbox:/inbox   # change-proposals writes, control reads and empties
+      # the installed front files, so the diff before the buttons is control's own, never the agent's
+      - ../services/hermes/front:/repo/services/hermes/front:ro
+      - ../config/squid:/repo/config/squid:ro
+      - /opt/personal-agent-data/applier/outcome:/outcome:ro   # what the applier did (services/applier), told once
     networks: [net-ctl]
     read_only: true
     tmpfs: ["/tmp"]
@@ -63,6 +134,73 @@ services:
     cpus: 0.25
     depends_on: [squid-ctl]
 
+  front:   # M3 front zone: the owner's general assistant on the open web. Starts only with --profile front, after the owner's
+           # two secrets exist and scripts/render-front-env.sh has run (docs/RUNBOOK.md, "Front zone")
+    image: nousresearch/hermes-agent@sha256:9c5561579f3ffdf333401797094ac3a743738d6c25d40f4331c7bf77b694238d
+    profiles: ["front"]
+    command: ["gateway", "run"]
+    restart: unless-stopped
+    stop_grace_period: 60s   # as vault: Hermes drains its sessions on SIGTERM
+    # the image boots as root (s6: uid remap, chown of /opt/data), then runs Hermes as uid 10000; these are all it needs
+    # (tested 2026-11-01: `gateway run` with these caps, pids_limit and memory stayed up as uid 10000 with 26 processes
+    # and stopped cleanly), the rest of Docker's default set is dropped
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE, FOWNER, KILL]
+    security_opt: ["no-new-privileges:true"]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    env_file:
+      - path: /opt/personal-agent-data/front.env   # rendered on the VPS by scripts/render-front-env.sh
+        required: false                           # so compose still parses before the owner's front secrets exist
+    volumes:
+      - /opt/personal-agent-data/hermes-front:/opt/data
+      # read-only overlays: the agent cannot edit its own config, persona or plugin
+      - ../services/hermes/front/config.yaml:/opt/data/config.yaml:ro
+      - ../services/hermes/front/SOUL.md:/opt/data/SOUL.md:ro
+      - ../services/hermes/front/plugins/cardblock:/opt/data/plugins/cardblock:ro
+    networks: [net-front]
+    mem_limit: 2g
+    oom_score_adj: 300
+    cpus: 1.0
+    cpu_shares: 512
+    pids_limit: 256
+    depends_on: [squid-front, change-proposals]
+
+  change-proposals:   # M3: the front agent's only way to ask for a change; it writes the inbox and nothing else
+    <<: *hardened
+    profiles: ["front"]
+    build:
+      context: ../services          # control/control.py is copied in: the proposal rules are control's own
+      dockerfile: change-proposals/Dockerfile
+    environment:
+      PROPOSALS_INBOX_DIR: /inbox
+    secrets: [change_proposals_mcp_token]
+    volumes:
+      - /opt/personal-agent-data/proposals-inbox:/inbox   # control (net-ctl) reads it: all the two zones share
+    networks: [net-front]
+    read_only: true
+    tmpfs: ["/tmp"]
+    mem_limit: 192m
+    cpus: 0.25
+    cpu_shares: 512
+
 secrets:
   telegram_control_token:
     file: /opt/personal-agent-secrets/telegram_control_token
+  vault_tools_key:
+    file: /opt/personal-agent-secrets/vault_tools_key
+  vault_tools_mcp_token:
+    file: /opt/personal-agent-secrets/vault_tools_mcp_token
+  vault_tools_internal_token:
+    file: /opt/personal-agent-secrets/vault_tools_internal_token
+  gmail_ingest_token:
+    file: /opt/personal-agent-secrets/gmail_ingest_token
+  gmail_ingest_client:
+    file: /opt/personal-agent-secrets/gmail_ingest_client
+  pdf_passwords:   # JSON {"bank": ["password", ...]}; set with `make secret-set NAME=pdf_passwords`
+    file: /opt/personal-agent-secrets/pdf_passwords
+  notion_token:    # internal integration token; set with `make secret-set NAME=notion_token`
+    file: /opt/personal-agent-secrets/notion_token
+  change_proposals_mcp_token:   # random; `make secret-gen NAME=change_proposals_mcp_token TYPE=token`
+    file: /opt/personal-agent-secrets/change_proposals_mcp_token

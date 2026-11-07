@@ -1,0 +1,93 @@
+# Hermes vault profile (v0.22.5). Mounted read-only; changes go through git + deploy only.
+# Keys per hermes-agent docs: /user-guide/configuration, /reference/mcp-config-reference,
+# /integrations/providers. Model id claude-sonnet-5-5 is NOT in the docs; verified live (docs/assumptions.md).
+model:
+  provider: anthropic
+  default: claude-sonnet-5-5
+
+agent:
+  max_turns: 40
+  reasoning_effort: high      # owner's choice 2026-10-28: accuracy over cost; real chats showed 'answer first, check later' slips at medium
+  disabled_toolsets:        # finance zone: no shell, code, browser, web, files, delegation, cron, memory
+    - terminal
+    - code_execution
+    - browser
+    - web
+    - delegation
+    - file
+    - cronjob
+    - memory
+    - kanban
+    - computer_use          # remote screen control: never in the finance zone
+    - image_gen             # not needed; each enabled toolset adds schema tokens to every session
+    - tts
+    - skills                # instructions live in SOUL.md, not in Hermes skills
+    - todo
+    - session_search        # old sessions carry stale facts; the ledger is the source of truth
+    - connections
+
+auxiliary:
+  compression:               # the summary carries money figures and decisions into later turns: the stronger model
+    provider: anthropic
+    model: claude-sonnet-5-5
+  title_generation:          # harmless: never feeds a number
+    provider: anthropic
+    model: claude-haiku-5-5
+  vision:                    # amounts on receipts and transfer screenshots
+    provider: anthropic
+    model: claude-sonnet-5-5
+
+compression:
+  threshold_tokens: 100000     # was 60000: three compactions in six minutes lost the owner's answers (re-asked questions)
+  # idle_compact_after_seconds: Hermes default 0 (off). 1800 would summarise the owner's answers when they step away to
+  # make the payday transfers and come back to report (it fires above 20% of threshold_tokens; it never fired 27-30 Oct)
+  min_tail_user_messages: 3    # default 1: the owner's last answers stay verbatim, not only in the summary
+
+memory:
+  memory_enabled: false      # financial facts live in the ledger, never in Hermes memory
+  user_profile_enabled: false
+  write_approval: true
+
+skills:
+  write_approval: true
+
+tools:
+  tool_search:
+    enabled: "off"   # quoted: bare off is a YAML boolean. docs: /user-guide/features/tool-search. With ~28 MCP tools Hermes defers most of them behind
+                     # tool_search ("tier 1: 6 visible, 30 deferred"); the model then said it had no PDF tool.
+                     # Eager tools cost ~5K tokens/turn (prompt-cached) and are reliable.
+
+security:
+  allow_lazy_installs: false
+
+sessions:
+  retention_days: 90
+
+unauthorized_dm_behavior: ignore
+
+plugins:
+  enabled:
+    - cardguard
+
+gateway:
+  platforms:
+    telegram:
+      extra:
+        disable_link_previews: true
+        allowed_chats: "none"    # no group id matches: every group is dropped; DMs are never filtered by this
+
+mcp_servers:
+  vault_tools:
+    url: "http://vault-tools:8000/mcp"
+    headers:
+      Authorization: "Bearer ${env:VAULT_TOOLS_MCP_TOKEN}"
+    timeout: 60
+    connect_timeout: 20
+    tools:
+      resources: false
+      prompts: false
+
+# /new, /clear, /reset and /undo only drop the chat context (the ledger is untouched) and only the owner can send them:
+# no confirmation prompt. The bot cannot save this itself because config.yaml is mounted read-only.
+approvals:
+  destructive_slash_confirm: false

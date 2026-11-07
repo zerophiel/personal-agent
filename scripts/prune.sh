@@ -1,22 +1,31 @@
 #!/usr/bin/env bash
-# Weekly Docker cleanup. NEVER touches volumes. Keeps images used by current compose files
-# and those listed in the previous release manifest. DRY_RUN=1 only prints.
+# Weekly Docker cleanup. NEVER touches volumes. Keeps the images of every compose service in every profile (a stopped
+# front zone or a timer job keeps its image), of running containers and of the release manifests, compared by full image
+# ID: `docker images` lists the digest-pinned Hermes image as <none>, so names alone never matched it. If compose cannot
+# list its images, the script stops before removing anything. DRY_RUN=1 only prints.
 set -euo pipefail
 ROOT="${ROOT:-/opt/personal-agent}"
 MANIFEST_DIR="${ROOT}/releases"          # current.txt, previous.txt: one image ref/ID per line
 run() { if [[ "${DRY_RUN:-0}" == 1 ]]; then echo "[dry-run] $*"; else "$@"; fi; }
+compose=(docker compose -f "$ROOT/compose/docker-compose.yml" --env-file "$ROOT/config/stack.env")
 
-keep=$(mktemp); trap 'rm -f "$keep"' EXIT
-docker compose -f "$ROOT/compose/docker-compose.yml" --env-file "$ROOT/config/stack.env" config --images 2>/dev/null >>"$keep" || true
-cat "$MANIFEST_DIR"/current.txt "$MANIFEST_DIR"/previous.txt 2>/dev/null >>"$keep" || true
+refs=$(mktemp); keep=$(mktemp); trap 'rm -f "$refs" "$keep"' EXIT
+plist=$("${compose[@]}" config --profiles)        # front, jobs
+profiles=()
+for p in $plist; do profiles+=(--profile "$p"); done
+"${compose[@]}" "${profiles[@]}" config --images >>"$refs"
+cat "$MANIFEST_DIR"/current.txt "$MANIFEST_DIR"/previous.txt 2>/dev/null >>"$refs" || true
 # running containers' images are also protected
-docker ps -q | xargs -r docker inspect --format '{{.Image}} {{.Config.Image}}' >>"$keep"
+docker ps -q | xargs -r docker inspect --format '{{.Image}}' >>"$refs"
+while read -r ref; do
+  [[ -z "$ref" ]] || docker image inspect --format '{{.Id}}' "$ref" 2>/dev/null || true
+done <"$refs" | sort -u >"$keep"
 
 before=$(df --output=used -B1M / | tail -1)
 run docker container prune -f
 run docker image prune -f                          # dangling only
-docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | while read -r ref id; do
-  if ! grep -qE "(^|[ ])(${ref}|${id}|sha256:${id}[0-9a-f]*)($|[ ])" "$keep"; then
+docker images --no-trunc --format '{{.ID}} {{.Repository}}:{{.Tag}}' | while read -r id ref; do
+  if ! grep -qxF "$id" "$keep"; then
     echo "unused image: $ref"
     run docker image rm "$id" || true
   fi

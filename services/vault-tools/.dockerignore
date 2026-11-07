@@ -1,0 +1,3 @@
+# The image copies vault_tools/ whole: the caches of a local test run would change it and force a rebuild on deploy.
+**/__pycache__
+**/*.pyc

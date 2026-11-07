@@ -1,0 +1,8 @@
+[Unit]
+Description=Upload relay and retention sweep every 15 minutes (safety net for the path unit)
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+Unit=pa-uploads.service
+[Install]
+WantedBy=timers.target

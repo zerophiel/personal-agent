@@ -1,0 +1,3 @@
+# The login account of config/vps.env runs Docker, systemctl and the scripts through sudo. On the first VPS this rule came from
+# cloud-init; on any other host scripts/bootstrap-host.sh fills in the account and checks the result with visudo.
+@LOGIN@ ALL=(ALL) NOPASSWD:ALL

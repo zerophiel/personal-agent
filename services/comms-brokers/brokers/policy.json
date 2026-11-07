@@ -1,0 +1,28 @@
+{
+  "gmail": {
+    "hidden_labels": [
+      "Keuangan"
+    ],
+    "hidden_sender_domains": [
+      "bankmandiri.co.id",
+      "bankmega.com",
+      "cimbniaga.co.id",
+      "dbs.com",
+      "hsbc.co.id"
+    ],
+    "label_prefix": "Comms",
+    "categories": [
+      "Penting",
+      "Perlu-Dibalas",
+      "Menunggu",
+      "Info",
+      "Promosi"
+    ]
+  },
+  "calendar": {
+    "calendars": {
+      "utama": "primary"
+    },
+    "max_days": 31
+  }
+}

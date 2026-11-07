@@ -1,0 +1,230 @@
+"""SQLite ledger. Money columns are INTEGER Rupiah, enforced by CHECK(typeof(x)='integer')."""
+from __future__ import annotations
+
+import sqlite3
+from datetime import datetime, timedelta, timezone
+
+WIB = timezone(timedelta(hours=7))
+
+SCHEMA_VERSION = 14  # 14: one_off_bills; 13: card_payments, debt_payments, plan_progress, fund_reports; 12: change_log, balance_reports, feature_requests.resolution; 11: subscriptions.ends/essential, sinking_funds.pace/due_payday; 10: card_lines, doc_files, statements.lines_status/lines_diff, sinking_funds.low_*; 9: card_installments, skipped_files; 8: statements.paid_amount; 7: cards.interest_bp_month; 6: transactions.merged_into, net_snapshots; 5: debts.pay_method/pay_to_alias/debit_account_alias; 2: cards.pay_method/pay_to_alias; 3: transaction dedupe, mutation_files, category_rules; 4: sinking_funds
+
+
+def _money(col: str, nullable: bool = False) -> str:
+    null = f"{col} IS NULL OR " if nullable else ""
+    return f"{col} INTEGER CHECK ({null}typeof({col})='integer')"
+
+
+DDL = f"""
+CREATE TABLE IF NOT EXISTS accounts (
+  id INTEGER PRIMARY KEY, alias TEXT NOT NULL UNIQUE, bank TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('main','pool','savings')), last4 TEXT);
+CREATE TABLE IF NOT EXISTS cards (
+  id INTEGER PRIMARY KEY, alias TEXT NOT NULL UNIQUE, bank TEXT NOT NULL, last4 TEXT NOT NULL,
+  statement_day INTEGER NOT NULL CHECK (statement_day BETWEEN 1 AND 31),
+  due_day INTEGER NOT NULL CHECK (due_day BETWEEN 1 AND 31),
+  {_money('credit_limit')} NOT NULL,
+  pay_method TEXT NOT NULL DEFAULT 'transfer' CHECK (pay_method IN ('transfer','app_menu')),
+  pay_to_alias TEXT,
+  interest_bp_month INTEGER);   -- monthly interest on an unpaid balance (basis points); NULL = default
+CREATE TABLE IF NOT EXISTS debts (
+  id INTEGER PRIMARY KEY, alias TEXT NOT NULL UNIQUE, lender TEXT NOT NULL,
+  {_money('outstanding')} NOT NULL, {_money('installment')} NOT NULL,
+  tenor_left INTEGER NOT NULL, rate_bp INTEGER, due_day INTEGER NOT NULL,
+  pay_method TEXT NOT NULL DEFAULT 'transfer' CHECK (pay_method IN ('transfer','autodebit')),
+  pay_to_alias TEXT,            -- payee alias to transfer to (pay_method=transfer)
+  debit_account_alias TEXT);    -- accounts.alias that is auto-debited (pay_method=autodebit)
+CREATE TABLE IF NOT EXISTS fixed_expenses (
+  id INTEGER PRIMARY KEY, alias TEXT NOT NULL UNIQUE, payee_alias TEXT NOT NULL,
+  {_money('amount')} NOT NULL, due_day INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS statements (
+  id INTEGER PRIMARY KEY, card_id INTEGER NOT NULL REFERENCES cards(id),
+  file_hash TEXT NOT NULL UNIQUE,
+  statement_date TEXT NOT NULL, due_date TEXT NOT NULL,
+  {_money('previous_balance')} NOT NULL, {_money('payments')} NOT NULL,
+  {_money('charges')} NOT NULL, {_money('fees')} NOT NULL,
+  {_money('total_due')} NOT NULL, {_money('minimum_due')} NOT NULL,
+  reconciled INTEGER NOT NULL CHECK (reconciled IN (0,1)),
+  recon_diff INTEGER NOT NULL, ingested_at TEXT NOT NULL, paid_at TEXT,
+  {_money('paid_amount')} NOT NULL DEFAULT 0);   -- payments the owner made against this statement (partial or full)
+CREATE TABLE IF NOT EXISTS transactions (
+  id INTEGER PRIMARY KEY, statement_id INTEGER REFERENCES statements(id),
+  card_id INTEGER REFERENCES cards(id), account_id INTEGER REFERENCES accounts(id),
+  txn_date TEXT NOT NULL, merchant TEXT NOT NULL,
+  {_money('amount')} NOT NULL, category TEXT,
+  status TEXT NOT NULL CHECK (status IN ('unverified','verified')),
+  source TEXT NOT NULL CHECK (source IN ('statement','receipt','manual','mutation')),
+  dedupe_key TEXT, file_hash TEXT,
+  merged_into INTEGER);   -- a receipt later seen in a bank mutation points at that row (never counted twice)
+CREATE INDEX IF NOT EXISTS idx_txn_date ON transactions(txn_date);
+CREATE TABLE IF NOT EXISTS mutation_files (
+  file_hash TEXT PRIMARY KEY, account_id INTEGER NOT NULL REFERENCES accounts(id),
+  period_start TEXT NOT NULL, period_end TEXT NOT NULL,
+  {_money('opening_balance', True)}, {_money('closing_balance', True)},
+  row_count INTEGER NOT NULL, new_rows INTEGER NOT NULL,
+  reconciled INTEGER NOT NULL CHECK (reconciled IN (0,1)), recon_diff INTEGER NOT NULL,
+  ingested_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS sinking_funds (
+  alias TEXT PRIMARY KEY, {_money('target')} NOT NULL CHECK (target > 0), due_date TEXT NOT NULL,
+  pool_alias TEXT NOT NULL REFERENCES accounts(alias),
+  pool_pay_to TEXT NOT NULL,            -- payee alias of the pool account number (contributions go here)
+  creditor_pay_to TEXT,                 -- payee alias of the creditor's account (final payment)
+  {_money('saved_so_far')} NOT NULL, saved_asof TEXT NOT NULL, note TEXT,
+  low_amount INTEGER, low_until TEXT,   -- optional low phase: deposit `low_amount` per payday up to month `low_until` (YYYY-MM), then spread the rest
+  pace TEXT NOT NULL DEFAULT 'rata' CHECK (pace IN ('rata','sisa')),   -- rata: a set deposit per payday; sisa: cards first, the pot gets what is left
+  due_payday INTEGER NOT NULL DEFAULT 0 CHECK (due_payday IN (0,1)));   -- 1: a payday on (or just before) the due date still counts
+CREATE TABLE IF NOT EXISTS net_snapshots (
+  month TEXT PRIMARY KEY, {_money('total_debt')} NOT NULL, {_money('accounts_balance', True)},
+  {_money('saved_funds')} NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS ingest_checks (   -- what the PDF itself contains, to catch rows the model forgot to send
+  file_hash TEXT PRIMARY KEY, dated_lines INTEGER NOT NULL, parts INTEGER NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS owner_names (name TEXT PRIMARY KEY);   -- lowercase; a transfer to one of these is the owner's own move
+CREATE TABLE IF NOT EXISTS category_rules (
+  pattern TEXT PRIMARY KEY, category TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS card_installments (   -- "03/12" on a card statement: payment 3 of 12
+  card_id INTEGER NOT NULL REFERENCES cards(id), key TEXT NOT NULL, description TEXT NOT NULL,
+  {_money('per_month')} NOT NULL CHECK (per_month > 0),
+  seq INTEGER NOT NULL, total INTEGER NOT NULL CHECK (total >= 2 AND seq BETWEEN 1 AND total),
+  as_of TEXT NOT NULL,                  -- statement date that printed seq/total
+  PRIMARY KEY (card_id, key));
+CREATE TABLE IF NOT EXISTS category_keywords (   -- owner's own words (a teacher's or helper's name): kept in the ledger, not in the code
+  keyword TEXT PRIMARY KEY, category TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS card_installment_scans (   -- statements already read for installments (an empty one = none printed)
+  card_id INTEGER NOT NULL REFERENCES cards(id), statement_date TEXT NOT NULL, PRIMARY KEY (card_id, statement_date));
+CREATE TABLE IF NOT EXISTS card_lines (   -- every transaction line of a card statement, read by code; amount > 0 = charge, < 0 = credit
+  id INTEGER PRIMARY KEY, statement_id INTEGER NOT NULL REFERENCES statements(id), card_id INTEGER NOT NULL REFERENCES cards(id),
+  cycle TEXT NOT NULL, txn_date TEXT, description TEXT NOT NULL, {_money('amount')} NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('belanja','langganan','cicilan','bunga','biaya','pembayaran','refund')), category TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_card_lines_cycle ON card_lines(cycle);
+CREATE TABLE IF NOT EXISTS doc_files (hash TEXT PRIMARY KEY, path TEXT NOT NULL);   -- which uploaded/ingested file has which sha256
+CREATE TABLE IF NOT EXISTS feature_requests (   -- what the bot could not do; the owner decides, a human builds it
+  id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'baru' CHECK (status IN ('baru','dikerjakan','selesai','ditolak')),
+  resolution TEXT);                     -- what was built (or why not), shown in /usulan
+CREATE TABLE IF NOT EXISTS change_log (   -- rows changed or removed by hand: the row before and after, so a human can trace or undo it
+  id INTEGER PRIMARY KEY, at TEXT NOT NULL, tbl TEXT NOT NULL, row_key TEXT NOT NULL,
+  action TEXT NOT NULL CHECK (action IN ('baru','ubah','hapus')), before_json TEXT, after_json TEXT, reason TEXT);
+CREATE TABLE IF NOT EXISTS balance_reports (   -- an account balance as the owner read it in the bank app (not a mutation file)
+  id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL REFERENCES accounts(id),
+  as_of TEXT NOT NULL, at TEXT NOT NULL, {_money('balance')} NOT NULL);
+CREATE TABLE IF NOT EXISTS card_payments (   -- each payment towards a statement, dated: a plan subtracts only those made BEFORE its payday
+  id INTEGER PRIMARY KEY, statement_id INTEGER NOT NULL REFERENCES statements(id), paid_on TEXT NOT NULL,
+  {_money('amount')} NOT NULL CHECK (amount > 0), created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS debt_payments (   -- an instalment recorded as paid (early by hand, or an auto-debit the owner reported)
+  id INTEGER PRIMARY KEY, debt_alias TEXT NOT NULL, due_date TEXT NOT NULL, {_money('amount')} NOT NULL,
+  paid_on TEXT NOT NULL, how TEXT NOT NULL CHECK (how IN ('manual','autodebit')), created_at TEXT NOT NULL,
+  UNIQUE (debt_alias, due_date));
+CREATE TABLE IF NOT EXISTS plan_progress (   -- a transfer of a payday's plan the owner said is done (cards: card_payments)
+  payday TEXT NOT NULL, item TEXT NOT NULL, {_money('amount')} NOT NULL, done_on TEXT NOT NULL, created_at TEXT NOT NULL,
+  PRIMARY KEY (payday, item));
+CREATE TABLE IF NOT EXISTS fund_reports (   -- emergency fund / pot balances as the owner read them: a plan uses the last one BEFORE its payday
+  id INTEGER PRIMARY KEY, fund TEXT NOT NULL, reported_on TEXT NOT NULL, {_money('balance')} NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS one_off_bills (   -- a bill paid once (arrears, a repair): planned by the payday it was recorded before
+  id INTEGER PRIMARY KEY, alias TEXT NOT NULL UNIQUE, name TEXT NOT NULL, {_money('amount')} NOT NULL CHECK (amount > 0),
+  due_date TEXT NOT NULL, method TEXT NOT NULL DEFAULT 'transfer' CHECK (method IN ('transfer','app_menu')),
+  pay_to_alias TEXT,                    -- payee alias of the number it is paid to (registered with /rekening or /va)
+  status TEXT NOT NULL DEFAULT 'terbuka' CHECK (status IN ('terbuka','lunas','batal')), paid_on TEXT, note TEXT,
+  recorded_on TEXT NOT NULL,            -- the server's day it was first recorded: which payday plans have it
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS subscriptions (
+  alias TEXT PRIMARY KEY, name TEXT NOT NULL, {_money('amount')} NOT NULL,   -- IDR per month (USD ones: approximate)
+  source TEXT NOT NULL,                 -- card or account alias it is charged to
+  status TEXT NOT NULL CHECK (status IN ('active','ended','unsure')), note TEXT, updated_at TEXT NOT NULL,
+  ends TEXT,                            -- YYYY-MM of the last charge (a contract with an end); NULL = no end
+  essential INTEGER NOT NULL DEFAULT 0 CHECK (essential IN (0,1)));   -- 1: never proposed as a cut (the owner's rule, e.g. for the children)
+CREATE TABLE IF NOT EXISTS skipped_files (   -- ingest files the owner chose not to record (out of range, duplicate, unreadable)
+  file_ref TEXT PRIMARY KEY, reason TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS plans (
+  id INTEGER PRIMARY KEY, payday TEXT NOT NULL, snapshot_json TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS thresholds (
+  key TEXT PRIMARY KEY, {_money('value')} NOT NULL);
+CREATE TABLE IF NOT EXISTS processed_messages (
+  message_id TEXT PRIMARY KEY, processed_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS payee_secrets (
+  alias TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('card','account','va')),
+  bank TEXT NOT NULL, last4 TEXT NOT NULL,
+  nonce BLOB NOT NULL, ciphertext BLOB NOT NULL, match_hash BLOB NOT NULL UNIQUE,
+  created_at TEXT NOT NULL);
+PRAGMA user_version = {SCHEMA_VERSION};
+"""
+
+
+def connect(path: str) -> sqlite3.Connection:
+    # Handlers run on different threads; server.py serializes every access with one lock.
+    conn = sqlite3.connect(path, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    if path != ":memory:":
+        conn.execute("PRAGMA journal_mode = WAL")
+    conn.executescript(DDL)
+    _migrate(conn)
+    return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """v1 -> v2: add the card payment columns to an existing ledger (CREATE IF NOT EXISTS skips them)."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(cards)")}
+    if "pay_method" not in cols:
+        conn.execute("ALTER TABLE cards ADD COLUMN pay_method TEXT NOT NULL DEFAULT 'transfer'"
+                     " CHECK (pay_method IN ('transfer','app_menu'))")
+    if "pay_to_alias" not in cols:
+        conn.execute("ALTER TABLE cards ADD COLUMN pay_to_alias TEXT")
+    scols = {r["name"] for r in conn.execute("PRAGMA table_info(statements)")}
+    if "paid_amount" not in scols:          # v8
+        conn.execute("ALTER TABLE statements ADD COLUMN paid_amount INTEGER NOT NULL DEFAULT 0"
+                     " CHECK (typeof(paid_amount)='integer')")
+    if "interest_bp_month" not in cols:     # v7
+        conn.execute("ALTER TABLE cards ADD COLUMN interest_bp_month INTEGER")
+    # v4 -> v5: how a debt is paid (transfer to a payee, or auto-debit from one of the owner's accounts)
+    dcols = {r["name"] for r in conn.execute("PRAGMA table_info(debts)")}
+    if "pay_method" not in dcols:
+        conn.execute("ALTER TABLE debts ADD COLUMN pay_method TEXT NOT NULL DEFAULT 'transfer'"
+                     " CHECK (pay_method IN ('transfer','autodebit'))")
+    for col in ("pay_to_alias", "debit_account_alias"):
+        if col not in dcols:
+            conn.execute(f"ALTER TABLE debts ADD COLUMN {col} TEXT")
+    # v2 -> v3: transaction dedupe + provenance (mutation_files/category_rules come from DDL)
+    tcols = {r["name"] for r in conn.execute("PRAGMA table_info(transactions)")}
+    for col, typ in (("dedupe_key", "TEXT"), ("file_hash", "TEXT"), ("merged_into", "INTEGER")):   # v6 adds merged_into
+        if col not in tcols:
+            conn.execute(f"ALTER TABLE transactions ADD COLUMN {col} {typ}")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_txn_dedupe ON transactions(dedupe_key)"
+                 " WHERE dedupe_key IS NOT NULL")
+    scols2 = {r["name"] for r in conn.execute("PRAGMA table_info(statements)")}
+    for col, typ in (("lines_status", "TEXT"), ("lines_diff", "INTEGER")):     # v10: card statement lines read by code
+        if col not in scols2:
+            conn.execute(f"ALTER TABLE statements ADD COLUMN {col} {typ}")
+    fcols = {r["name"] for r in conn.execute("PRAGMA table_info(sinking_funds)")}
+    for col, typ in (("low_amount", "INTEGER"), ("low_until", "TEXT"),
+                     ("pace", "TEXT NOT NULL DEFAULT 'rata' CHECK (pace IN ('rata','sisa'))"),                 # v11
+                     ("due_payday", "INTEGER NOT NULL DEFAULT 0 CHECK (due_payday IN (0,1))")):
+        if col not in fcols:
+            conn.execute(f"ALTER TABLE sinking_funds ADD COLUMN {col} {typ}")
+    scols3 = {r["name"] for r in conn.execute("PRAGMA table_info(subscriptions)")}
+    if "ends" not in scols3:                                                                     # v11
+        conn.execute("ALTER TABLE subscriptions ADD COLUMN ends TEXT")
+    if "essential" not in scols3:
+        conn.execute("ALTER TABLE subscriptions ADD COLUMN essential INTEGER NOT NULL DEFAULT 0 CHECK (essential IN (0,1))")
+    if "resolution" not in {r["name"] for r in conn.execute("PRAGMA table_info(feature_requests)")}:              # v12
+        conn.execute("ALTER TABLE feature_requests ADD COLUMN resolution TEXT")
+    _backfill_v13(conn)
+    conn.commit()
+
+
+def _backfill_v13(conn: sqlite3.Connection) -> None:
+    """v13: payments and fund balances get dates. What was recorded before becomes one dated row each (once: a statement or fund
+    that already has rows is left alone). A card's latest statement is dated by paid_at, or today when only part is paid (all
+    such payments were made on or after the payday being planned); an older statement by paid_at or its due date."""
+    now = datetime.now(WIB)
+    today, at = now.date().isoformat(), now.isoformat(timespec="seconds")
+    conn.execute(
+        "INSERT INTO card_payments(statement_id, paid_on, amount, created_at)"
+        " SELECT s.id, COALESCE(substr(s.paid_at, 1, 10), CASE WHEN s.id = (SELECT id FROM statements WHERE card_id = s.card_id"
+        "   ORDER BY statement_date DESC, id DESC LIMIT 1) THEN ? ELSE s.due_date END), s.paid_amount, ?"
+        " FROM statements s WHERE s.paid_amount > 0 AND NOT EXISTS (SELECT 1 FROM card_payments p WHERE p.statement_id = s.id)",
+        (today, at))
+    if not conn.execute("SELECT 1 FROM fund_reports WHERE fund = 'darurat'").fetchone():
+        conn.execute("INSERT INTO fund_reports(fund, reported_on, balance, created_at) SELECT 'darurat', ?, value, ?"
+                     " FROM thresholds WHERE key = 'emergency_saved'", (today, at))
+    conn.execute("INSERT INTO fund_reports(fund, reported_on, balance, created_at)"
+                 " SELECT 'pot:' || alias, date(saved_asof, '-1 day'), saved_so_far, ? FROM sinking_funds f"
+                 " WHERE NOT EXISTS (SELECT 1 FROM fund_reports r WHERE r.fund = 'pot:' || f.alias)", (at,))

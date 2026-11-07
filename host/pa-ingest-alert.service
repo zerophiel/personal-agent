@@ -1,0 +1,6 @@
+[Unit]
+Description=Tell the owner when the statement ingest fails (OnFailure of pa-ingest)
+[Service]
+Type=oneshot
+EnvironmentFile=/opt/personal-agent/config/stack.env
+ExecStart=/usr/bin/python3 /opt/personal-agent/scripts/ingest-alert.py

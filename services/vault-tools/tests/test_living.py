@@ -1,0 +1,411 @@
+import asyncio
+import os
+import sys
+import tempfile
+import unittest
+from datetime import date
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from vault_tools import living as lv  # noqa: E402
+from vault_tools import mutations as mu  # noqa: E402
+from vault_tools import suggest as sg  # noqa: E402
+from vault_tools import tools  # noqa: E402
+from vault_tools.ledger import connect  # noqa: E402
+
+TODAY = date(2026, 10, 27)
+
+
+def tx(conn, account, day, desc, amount, category=None):
+    conn.execute("INSERT INTO transactions(account_id,txn_date,merchant,amount,category,status,source) VALUES (?,?,?,?,?,?,'mutation')",
+                 (account, day, desc, amount, category, "verified" if category else "unverified"))
+
+
+def world(salary=42_000_000):
+    conn = connect(":memory:")
+    conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('bca-utama','BCA','main')")       # id 1: main until June
+    conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('mandiri-utama','Mandiri','main')")  # id 2: main since July
+    cash = {"01": 10, "02": 12, "03": 11, "04": 9, "05": 13, "06": 10, "07": 14, "08": 12, "09": 16}    # million per month
+    for m, millions in cash.items():
+        month = f"2026-{m}"
+        acct = 1 if int(m) <= 6 else 2
+        if m == "07":                                              # the move: part of July is still on BCA
+            tx(conn, 1, f"{month}-03", "QR MAKAN", -4_000_000, "makan")
+            tx(conn, 2, f"{month}-12", "QR MAKAN", -10_000_000, "makan")
+        else:
+            tx(conn, acct, f"{month}-10", "QR MAKAN", -millions * 1_000_000, "makan")
+        tx(conn, acct, f"{month}-25", "GAJI", 30_000_000 if int(m) <= 6 else 42_000_000, "gaji")
+        tx(conn, acct, f"{month}-26", "PINDAH DANA KE REKENING SENDIRI", -5_000_000, "transfer_internal")
+        tx(conn, acct, f"{month}-27", "BAYAR SEKOLAH", -3_000_000, "wajib:sekolah")
+        tx(conn, acct, f"{month}-28", "KLAIM JHT", -1_000_000, "sekali:x")
+    # March: half of the money out was never categorized -> that month must be skipped
+    tx(conn, 1, "2026-03-15", "TRANSFER MISTERI", -20_000_000, None)
+    tx(conn, 2, "2026-10-05", "OCT MAKAN", -99_000_000, "makan")                         # current month: never counted
+    tools.set_threshold(conn, "net_salary", salary)
+    tools.upsert_expense(conn, "sekolah", "sekolah-va", 4_000_000, 1)
+    tools.upsert_debt(conn, "mobil", "MTF", 108_319_000, 5_701_000, 19, 2, 815)
+    for month, charges in (("2026-08", 5_000_000), ("2026-09", 7_000_000)):
+        conn.execute("INSERT OR IGNORE INTO cards(alias,bank,last4,statement_day,due_day,credit_limit) VALUES ('c1','X','1111',5,20,1000)")
+        conn.execute("INSERT INTO statements(card_id,file_hash,statement_date,due_date,previous_balance,payments,charges,fees,total_due,"
+                     "minimum_due,reconciled,recon_diff,ingested_at) VALUES (1,?,?,?,0,0,?,0,?,1,1,0,'t')",
+                     (month * 5, f"{month}-05", f"{month}-20", charges, charges))
+    conn.commit()
+    return conn
+
+
+class Monthly(unittest.TestCase):
+    def test_sums_across_accounts_and_excludes_non_living_money(self):
+        m = lv.monthly(world(), TODAY)
+        self.assertEqual(m["2026-07"]["cash"], 14_000_000)                    # 4M on BCA + 10M on Mandiri
+        self.assertEqual(m["2026-07"]["excluded"], 5_000_000 + 3_000_000 + 1_000_000)   # internal + wajib + sekali
+        self.assertEqual(m["2026-07"]["salary_in"], 42_000_000)
+        self.assertEqual(m["2026-02"]["salary_in"], 30_000_000)               # the old salary, before the job change
+        self.assertNotIn("2026-10", m)                                        # current month is never history
+
+    def test_ended_recurring_costs_are_shown_but_kept_out_of_the_reserve(self):
+        conn = world()
+        for m in ("01", "02", "03"):                                   # the driver was paid early in the year, then stopped
+            tx(conn, 1, f"2026-{m}-05", "TRANSFER KE DARJA", -2_000_000, "berhenti:supir")
+        conn.commit()
+        m = lv.monthly(conn, TODAY)
+        self.assertEqual(m["2026-01"]["ended"], 2_000_000)
+        self.assertEqual(m["2026-01"]["cash"], 10_000_000)             # unchanged: the driver is not day-to-day living
+        self.assertEqual(m["2026-04"]["ended"], 0)
+        a = lv.analyse(conn, TODAY, from_month="2026-01")
+        self.assertEqual((a["tight"], a["recommended"]), (12_000_000, 13_200_000))         # same as without the driver rows
+        text = lv.format_analysis(a)
+        self.assertIn("biaya yang sudah berhenti Rp 2.000.000 (tidak dihitung)", text)
+        from vault_tools import health as hl
+        self.assertFalse(hl.is_discretionary("berhenti:supir"))
+
+    def test_coverage_flags_a_poorly_categorized_month(self):
+        m = lv.monthly(world(), TODAY)
+        self.assertEqual(m["2026-03"]["uncategorized"], 20_000_000)
+        self.assertLess(m["2026-03"]["coverage_pct"], lv.MIN_COVERAGE_PCT)
+        self.assertEqual(m["2026-04"]["coverage_pct"], 100)
+
+
+class Analysis(unittest.TestCase):
+    def test_default_window_is_the_last_six_complete_months(self):
+        a = lv.analyse(world(), TODAY)
+        self.assertEqual(a["counted"], ["2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"])
+        # Apr 9, May 13, Jun 10, Jul 14, Aug 12, Sep 16 (million) -> sorted 9,10,12,13,14,16 -> median 12.5M
+        self.assertEqual((a["tight"], a["recommended"], a["loose"]), (12_500_000, 13_750_000, 16_000_000))
+
+    def test_from_january_skips_the_untidy_month_and_uses_the_median_of_the_rest(self):
+        a = lv.analyse(world(), TODAY, from_month="2026-01")
+        self.assertEqual(a["skipped"], ["2026-03"])
+        self.assertEqual(len(a["counted"]), 8)
+        self.assertEqual((a["tight"], a["recommended"], a["loose"]), (12_000_000, 13_200_000, 16_000_000))   # 9,10,10,12,12,13,14,16
+
+    def test_since_the_job_change(self):
+        a = lv.analyse(world(), TODAY, from_month="2026-07")
+        self.assertEqual((a["tight"], a["recommended"], a["loose"]), (14_000_000, 15_400_000, 16_000_000))
+        self.assertEqual(a["commitments"], {"fixed": 4_000_000, "installments": 5_701_000, "pot": 0, "total": 9_701_000})
+        text = lv.format_analysis(a)
+        self.assertIn("ketat Rp 14.000.000 (median), disarankan Rp 15.400.000 (median + 10%), longgar Rp 16.000.000", text)
+        self.assertIn("gaji masuk Rp 42.000.000", text)
+        self.assertIn("minta persetujuan pemilik lalu set_threshold living_reserve", text)
+
+    def test_no_false_deficit_from_total_card_charges(self):
+        """Regression: salary - commitments - living - AVERAGE CARD CHARGES printed "DEFISIT Rp 23,8 juta" although the card
+        charges already held the instalments, subscriptions, interest and a one-off school fee."""
+        a = lv.analyse(world(salary=20_000_000), TODAY, from_month="2026-07")
+        self.assertNotIn("monthly_free", a)
+        text = lv.format_analysis(a)
+        self.assertNotIn("DEFISIT", text)
+        self.assertNotIn("= sisa", text)
+        self.assertIn("SUDAH termasuk cicilan, langganan, bunga dan pembelian sekali", text)
+        self.assertIn("simulasi_skenario", text)
+
+    def test_one_month_is_marked_provisional_and_none_gives_a_clear_message(self):
+        conn = connect(":memory:")
+        self.assertIn("Belum ada mutasi bulan penuh", lv.format_analysis(lv.analyse(conn, TODAY)))
+        conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('a','X','main')")
+        tx(conn, 1, "2026-09-10", "MAKAN", -5_000_000, "makan")
+        conn.commit()
+        a = lv.analyse(conn, TODAY)
+        self.assertFalse(a["enough"])
+        self.assertIn("BARU 1 BULAN DATA", lv.format_analysis(a))
+
+    def test_unset_salary_and_current_reserve_are_reported(self):
+        conn = world()
+        conn.execute("DELETE FROM thresholds WHERE key='net_salary'")
+        tools.set_threshold(conn, "living_reserve", 8_000_000)
+        text = lv.format_analysis(lv.analyse(conn, TODAY, from_month="2026-07"))
+        self.assertIn("net_salary belum diset", text)
+        self.assertIn("living_reserve yang berlaku sekarang: Rp 8.000.000", text)
+
+    def test_mostly_uncategorized_history_gives_no_recommendation(self):
+        conn = connect(":memory:")
+        conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('a','X','main')")
+        for m in ("2026-08", "2026-09"):
+            tx(conn, 1, f"{m}-10", "APA SAJA", -9_000_000, None)
+            tx(conn, 1, f"{m}-11", "MAKAN", -1_000_000, "makan")
+        conn.commit()
+        a = lv.analyse(conn, TODAY)
+        self.assertIsNone(a["recommended"])
+        self.assertIn("Belum bisa merekomendasikan living_reserve", lv.format_analysis(a))
+
+
+class Suggestions(unittest.TestCase):
+    def descs(self, conn, items):
+        conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('a','X','main')")
+        for desc, amount in items:
+            tx(conn, 1, "2026-09-10", desc, amount)
+        conn.commit()
+
+    def test_rules_on_real_looking_descriptors(self):
+        owners = ["danuarta wiratama"]
+        cases = [
+            ("transfer bi fast ke bca danuarta wiratama", -1, "transfer_internal"),
+            ("transfer bi fast ke bca budi santoso", -1, None),
+            ("pembayaran hsbc", -1, "wajib:kartu"),
+            ("pembayaran dbs / ex - anz", -1, "wajib:kartu"),
+            ("pembayaran kartu kredit", -1, "wajib:kartu"),
+            ("biaya transaksi bank pembayaran hsbc", -1, "biaya-bank"),               # must not look like a card payment
+            ("biaya transfer bi fast", -1, "biaya-bank"),
+            ("pembayaran spaylater #", -1, "wajib:spaylater"),
+            ("pendebitan otomatis auto coll # ang ke", -1, "wajib:cicilan"),
+            ("pembayaran tokopedia", -1, "belanja-online"),
+            ("pembayaran qr ke gado-gado pak jae", -1, "makan"),
+            ("transaksi di edc yakiniku ten tangerang", -1, "makan"),
+            ("pembayaran qr ke indomaret", -1, "belanja-harian"),
+            ("transfer ke bank lain bca anetasia anggoro", -1, None),
+            ("pembayaran klaim jht bpjs ketenagakerjaan", 1, "sekali:jht"),
+            ("gaji pt maju", 1, "gaji"),
+            ("transfer masuk dari budi", 1, None),
+        ]
+        for desc, sign, want in cases:
+            self.assertEqual(sg.suggest_category(desc, sign * 1000, owners), want, desc)
+
+    def test_real_world_descriptors_seen_in_the_owners_statements(self):
+        owners = ["danuarta wiratama"]
+        cases = [
+            ("switching db ke 542 danuarta wiratama", -1, "transfer_internal"),                  # no word "transfer"
+            ("switching db ke 028 danuarta wiratama /m-bca", -1, "transfer_internal"),
+            ("trsf e-banking cr danuarta wiratama", 1, "transfer_internal"),                     # incoming from own name
+            ("kartu kredit/pl bca card danuarta wiratama", -1, "wajib:kartu"),                   # cardholder name != own transfer
+            ("bi-fast db biaya txn ke 002 danuarta wiratama", -1, "biaya-bank"),
+            ("inka pocket: main pocket pocket money in", 1, "transfer_internal"),
+            ("inka pocket pocket money in failed movement between pockets", -1, "transfer_internal"),
+            ("inka pocket: traveloka pos transaction", -1, "liburan"),                           # a real purchase, not a pocket move
+            ("trsf e-banking db vanessa inka", -1, None),                                        # spouse: never guessed
+            ("trsf e-banking cr ftscy reza nugraha yulis", 1, None),
+        ]
+        for desc, sign, want in cases:
+            self.assertEqual(sg.suggest_category(desc, sign * 1000, owners), want, desc)
+
+    def test_recurring_obligations_and_own_accounts_seen_in_the_statements(self):
+        owners, mine = ["danuarta wiratama"], ["2941", "2701"]
+        cases = [
+            ("trsf e-banking db ftfva the riviera", -1, "wajib:ipl"),
+            ("trsf e-banking db 62167/the riviera", -1, "wajib:ipl"),
+            ("trsf e-banking db 11192/ipeka", -1, "wajib:sekolah"),
+            ("trsf e-banking db avrist assurance p", -1, "wajib:asuransi"),
+            ("kr otomatis llg-citibank pt avrist assuranc surrp", 1, None),                 # a payout: the owner decides
+            ("kr otomatis llg-deutsche bank pt asuransi allianz commission pay", 1, None),  # commission income: the owner decides
+            ("flazz bca topup", -1, "transport"),
+            ("trsf e-banking db ftsai top up poket fixed expenses", -1, "transfer_internal"),
+            ("poket 4100 gaji pak jaja: pindahkan poket", -1, "transfer_internal"),
+            ("transfer bi fast ke bca ****2941", -1, "transfer_internal"),                  # own account by number
+            ("transfer bi fast ke bca ****9999", -1, None),                                 # someone else's account
+            ("transaksi debit qr rs mandaya", -1, "kesehatan"),
+            ("inka pocket: traveloka pos transaction", -1, "liburan"),
+        ]
+        for desc, sign, want in cases:
+            self.assertEqual(sg.suggest_category(desc, sign * 1000, owners, mine), want, desc)
+
+    def test_owner_keywords_apply_now_and_to_every_future_import(self):
+        from vault_tools import mutations as mu
+        conn = connect(":memory:")
+        conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('b','BCA','main')")
+        for i, d in enumerate(("TRSF E-BANKING DB 0110/FTSCY/WS1 GURU BUDI", "TRANSFER BI FAST KE BCA GURU BUDI", "BELI KOPI")):
+            conn.execute("INSERT INTO transactions(txn_date,merchant,amount,status,source) VALUES (?,?,?,?,?)",
+                         (f"2026-10-0{i + 1}", d, -100_000, "unverified", "mutation"))
+        conn.commit()
+        self.assertIn("2 transaksi", mu.set_category_keyword(conn, "Guru Budi", "wajib:les"))
+        self.assertEqual([r[0] for r in conn.execute("SELECT category FROM transactions ORDER BY id")], ["wajib:les", "wajib:les", None])
+        conn.execute("INSERT INTO transactions(txn_date,merchant,amount,status,source) VALUES ('2026-11-02','TRSF DB GURU BUDI',-100000,'unverified','mutation')")
+        conn.commit()
+        sg.apply_suggestions(conn)
+        self.assertEqual(conn.execute("SELECT category FROM transactions WHERE txn_date='2026-11-02'").fetchone()[0], "wajib:les")
+        with self.assertRaises(ValueError):
+            mu.set_category_keyword(conn, "ab", "x")
+
+    def test_card_payments_hospitals_and_church_collections(self):
+        """Regression (2026-11-01): a transfer to an own card's number is that card's bill. Read as a move between own
+        accounts, four September repayments dropped out of the month's expenses."""
+        cards = [("mega-5855", "5855", ("mega",)), ("hsbc-5915", "5915", ("hsbc",)), ("dbs-5685", "5685", ("dbs",))]
+        owners = ["nama pemilik"]
+        cases = [
+            ("transfer bi fast ke mega ****5855", -1, "wajib:kartu"),
+            ("transfer ke bank lain bank hsbc ****5915", -1, "wajib:kartu"),
+            ("transfer bi fast ke dbs ****5685", -1, "wajib:kartu"),
+            ("transfer ke bank lain bank hsbc ****5915 nama pemilik", -1, "wajib:kartu"),   # the cardholder's name: still the bill
+            ("biaya transaksi bank pembayaran hsbc ****5915", -1, "biaya-bank"),          # that payment's fee stays a fee
+            ("transfer bi fast ke bca ****5855", -1, None),                                # the same four digits at another bank
+            ("transfer bi fast ke mega ****5855", 1, None),                                # money back from a card: the owner says
+            ("transfer bi fast ke bca ****1234", -1, None),
+            ("transaksi debit qr siloam hos", -1, "kesehatan"),
+            ("pembayaran qr ke pgdp kosambibaru kolekt", -1, "donasi"),
+            ("pembayaran qr ke pgdp katedral kolekte", -1, "donasi"),
+        ]
+        for desc, sign, want in cases:
+            self.assertEqual(sg.suggest_category(desc, sign * 1000, owners, cards=cards), want, desc)
+        self.assertEqual(sg.suggest_category("transfer bi fast ke mega #", -1000, owners, cards=cards,
+                                             raw="Transfer BI Fast ke MEGA 12345855"), "wajib:kartu")   # a full number ending in it
+
+    def test_own_cards_come_from_the_registered_cards_and_count_as_expenses(self):
+        conn = connect(":memory:")
+        conn.execute("INSERT INTO accounts(alias,bank,kind,last4) VALUES ('m','Mandiri','main','4100')")
+        conn.execute("INSERT INTO cards(alias,bank,last4,statement_day,due_day,credit_limit) VALUES ('dbs-5685','DBS','5685',5,25,10000000)")
+        tx(conn, 1, "2026-09-30", "Transfer BI Fast ke DBS ****5685", -1_000_000)
+        tx(conn, 1, "2026-09-30", "Main Pocket Interest", 7_000)
+        tx(conn, 1, "2026-09-30", "Transfer BI Fast ke Mandiri ****4100", -50_000)
+        conn.commit()
+        s = {k: g["suggestion"] for k, g in sg.groups(conn).items()}
+        self.assertEqual(s, {"transfer bi fast ke dbs ****5685": "wajib:kartu", "main pocket interest": "bunga",
+                             "transfer bi fast ke mandiri ****4100": "transfer_internal"})
+        self.assertEqual(sg.apply_suggestions(conn), "3 kelompok dikategorikan (3 transaksi)")
+        c = mu.cashflow(conn, "2026-09")
+        self.assertEqual((c["income"], c["expenses"]), (7_000, 1_000_000))          # the bill counts, the own move does not
+
+    def test_a_card_bill_cannot_be_marked_a_move_between_own_accounts(self):
+        conn = connect(":memory:")
+        conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('m','Mandiri','main')")
+        conn.execute("INSERT INTO cards(alias,bank,last4,statement_day,due_day,credit_limit) VALUES ('mega-5855','Mega','5855',5,25,10000000)")
+        tx(conn, 1, "2026-09-30", "Transfer BI Fast ke MEGA ****5855", -2_000_000)
+        tx(conn, 1, "2026-09-30", "Transfer BI Fast ke BCA ****5855", -100_000)       # someone else's account, same four digits
+        conn.commit()
+        with self.assertRaises(ValueError) as e:
+            mu.set_category_rule(conn, "Transfer BI Fast ke MEGA ****5855", "transfer_internal")
+        self.assertIn("wajib:kartu", str(e.exception))
+        with self.assertRaises(ValueError):
+            mu.set_category(conn, 1, "transfer_internal")
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM category_rules").fetchone()[0], 0)     # nothing stored
+        self.assertIn("1 transaksi", mu.set_category_rule(conn, "Transfer BI Fast ke MEGA ****5855", "wajib:kartu"))
+        self.assertEqual(mu.set_category(conn, 2, "transfer_internal"), "transaksi 2 -> transfer_internal")
+        # a group of own moves in the owner's name that holds one card number: applying all skips it, nothing breaks
+        sg.add_owner_name(conn, "Nama Pemilik")
+        for n in ("11112222", "33334444", "12345855"):
+            tx(conn, 1, "2026-10-01", f"Transfer BI Fast ke MEGA {n} NAMA PEMILIK", -10_000)
+        conn.commit()
+        out = sg.apply_suggestions(conn)
+        self.assertTrue(out.startswith("0 kelompok dikategorikan (0 transaksi); dilewati 'transfer bi fast ke mega # nama"), out)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM transactions WHERE status='unverified'").fetchone()[0], 3)
+
+    def test_a_stored_own_move_rule_or_word_never_verifies_a_card_bill(self):
+        """A rule keyed without the number ('#') or a word such as the owner's name also matches the card's repayment."""
+        conn = connect(":memory:")
+        conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('mandiri-utama','Mandiri','main')")
+        conn.execute("INSERT INTO cards(alias,bank,last4,statement_day,due_day,credit_limit) VALUES ('mega-5855','Mega','5855',5,25,10000000)")
+        conn.execute("INSERT INTO category_rules VALUES ('transfer bi fast ke mega # nama pemilik','transfer_internal')")
+        conn.commit()
+        rows = [{"date": "2026-10-02", "description": "Transfer BI Fast ke MEGA 11112222 NAMA PEMILIK", "amount": -10_000},
+                {"date": "2026-10-03", "description": "Transfer BI Fast ke MEGA 12345855 NAMA PEMILIK", "amount": -2_000_000}]
+        mu.record_mutations(conn, "mandiri-utama", "c" * 64, "2026-10-01", "2026-10-31", None, None, rows)
+        got = [tuple(r) for r in conn.execute("SELECT amount, category, status FROM transactions ORDER BY txn_date")]
+        self.assertEqual(got, [(-10_000, "transfer_internal", "verified"), (-2_000_000, None, "unverified")])
+        bill = {"transfer bi fast ke mega # nama pemilik": "wajib:kartu"}
+        self.assertEqual({k: g["suggestion"] for k, g in sg.groups(conn).items()}, bill)
+        tx(conn, 1, "2026-10-04", "Transfer ke NAMA PEMILIK Jago", -20_000)
+        conn.commit()
+        self.assertEqual(mu.set_category_keyword(conn, "nama pemilik", "transfer_internal"),
+                         "kata kunci 'nama pemilik' -> transfer_internal; 1 transaksi dikategorikan; "
+                         "1 pembayaran kartu dilewati: kategorikan 'wajib:kartu'")
+        self.assertEqual({k: g["suggestion"] for k, g in sg.groups(conn).items()}, bill)      # the word does not override it
+
+    def test_a_pocket_name_is_not_the_event(self):
+        """Regression: a pocket called "Gaji Pak Darja" made pocket moves look like salary and interest like income."""
+        cases = [
+            ("gaji pak darja: listrik rumah dan mobil movement between pockets", 1, "transfer_internal"),
+            ("listrik: gaji pak darja movement between pockets", -1, "transfer_internal"),
+            ("gaji pak darja: interest", 1, "bunga"),
+            ("gaji pak darja: tax on interest", -1, "biaya-bank"),
+            ("gaji pak darja: outgoing transfer fee", -1, "biaya-bank"),
+            ("main pocket interest", 1, "bunga"),                    # Jago: interest paid into the main pocket, not a move
+            ("main pocket tax on interest", -1, "biaya-bank"),
+        ]
+        for desc, sign, want in cases:
+            self.assertEqual(sg.suggest_category(desc, sign * 1000, ["danuarta wiratama"]), want, desc)
+
+    def test_account_numbers_come_from_the_registered_accounts(self):
+        conn = connect(":memory:")
+        conn.execute("INSERT INTO accounts(alias,bank,kind,last4) VALUES ('b','BCA','main','2941')")
+        conn.execute("INSERT INTO accounts(alias,bank,kind,last4) VALUES ('pot','Jago','pool','8405')")      # the pot is not "my spending account"
+        conn.execute("INSERT INTO transactions(txn_date,merchant,amount,status,source) VALUES ('2026-09-01','Transfer BI Fast ke BCA ****2941',-100000,'unverified','mutation')")
+        conn.execute("INSERT INTO transactions(txn_date,merchant,amount,status,source) VALUES ('2026-09-02','Transfer BI Fast ke Jago ****8405',-100000,'unverified','mutation')")
+        conn.commit()
+        s = {k: g["suggestion"] for k, g in sg.groups(conn).items()}
+        self.assertEqual(s["transfer bi fast ke bca ****2941"], "transfer_internal")
+        self.assertIsNone(s["transfer bi fast ke jago ****8405"])                  # to the pot: a deliberate decision, not guessed
+
+    def test_owner_name_is_needed_and_validated(self):
+        conn = connect(":memory:")
+        self.descs(conn, [("Transfer BI Fast Ke BCA DANUARTA WIRATAMA", -5_000_000)])
+        self.assertIsNone(next(iter(sg.groups(conn).values()))["suggestion"])
+        with self.assertRaises(ValueError):
+            sg.add_owner_name(conn, "ab")
+        sg.add_owner_name(conn, "  Danuarta   Wiratama ")
+        self.assertEqual(next(iter(sg.groups(conn).values()))["suggestion"], "transfer_internal")
+
+    def test_suggestions_list_and_apply_all(self):
+        conn = connect(":memory:")
+        self.descs(conn, [("Pembayaran HSBC", -23_000_000), ("Pembayaran HSBC", -23_000_000), ("Pembayaran Tokopedia 123456789", -500_000),
+                          ("Transfer ke bank lain BCA ANETASIA", -800_000)])
+        lines = sg.suggestions(conn)
+        self.assertEqual(lines[0], "pembayaran hsbc | 2x | Rp 46.000.000 | usulan: wajib:kartu")
+        self.assertIn("pembayaran tokopedia # | 1x | Rp 500.000 | usulan: belanja-online", lines)
+        self.assertIn("1 kelompok lain tanpa usulan, total Rp 800.000", lines[-1])
+        self.assertEqual(sg.apply_suggestions(conn), "2 kelompok dikategorikan (3 transaksi)")
+        cats = {r["merchant"]: (r["category"], r["status"]) for r in conn.execute("SELECT merchant, category, status FROM transactions")}
+        self.assertEqual(cats["Pembayaran HSBC"], ("wajib:kartu", "verified"))
+        self.assertEqual(cats["Transfer ke bank lain BCA ANETASIA"], (None, "unverified"))     # no suggestion: left alone
+        left = sg.suggestions(conn)
+        self.assertEqual(len(left), 1)                                                          # only the "no suggestion" remainder
+        self.assertTrue(left[0].startswith("(1 kelompok lain tanpa usulan, total Rp 800.000"))
+
+    def test_apply_only_the_listed_descriptors_and_rules_cover_future_rows(self):
+        conn = connect(":memory:")
+        self.descs(conn, [("Pembayaran HSBC", -1_000_000), ("Pembayaran Tokopedia", -2_000_000)])
+        self.assertEqual(sg.apply_suggestions(conn, ["pembayaran hsbc"]), "1 kelompok dikategorikan (1 transaksi)")
+        self.assertEqual(conn.execute("SELECT category FROM transactions WHERE merchant='Pembayaran Tokopedia'").fetchone()[0], None)
+        mu.record_mutations(conn, "a", "a" * 64, "2026-10-01", "2026-10-31", None, None,
+                            [{"date": "2026-10-15", "description": "Pembayaran HSBC", "amount": -5_000_000}])
+        self.assertEqual(conn.execute("SELECT category FROM transactions WHERE txn_date='2026-10-15'").fetchone()[0], "wajib:kartu")
+
+    def test_nothing_to_suggest(self):
+        self.assertEqual(sg.suggestions(connect(":memory:"))[0].split(":")[0], "Tidak ada usulan")
+
+
+try:
+    from starlette.testclient import TestClient  # noqa: F401
+    from vault_tools.server import MCP_TOOL_NAMES, create_app
+    HAVE_SERVER = True
+except ImportError:
+    HAVE_SERVER = False
+
+
+@unittest.skipUnless(HAVE_SERVER, "mcp/starlette not installed")
+class Tools(unittest.TestCase):
+    def test_flow_through_the_tools(self):
+        with tempfile.TemporaryDirectory() as d:
+            app = create_app(os.path.join(d, "l.db"), bytes(range(32)), "m" * 40, "i" * 40, allowed_hosts=["testserver"],
+                             today=lambda: TODAY, ingest_dir=d, passwords_path=None)
+            call = lambda n, a=None: asyncio.run(app.state.mcp.call_tool(n, a or {}))  # noqa: E731
+            self.assertTrue({"add_owner_name", "suggest_categories", "apply_suggestions", "living_cost_analysis"} <= set(MCP_TOOL_NAMES))
+            call("upsert_account", {"alias": "m", "bank": "Mandiri", "kind": "main"})
+            for i, month in enumerate(("2026-08", "2026-09")):
+                call("record_mutations", {"account_alias": "m", "file_hash": str(i) * 64, "period_start": f"{month}-01",
+                                          "period_end": f"{month}-28", "rows": [
+                    {"date": f"{month}-05", "description": "Pembayaran QR ke GADO-GADO PAK JAE", "amount": -6_000_000},
+                    {"date": f"{month}-06", "description": "Pembayaran HSBC", "amount": -1_000_000}]})
+            self.assertIn("pembayaran qr ke gado-gado pak jae", str(call("suggest_categories")))
+            self.assertIn("2 kelompok dikategorikan (4 transaksi)", str(call("apply_suggestions")))
+            self.assertIn("disarankan Rp 6.600.000", str(call("living_cost_analysis")))
+            with self.assertRaises(Exception):
+                call("living_cost_analysis", {"from_month": "202608"})
+
+
+if __name__ == "__main__":
+    unittest.main()

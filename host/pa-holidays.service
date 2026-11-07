@@ -1,0 +1,6 @@
+[Unit]
+Description=Refresh cuti bersama / holidays for vault-tools
+[Service]
+Type=oneshot
+EnvironmentFile=/opt/personal-agent/config/stack.env
+ExecStart=/usr/bin/python3 /opt/personal-agent/scripts/fetch-cuti.py

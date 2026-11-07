@@ -1,0 +1,3 @@
+name: cardguard
+version: "0.1"
+description: Replace card numbers in inbound Telegram text with tokens before dispatch (spike).

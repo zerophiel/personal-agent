@@ -1,0 +1,7 @@
+{
+  "dbs":     {"addresses": ["dbsistatement@dbs.com"],                              "org_domain": "dbs.com"},
+  "cimb":    {"addresses": ["CreditCard.Estatement@cimbniaga.co.id"],              "org_domain": "cimbniaga.co.id"},
+  "hsbc":    {"addresses": ["creditcard-hsbcindonesia@mail.hsbc.co.id"],           "org_domain": "hsbc.co.id"},
+  "mandiri": {"addresses": ["ebillingmandirikartukredit@bankmandiri.co.id"],       "org_domain": "bankmandiri.co.id"},
+  "mega":    {"addresses": ["e-billing@bankmega.com", "ebilling@bankmega.com"],    "org_domain": "bankmega.com"}
+}

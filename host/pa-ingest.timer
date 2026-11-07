@@ -1,0 +1,7 @@
+[Unit]
+Description=Statement ingest daily 06:00 WIB
+[Timer]
+OnCalendar=*-*-* 06:00:00 Asia/Jakarta
+Persistent=true
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,395 @@
+"""Bank account mutations (rekening koran): record, reconcile, categorize, analyse.
+
+Conventions: amounts are signed integer Rupiah, outflow negative. The model extracts rows from
+untrusted statement text; everything here is deterministic. Rows are deduplicated across
+overlapping files, and a balance mismatch is flagged, never corrected. Category 'transfer_internal'
+(moves between the owner's own accounts) is excluded from income and expense.
+"""
+from __future__ import annotations
+
+import hashlib
+import re
+import sqlite3
+import statistics
+from collections import defaultdict
+from datetime import date, datetime, timezone
+from difflib import SequenceMatcher
+
+from . import changelog
+from .money import check_idr, format_idr
+
+MAX_ROWS = 2000
+INTERNAL = "transfer_internal"
+# windfalls and one-time moves (JHT, bonus, THR, a lump-sum card payoff) and money that only passes through the
+# owner on its way between third parties (perantara:): none of it is part of the monthly picture
+ONE_OFF = ("sekali:", "perantara:")
+
+
+def excluded(category: str | None) -> bool:
+    """Not counted in monthly income/expense: own-account moves and one-off items."""
+    c = category or ""
+    return c == INTERNAL or c.startswith(ONE_OFF)
+_REF = re.compile(r"\d{6,}")
+_CTRL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def clean_text(s: str, limit: int = 120) -> str:
+    return _CTRL.sub(" ", s).strip()[:limit]
+
+
+def normalize(desc: str) -> str:
+    """Stable merchant key: lowercase, long digit runs (refs/accounts) -> '#', spaces collapsed."""
+    return " ".join(_REF.sub("#", desc.lower()).split())[:100]
+
+
+CARD_BILL = "wajib:kartu"
+
+
+def own_cards(conn) -> list[tuple[str, str, tuple[str, ...]]]:
+    """(alias, last4, words of the bank's name) for each of the owner's cards."""
+    return [(r["alias"], r["last4"], tuple(w for w in re.split(r"[^a-z]+", r["bank"].lower()) if len(w) >= 3))
+            for r in conn.execute("SELECT alias, last4, bank FROM cards")]
+
+
+def card_paid(desc: str, cards) -> str | None:
+    """The alias of the owner's card a descriptor moves money to or from: the card's number (masked as ****NNNN, or a
+    long number ending in its last4) and its bank's name are both in the text. Without the bank's name a third party's
+    account that happens to end in the same four digits would read as a card bill."""
+    low = desc.lower()
+    ends = {m[-4:] for m in re.findall(r"\d{8,}", low)} | set(re.findall(r"[*x]{2,}(\d{4})\b", low))
+    return next((alias for alias, last4, words in cards if last4 in ends and any(w in low for w in words)), None)
+
+
+def _not_a_card_bill(conn, descs, category: str) -> None:
+    """A card repayment is the card's bill, never a move between own accounts: a card's spending reaches the bank
+    cashflow only as its repayment, so 'transfer_internal' would drop it from the month's expenses."""
+    if category != INTERNAL:
+        return
+    cards = own_cards(conn)
+    for d in descs:
+        alias = card_paid(d, cards)
+        if alias:
+            raise ValueError(f"ini pembayaran kartu {alias}, bukan pindah dana antar rekening sendiri: "
+                             f"pakai kategori '{CARD_BILL}'")
+
+
+ROUNDING_TOLERANCE = 3     # Rp: statements print cents, the rows are whole Rupiah; a diff this small is rounding
+
+
+def ledger_gap(conn, account_id: int, start: str, end: str, opening: int, closing: int) -> tuple[int, int]:
+    """(the account's mutation rows over start..end, whichever file brought them; that sum minus the file's balance
+    change). A file can balance on its own while the ledger holds one of its rows twice, read from another document."""
+    held = conn.execute("SELECT COALESCE(SUM(amount),0) FROM transactions WHERE account_id=? AND source='mutation'"
+                        " AND txn_date BETWEEN ? AND ?", (account_id, start, end)).fetchone()[0]
+    return held, held - (closing - opening)
+
+
+def _reworded(conn, account_id: int, keyed: list[tuple]) -> set[int]:
+    """Indexes of rows another file of this account already holds in other words. The same bank row read from two
+    documents (an app export, then the month's e-statement) can come back worded differently, so its key misses. First
+    every exact key claims its stored row; then a row left over takes a stored row of the same day and amount that no key
+    claimed, the most similar wording first, each stored row once. A row the earlier file lacks (the later one goes further
+    into that day) stays new."""
+    lo, hi = min(k[0] for k in keyed), max(k[0] for k in keyed)
+    held = conn.execute("SELECT id, txn_date, amount, merchant, dedupe_key FROM transactions WHERE account_id=?"
+                        " AND source='mutation' AND txn_date BETWEEN ? AND ?", (account_id, lo, hi)).fetchall()
+    keys, held_keys = {k[4] for k in keyed}, {h["dedupe_key"] for h in held}
+    free: dict[tuple, list] = defaultdict(list)
+    for h in held:
+        if h["dedupe_key"] not in keys:
+            free[(h["txn_date"], h["amount"])].append((h["id"], normalize(h["merchant"])))
+    left: dict[tuple, list] = defaultdict(list)
+    for i, (d, _, amount, norm, key) in enumerate(keyed):
+        if key not in held_keys and (d, amount) in free:
+            left[(d, amount)].append((i, norm))
+    out: set[int] = set()
+    for group, rows in left.items():
+        taken = set()
+        for _, hid, i in sorted((-SequenceMatcher(None, norm, m).ratio(), hid, i) for i, norm in rows for hid, m in free[group]):
+            if i not in out and hid not in taken:
+                out.add(i)
+                taken.add(hid)
+    return out
+
+
+def _purge_file(conn, file_hash: str) -> int:
+    """Remove what an earlier (incomplete) recording of this file stored. Returns rows that had a category."""
+    ids = [r[0] for r in conn.execute("SELECT id FROM transactions WHERE file_hash=?", (file_hash,))]
+    categorized = conn.execute("SELECT COUNT(*) FROM transactions WHERE file_hash=? AND category IS NOT NULL", (file_hash,)).fetchone()[0]
+    for i in ids:
+        # the row goes, and any category a record gave it with it: logged as given back, so it is never taken back from a
+        # new row that gets this id (the last ids are used again)
+        for (rid,) in conn.execute("SELECT id FROM transactions WHERE merged_into=?", (i,)).fetchall():
+            changelog.log(conn, "transactions", i, "ubah", None, {"kembali": rid}, "berkas mutasi direkam ulang: baris ini dihapus")
+        conn.execute("UPDATE transactions SET merged_into=NULL WHERE merged_into=?", (i,))
+    conn.execute("DELETE FROM transactions WHERE file_hash=?", (file_hash,))
+    conn.execute("DELETE FROM mutation_files WHERE file_hash=?", (file_hash,))
+    return categorized
+
+
+def record_mutations(conn: sqlite3.Connection, account_alias: str, file_hash: str, period_start: str,
+                     period_end: str, opening_balance: int | None, closing_balance: int | None,
+                     rows: list[dict], replace: bool = False) -> dict:
+    """rows: [{date, description, amount (signed), balance?}]. Idempotent: re-sending a file or an
+    overlapping period adds only rows not seen before, also when another document worded them differently (_reworded).
+    `replace=True` re-records a file that was stored incompletely (its earlier rows are removed first). Two checks
+    decide `reconciled`: opening + rows = closing (within Rp 3 of rounding) and, when ingest_statement counted the
+    document's dated lines, that no rows are missing: balances alone miss credit/debit pairs that cancel each other out.
+    A third, over the ledger (ledger_gap), warns when the account's rows in the period no longer add up to the file."""
+    if len(file_hash) != 64:
+        raise ValueError("file_hash must be the sha256 from ingest_statement")
+    if not 0 < len(rows) <= MAX_ROWS:
+        raise ValueError(f"rows must be 1..{MAX_ROWS}")
+    ps, pe = date.fromisoformat(period_start), date.fromisoformat(period_end)
+    if pe < ps:
+        raise ValueError("period_end before period_start")
+    for v in (opening_balance, closing_balance):
+        if v is not None:
+            check_idr(v)
+    acct = conn.execute("SELECT id FROM accounts WHERE alias=?", (account_alias,)).fetchone()
+    if acct is None:
+        raise ValueError(f"rekening {account_alias} belum terdaftar (upsert_account dulu)")
+    seen_file = conn.execute("SELECT new_rows, reconciled FROM mutation_files WHERE file_hash=?",
+                             (file_hash,)).fetchone()
+    lost_categories = None
+    if seen_file:
+        if not replace:
+            return {"status": "duplicate", "new_rows": 0, "reconciled": bool(seen_file["reconciled"])}
+        lost_categories = _purge_file(conn, file_hash)
+
+    parsed, total = [], 0
+    for r in rows:
+        d = date.fromisoformat(r["date"])
+        check_idr(r["amount"])
+        if r["amount"] == 0:
+            continue
+        total += r["amount"]
+        parsed.append((d.isoformat(), clean_text(r["description"]), r["amount"]))
+    if not parsed:
+        raise ValueError("no non-zero rows")
+
+    balanced, diff = True, 0
+    if opening_balance is not None and closing_balance is not None:
+        diff = closing_balance - (opening_balance + total)
+        balanced = abs(diff) <= ROUNDING_TOLERANCE
+    chk = conn.execute("SELECT dated_lines FROM ingest_checks WHERE file_hash=?", (file_hash,)).fetchone()
+    expected = chk["dated_lines"] if chk else 0
+    missing = max(0, expected - len(parsed)) if expected else 0
+    reconciled = balanced and missing == 0
+
+    counts: dict[tuple, int] = defaultdict(int)
+    keyed = []
+    for d, desc, amount in parsed:
+        key_base = (d, amount, normalize(desc))
+        counts[key_base] += 1       # n-th identical row of the day within this file
+        raw = f"{acct['id']}|{d}|{amount}|{key_base[2]}|{counts[key_base]}"
+        keyed.append((d, desc, amount, key_base[2], hashlib.sha256(raw.encode()).hexdigest()))
+    reworded = _reworded(conn, acct["id"], keyed)
+    new, debits = 0, []
+    rules = {p: c for p, c in conn.execute("SELECT pattern, category FROM category_rules")}
+    cards = own_cards(conn)
+    for i, (d, desc, amount, norm, key) in enumerate(keyed):
+        if i in reworded:
+            continue
+        category = rules.get(norm)
+        if category == INTERNAL and card_paid(desc, cards):
+            category = None                             # a card's bill under an own-move rule ('#' hides the number): the owner decides
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO transactions(account_id,txn_date,merchant,amount,category,status,source,"
+            "dedupe_key,file_hash) VALUES (?,?,?,?,?,?,?,?,?)",
+            (acct["id"], d, desc, amount, category, "verified" if category else "unverified",
+             "mutation", key, file_hash))
+        new += cur.rowcount
+        if cur.rowcount and amount < 0:
+            debits.append(cur.lastrowid)
+    # a purchase already captured from a screenshot is merged, not double counted; matched once the whole file is in, so of
+    # two equal debits the one on the receipt's own date gets it
+    from .health import merge_receipts
+    merge_receipts(conn, debits)
+    conn.execute(
+        "INSERT INTO mutation_files VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (file_hash, acct["id"], period_start, period_end, opening_balance, closing_balance,
+         len(parsed), new, int(reconciled), diff, datetime.now(timezone.utc).isoformat()))
+    conn.commit()
+    out = {"status": "replaced" if lost_categories is not None else "stored", "rows": len(parsed), "new_rows": new,
+           "already_known": len(parsed) - new, "reconciled": reconciled}
+    if reworded:
+        out["matched_by_date_amount"] = len(reworded)     # already stored from another file in other words: not added
+    if lost_categories:
+        out["lost_categories"] = lost_categories     # manual categories on the old rows of this file are gone
+    warnings = []
+    if not balanced:
+        warnings.append(f"REKONSILIASI TIDAK COCOK: saldo akhir tercetak {closing_balance}, hasil hitung "
+                        f"{opening_balance + total}, selisih {diff}. Ada baris yang mungkin hilang atau salah baca.")
+    else:
+        if diff:
+            out["note"] = f"selisih Rp {diff} dianggap pembulatan sen"
+        if opening_balance is not None and closing_balance is not None:
+            held, gap = ledger_gap(conn, acct["id"], period_start, period_end, opening_balance, closing_balance)
+            if abs(gap) > ROUNDING_TOLERANCE:
+                warnings.append(f"BUKU TIDAK COCOK: semua baris rekening ini {period_start} s.d. {period_end} di buku "
+                                f"berjumlah {held}, perubahan saldo berkas ini {closing_balance - opening_balance}, selisih "
+                                f"{gap}. Ada baris ganda atau hilang dari berkas lain yang periodenya bertumpuk: laporkan ke "
+                                "pemilik, jangan dikoreksi sendiri.")
+    if missing:
+        warnings.append(f"BARIS KURANG: dokumen memuat {expected} baris bertanggal, hanya {len(parsed)} yang dikirim "
+                        f"(kurang {missing}). Baca ulang SEMUA bagian dan kirim ulang lengkap dengan replace=true.")
+        out["missing_rows"] = missing
+    if warnings:
+        out["warning"] = " ".join(warnings)
+    return out
+
+
+# ---- categorization ----------------------------------------------------------------------
+
+def set_category(conn, txn_id: int, category: str) -> str:
+    cat = clean_text(category, 40).lower()
+    if not cat:
+        raise ValueError("category kosong")
+    row = conn.execute("SELECT merchant FROM transactions WHERE id=?", (txn_id,)).fetchone()
+    if row is None:
+        raise ValueError("transaksi tidak ditemukan")
+    _not_a_card_bill(conn, [row["merchant"]], cat)
+    conn.execute("UPDATE transactions SET category=?, status='verified' WHERE id=?", (cat, txn_id))
+    conn.commit()
+    return f"transaksi {txn_id} -> {cat}"
+
+
+def set_category_keyword(conn, keyword: str, category: str) -> str:
+    """Remember that any description containing `keyword` (a name, a shop) belongs to `category`; applies to rows
+    still uncategorized and to every future import."""
+    kw, cat = clean_text(keyword, 40).lower().strip(), clean_text(category, 40).lower()
+    if len(kw) < 4 or not cat:
+        raise ValueError("kata kunci minimal 4 huruf dan kategori wajib")
+    conn.execute("INSERT INTO category_keywords VALUES (?,?) ON CONFLICT(keyword) DO UPDATE SET category=excluded.category", (kw, cat))
+    cards = own_cards(conn) if cat == INTERNAL else []
+    rows = conn.execute("SELECT id, merchant FROM transactions WHERE source IN ('mutation','receipt')"
+                        " AND category IS NULL AND merged_into IS NULL AND lower(merchant) LIKE ?", (f"%{kw}%",)).fetchall()
+    hit = [r["id"] for r in rows if not card_paid(r["merchant"], cards)]     # an own-move word (a name) skips the card bills
+    conn.executemany("UPDATE transactions SET category=?, status='verified' WHERE id=?", [(cat, i) for i in hit])
+    conn.commit()
+    skipped = len(rows) - len(hit)
+    return (f"kata kunci '{kw}' -> {cat}; {len(hit)} transaksi dikategorikan"
+            + (f"; {skipped} pembayaran kartu dilewati: kategorikan '{CARD_BILL}'" if skipped else ""))
+
+
+def set_category_rule(conn, merchant: str, category: str) -> str:
+    """Remember a category for a merchant and apply it to matching rows not yet verified."""
+    pattern, cat = normalize(merchant), clean_text(category, 40).lower()
+    if not pattern or not cat:
+        raise ValueError("merchant dan category wajib")
+    rows = [r for r in conn.execute("SELECT id, merchant FROM transactions WHERE source IN ('mutation','receipt')"
+                                    " AND status='unverified' AND merged_into IS NULL").fetchall()
+            if normalize(r["merchant"]) == pattern]
+    _not_a_card_bill(conn, [pattern] + [r["merchant"] for r in rows], cat)
+    conn.execute("INSERT INTO category_rules VALUES (?,?) ON CONFLICT(pattern) DO UPDATE SET category=excluded.category",
+                 (pattern, cat))
+    for r in rows:
+        conn.execute("UPDATE transactions SET category=?, status='verified' WHERE id=?", (cat, r["id"]))
+    conn.commit()
+    return f"aturan '{pattern}' -> {cat}; {len(rows)} transaksi diperbarui"
+
+
+def list_uncategorized(conn, limit: int = 30) -> list[str]:
+    """Most frequent unverified merchants first, so one rule fixes many rows."""
+    groups: dict[str, list] = defaultdict(list)
+    for r in conn.execute("SELECT id, merchant, amount, category FROM transactions "
+                          "WHERE source IN ('mutation','receipt') AND status='unverified' AND merged_into IS NULL"):
+        groups[normalize(r["merchant"])].append(r)
+    out = []
+    for pat, rs in sorted(groups.items(), key=lambda kv: -len(kv[1]))[:limit]:
+        guess = next((r["category"] for r in rs if r["category"]), None)
+        out.append(f"{pat} | {len(rs)}x | contoh id={rs[0]['id']} {format_idr(rs[0]['amount'])}"
+                   + (f" | usulan: {guess}" if guess else ""))
+    return out
+
+
+# ---- analysis ----------------------------------------------------------------------------
+
+def _month_rows(conn, month: str):
+    return conn.execute(
+        "SELECT merchant, amount, category, status FROM transactions "
+        "WHERE source='mutation' AND substr(txn_date,1,7)=?", (month,)).fetchall()
+
+
+def cashflow(conn, month: str) -> dict:
+    """Income, expenses, net and savings rate for YYYY-MM (own-account transfers excluded)."""
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+        raise ValueError("month harus YYYY-MM")
+    rows = _month_rows(conn, month)
+    income = sum(r["amount"] for r in rows if r["amount"] > 0 and not excluded(r["category"]))
+    spend = -sum(r["amount"] for r in rows if r["amount"] < 0 and not excluded(r["category"]))
+    one_off_in = sum(r["amount"] for r in rows if r["amount"] > 0 and (r["category"] or "").startswith(ONE_OFF))
+    one_off_out = -sum(r["amount"] for r in rows if r["amount"] < 0 and (r["category"] or "").startswith(ONE_OFF))
+    by_cat: dict[str, int] = defaultdict(int)
+    merchants: dict[str, int] = defaultdict(int)
+    for r in rows:
+        if r["amount"] < 0 and not excluded(r["category"]):
+            by_cat[r["category"] or "belum dikategorikan"] += -r["amount"]
+            merchants[normalize(r["merchant"])] += -r["amount"]
+    bad = conn.execute("SELECT COUNT(*) FROM mutation_files WHERE reconciled=0").fetchone()[0]
+    return {
+        "month": month, "rows": len(rows), "income": income, "expenses": spend, "net": income - spend,
+        "one_off_in": one_off_in, "one_off_out": one_off_out,
+        "savings_rate_bp": (income - spend) * 10_000 // income if income > 0 else None,
+        "by_category": sorted(by_cat.items(), key=lambda kv: -kv[1]),
+        "top_merchants": sorted(merchants.items(), key=lambda kv: -kv[1])[:5],
+        "unverified": sum(1 for r in rows if r["status"] == "unverified"),
+        "unreconciled_files": bad,
+    }
+
+
+def format_cashflow(c: dict) -> str:
+    if c["rows"] == 0:
+        return f"Belum ada mutasi untuk {c['month']}."
+    rate = "-" if c["savings_rate_bp"] is None else f"{c['savings_rate_bp'] / 100:.1f}%"
+    lines = [f"Arus kas {c['month']} ({c['rows']} transaksi)",
+             f"Pemasukan {format_idr(c['income'])}; pengeluaran {format_idr(c['expenses'])}; "
+             f"selisih {format_idr(c['net'])}; rasio tabung {rate}"]
+    lines += [f"- {k}: {format_idr(v)}" for k, v in c["by_category"][:8]]
+    lines.append("Terbesar: " + "; ".join(f"{k} {format_idr(v)}" for k, v in c["top_merchants"]))
+    if c.get("one_off_in") or c.get("one_off_out"):
+        lines.append(f"Sekali/perantara (tidak dihitung dalam rasio): masuk {format_idr(c['one_off_in'])}; keluar {format_idr(c['one_off_out'])}")
+    if c["unverified"]:
+        lines.append(f"Catatan: {c['unverified']} transaksi belum diverifikasi kategorinya.")
+    if c["unreconciled_files"]:
+        lines.append(f"PERINGATAN: {c['unreconciled_files']} file mutasi belum cocok saat rekonsiliasi.")
+    return "\n".join(lines)
+
+
+def recurring(conn, min_months: int = 3, tolerance_pct: int = 15) -> list[str]:
+    """Outflows with the same merchant key, similar amount, in at least `min_months` months."""
+    by: dict[str, list] = defaultdict(list)
+    for r in conn.execute("SELECT merchant, amount, substr(txn_date,1,7) m, category FROM transactions "
+                          "WHERE source='mutation' AND amount < 0"):
+        if not excluded(r["category"]):
+            by[normalize(r["merchant"])].append((r["m"], -r["amount"]))
+    out = []
+    for key, items in by.items():
+        med = statistics.median(a for _, a in items)
+        close = [(m, a) for m, a in items if abs(a - med) * 100 <= tolerance_pct * med]
+        months = {m for m, _ in close}
+        if len(months) >= min_months:
+            out.append((len(months), f"{key} | {len(months)} bulan | sekitar {format_idr(int(med))}/bulan"))
+    return [s for _, s in sorted(out, reverse=True)]
+
+
+def suggest_salary(conn, lookback_months: int = 4) -> str:
+    """Largest monthly credit that repeats with a similar amount: a candidate salary for the owner to confirm."""
+    by_month: dict[str, tuple[int, str]] = {}
+    for r in conn.execute("SELECT merchant, amount, substr(txn_date,1,7) m FROM transactions "
+                          "WHERE source='mutation' AND amount >= 1000000 AND IFNULL(category,'') != ?"
+                          " AND IFNULL(category,'') NOT LIKE 'sekali:%' AND IFNULL(category,'') NOT LIKE 'perantara:%'", (INTERNAL,)):
+        if r["m"] not in by_month or r["amount"] > by_month[r["m"]][0]:
+            by_month[r["m"]] = (r["amount"], normalize(r["merchant"]))
+    recent = sorted(by_month.items())[-lookback_months:]
+    if len(recent) < 2:
+        return "Data belum cukup untuk menebak gaji (butuh minimal 2 bulan mutasi)."
+    amounts = [a for _, (a, _) in recent]
+    med = statistics.median(amounts)
+    similar = [(m, a, d) for m, (a, d) in recent if abs(a - med) * 100 <= 15 * med]
+    if len(similar) < 2:
+        return "Tidak ada pemasukan bulanan yang jumlahnya mirip; tanyakan gaji ke pemilik."
+    desc = statistics.mode([d for _, _, d in similar])
+    return (f"Dugaan gaji: sekitar {format_idr(int(med))}/bulan dari '{desc}' pada "
+            f"{', '.join(m for m, _, _ in similar)}. Minta pemilik konfirmasi sebelum set net_salary.")

@@ -1,0 +1,102 @@
+# Hermes comms profile (v0.22.5, M4, not deployed): the owner's email and calendar assistant. Mounted read-only; comms
+# has no change-proposals, so a change is the owner's commit + deploy. Mail and events come only through the two
+# brokers (services/comms-brokers), which hold the Google tokens: finance mail is hidden there, nothing can be sent,
+# and the calendar is read-only. Keys as in services/hermes/front/config.yaml.
+model:
+  provider: anthropic
+  default: claude-haiku-5-5     # comms budget: USD 10/month on its own workspace key
+
+agent:
+  max_turns: 20
+  image_input_mode: native  # a photo goes to the main model as an image; there is no vision tool (below)
+  disabled_toolsets:        # comms keeps clarify and the two broker MCP servers, nothing else
+    - terminal
+    - code_execution
+    - browser
+    - x_search              # off by default, but turns itself on when xAI credentials exist
+    - delegation
+    - file
+    - cronjob               # no schedules: comms only answers the owner's messages
+    - kanban
+    - computer_use
+    - image_gen
+    - tts
+    - skills
+    - todo
+    - session_search
+    - connections
+    - web                   # no web: nothing a mail says can make comms fetch a page
+    - search                # web_search alone (already in web; listed so neither name brings it back)
+    - memory                # mail content is not kept between sessions
+    - vision
+
+auxiliary:
+  compression:
+    provider: anthropic
+    model: claude-haiku-5-5
+  title_generation:
+    provider: anthropic
+    model: claude-haiku-5-5
+  vision:
+    provider: anthropic
+    model: claude-haiku-5-5
+
+compression:
+  threshold_tokens: 60000
+  min_tail_user_messages: 3
+
+memory:
+  memory_enabled: false
+  user_profile_enabled: false
+  write_approval: true
+  nudge_interval: 0
+
+skills:
+  write_approval: true
+  guard_agent_created: true  # a skill the agent writes is scanned first (the skills toolset is off anyway)
+
+tools:
+  tool_search:
+    enabled: "off"   # quoted: bare off is a YAML boolean
+
+security:
+  allow_lazy_installs: false
+
+sessions:
+  retention_days: 7          # sessions hold mail summaries: a week, not front's month
+
+unauthorized_dm_behavior: ignore
+
+plugins:
+  enabled:
+    - cardblock   # front's plugin, mounted from services/hermes/front/plugins: a card-like number never reaches the model
+
+gateway:
+  platforms:
+    telegram:
+      extra:
+        disable_link_previews: true
+        allowed_chats: "none"    # no group id matches: every group is dropped; DMs are never filtered by this
+
+mcp_servers:
+  gmail_broker:
+    url: "http://gmail-broker:8000/mcp"
+    headers:
+      Authorization: "Bearer ${env:GMAIL_BROKER_MCP_TOKEN}"
+    timeout: 30
+    connect_timeout: 20
+    tools:
+      resources: false
+      prompts: false
+  calendar_broker:
+    url: "http://calendar-broker:8000/mcp"
+    headers:
+      Authorization: "Bearer ${env:CALENDAR_BROKER_MCP_TOKEN}"
+    timeout: 30
+    connect_timeout: 20
+    tools:
+      resources: false
+      prompts: false
+
+approvals:
+  destructive_slash_confirm: false

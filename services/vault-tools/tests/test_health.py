@@ -1,0 +1,777 @@
+import asyncio
+import json
+import os
+import sys
+import tempfile
+import unittest
+from datetime import date
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from vault_tools import health as hl  # noqa: E402
+from vault_tools import mutations as mu  # noqa: E402
+from vault_tools import reports  # noqa: E402
+from vault_tools import tools  # noqa: E402
+from vault_tools.ledger import connect  # noqa: E402
+from vault_tools.payee_vault import PayeeVault  # noqa: E402
+
+TODAY = date(2026, 11, 10)          # window 2026-10-30 .. 2026-11-30 (31 days); today is day 12 = 38% elapsed
+
+
+def planned(salary=10_000_000):
+    conn = connect(":memory:")
+    conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('mandiri-utama','Mandiri','main')")
+    conn.commit()
+    tools.set_threshold(conn, "net_salary", salary)
+    tools.generate_payday_plan(conn, TODAY, payday=date(2026, 10, 30))
+    return conn
+
+
+def spend(conn, amount, merchant="WARUNG", day="2026-11-05", **kw):
+    return hl.record_expense(conn, TODAY, amount, merchant, day, **kw)
+
+
+class RecordExpense(unittest.TestCase):
+    def test_stored_negative_unverified_with_receipt_source(self):
+        conn = planned()
+        r = spend(conn, 50_000, "KOPI KENANGAN", category="makan")
+        self.assertEqual((r["status"], r["category"]), ("stored", "makan"))
+        # what was stored, from the code: the bot confirms with this, not with its own reading of the photo
+        self.assertEqual(r["recorded"], f"#{r['id']} KOPI KENANGAN Rp 50.000, 2026-11-05, tunai, kategori makan")
+        row = conn.execute("SELECT amount, status, source, merchant FROM transactions").fetchone()
+        self.assertEqual((row["amount"], row["status"], row["source"]), (-50_000, "unverified", "receipt"))
+
+    def test_same_screenshot_twice_is_flagged_unless_confirmed(self):
+        conn = planned()
+        spend(conn, 50_000, "KOPI KENANGAN")
+        dup = spend(conn, 50_000, "Kopi Kenangan")
+        self.assertEqual(dup["status"], "possible_duplicate")
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0], 1)
+        self.assertEqual(spend(conn, 50_000, "KOPI KENANGAN", allow_duplicate=True)["status"], "stored")
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0], 2)
+        self.assertEqual(spend(conn, 50_000, "KOPI KENANGAN", day="2026-11-06")["status"], "stored")   # other day: fine
+
+    def test_a_resent_screenshot_described_in_other_words_is_still_a_duplicate(self):
+        """Regression 2026-10-28: after /new the bot re-read the same Flazz top-up screenshot, named it differently and stored
+        it a second time (the merchant text was the only key)."""
+        conn = planned()
+        conn.execute("INSERT OR IGNORE INTO accounts(alias,bank,kind,last4) VALUES ('mandiri-utama','Mandiri','main','2701')")
+        conn.commit()
+        flazz = spend(conn, 100_000, "Isi saldo Flazz (tol)", account_alias="mandiri-utama")
+        self.assertEqual(flazz["status"], "stored")
+        self.assertIn("Rp 100.000, 2026-11-05, dari mandiri-utama, kategori ", flazz["recorded"])
+        dup = spend(conn, 100_000, "Isi Flazz BCA (tol)", account_alias="mandiri-utama")
+        self.assertEqual((dup["status"], dup["existing_merchant"]), ("possible_duplicate", "Isi saldo Flazz (tol)"))
+        self.assertEqual(spend(conn, 100_000, "Parkir mall")["status"], "stored")          # no source given: merchant decides
+
+    def test_validation(self):
+        conn = planned()
+        for kw in ({"amount": 0}, {"amount": -5}, {"merchant": "  "}, {"txn_date": "2027-01-01"},
+                   {"account_alias": "ghost"}, {"card_alias": "ghost"}):
+            args = dict(amount=1000, merchant="X", txn_date="2026-11-05")
+            args.update(kw)
+            with self.assertRaises(ValueError):
+                hl.record_expense(conn, TODAY, **args)
+        with self.assertRaises(TypeError):
+            spend(conn, 1500.5)
+
+    def test_category_rule_is_applied_and_verified(self):
+        conn = planned()
+        mu.set_category_rule(conn, "NETFLIX.COM 123456", "langganan")
+        spend(conn, 186_000, "NETFLIX.COM 654321")
+        row = conn.execute("SELECT category, status FROM transactions").fetchone()
+        self.assertEqual((row["category"], row["status"]), ("langganan", "verified"))
+        self.assertEqual(mu.list_uncategorized(conn), [])
+
+
+class Merge(unittest.TestCase):
+    def setUp(self):
+        self.conn = planned()
+        spend(self.conn, 50_000, "KOPI KENANGAN", day="2026-11-05", category="makan", account_alias="mandiri-utama")
+
+    def mutation(self, desc="QRIS KOPI KENANGAN 998877", day="2026-11-06", amount=-50_000, h="a" * 64):
+        return mu.record_mutations(self.conn, "mandiri-utama", h, "2026-11-01", "2026-11-30", None, None,
+                                   [{"date": day, "description": desc, "amount": amount}])
+
+    def test_receipt_seen_in_bank_mutation_is_counted_once_and_keeps_its_category(self):
+        self.mutation()
+        rec = self.conn.execute("SELECT merged_into FROM transactions WHERE source='receipt'").fetchone()[0]
+        mut = self.conn.execute("SELECT id, category, status FROM transactions WHERE source='mutation'").fetchone()
+        self.assertEqual(rec, mut["id"])
+        self.assertEqual((mut["category"], mut["status"]), ("makan", "unverified"))
+        self.assertEqual(hl.spending_pace(self.conn, TODAY)["spent"], 50_000)          # not 100_000
+        self.assertEqual(hl.budget_status(self.conn, "2026-11"), [])                    # no budget set, nothing double
+
+    def test_different_amount_or_far_date_is_not_merged(self):
+        self.mutation(amount=-51_000, h="b" * 64)
+        self.mutation(day="2026-11-20", h="c" * 64)
+        self.assertIsNone(self.conn.execute("SELECT merged_into FROM transactions WHERE source='receipt'").fetchone()[0])
+
+    def test_one_receipt_merges_into_only_one_mutation(self):
+        mu.record_mutations(self.conn, "mandiri-utama", "d" * 64, "2026-11-01", "2026-11-30", None, None,
+                            [{"date": "2026-11-05", "description": "KOPI A", "amount": -50_000},
+                             {"date": "2026-11-06", "description": "KOPI B", "amount": -50_000}])
+        self.assertEqual(hl.spending_pace(self.conn, TODAY)["spent"], 100_000)          # two real mutation rows, receipt absorbed
+        merged = self.conn.execute("SELECT COUNT(*) FROM transactions WHERE merged_into IS NOT NULL").fetchone()[0]
+        self.assertEqual(merged, 1)
+
+
+class _Banks:
+    """Mandiri, BCA and Jago (its one statement lists every pocket: jago-harian purchases are in jago-utama's file), a card,
+    and statement uploads."""
+
+    def setUp(self):
+        self.conn = planned()
+        for alias, bank in (("bca-utama", "BCA"), ("jago-utama", "jago"), ("jago-harian", "Jago")):
+            self.conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES (?,?,'main')", (alias, bank))
+        self.conn.commit()
+        tools.upsert_card(self.conn, "cimb-1", "CIMB", "2222", 5, 5, 10_000_000)
+
+    def upload(self, account, h, *rows, period=("2026-11-01", "2026-11-30")):
+        mu.record_mutations(self.conn, account, h * 64, *period, None, None,
+                            [{"date": d, "description": desc, "amount": a} for d, desc, a in rows])
+
+    def merged(self, rid):
+        return self.conn.execute("SELECT merged_into FROM transactions WHERE id=?", (rid,)).fetchone()[0]
+
+    def spent(self):
+        return hl.spending_pace(self.conn, TODAY)["spent"]
+
+    def pace(self):
+        """(spent, rows and amount still uncategorized at another bank than the daily account's: not counted yet)"""
+        p = hl.spending_pace(self.conn, TODAY)
+        return p["spent"], p["unsorted"]["rows"], p["unsorted"]["amount"]
+
+    def count(self):
+        return self.conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+
+
+class MergeRules(_Banks, unittest.TestCase):
+    """Only the same money merges (2026-10-30; the old rule took any account's debit of that amount): the same bank, never
+    a card purchase, never a purchase with a move between the owner's own accounts."""
+
+    def test_another_banks_debit_of_the_same_amount_is_other_money(self):
+        rid = spend(self.conn, 100_000, "ISI FLAZZ", category="transport", account_alias="mandiri-utama")["id"]
+        self.upload("bca-utama", "a", ("2026-11-05", "TRSF E-BANKING 1234567", -100_000))
+        self.assertIsNone(self.merged(rid))
+        self.assertEqual(self.pace(), (100_000, 1, 100_000))    # two payments: the BCA row waits for its category
+        self.upload("mandiri-utama", "b", ("2026-11-06", "FLAZZ TOPUP 998877", -100_000))
+        self.assertEqual(self.merged(rid), self.conn.execute("SELECT id FROM transactions WHERE merchant LIKE 'FLAZZ%'").fetchone()[0])
+        self.assertEqual(self.pace(), (100_000, 1, 100_000))    # the receipt is inside its own bank's row
+
+    def test_a_pocket_is_in_its_banks_one_statement(self):
+        rid = spend(self.conn, 156_541, "PHO STREET", category="makan", account_alias="jago-harian")["id"]
+        self.upload("jago-utama", "c", ("2026-11-05", "Monthly spending: PHO STREET POS Transaction", -156_541))
+        self.assertIsNotNone(self.merged(rid))                                    # 'Jago' and 'jago' are one bank
+        self.assertEqual(self.spent(), 156_541)
+
+    def test_a_card_purchase_is_never_a_bank_debit(self):
+        rid = spend(self.conn, 75_000, "GRAB", category="transport", card_alias="cimb-1")["id"]
+        self.upload("mandiri-utama", "d", ("2026-11-05", "QRIS GRAB", -75_000))
+        self.assertIsNone(self.merged(rid))
+
+    def test_a_purchase_is_never_a_move_between_own_accounts(self):
+        mu.set_category_rule(self.conn, "Danu Pocket Pocket Money In", "transfer_internal")
+        parkir = spend(self.conn, 100_000, "PARKIR", category="transport", account_alias="jago-harian")["id"]
+        flazz = spend(self.conn, 100_000, "Isi saldo Flazz", day="2026-11-04", category="transfer_internal",
+                      account_alias="jago-harian")["id"]
+        self.upload("jago-utama", "e", ("2026-11-05", "Danu Pocket Pocket Money In", -100_000))
+        self.assertIsNone(self.merged(parkir))                    # the closer date, but a pocket move is not a purchase
+        self.assertIsNotNone(self.merged(flazz))                  # a move the owner recorded is one
+        self.assertEqual(self.spent(), 100_000)
+
+    def test_of_two_equal_debits_the_one_on_the_receipts_date_takes_it(self):
+        rid = spend(self.conn, 50_000, "KOPI KENANGAN", day="2026-11-06", category="makan", account_alias="mandiri-utama")["id"]
+        self.upload("mandiri-utama", "f", ("2026-11-05", "TRSF KE ANDI", -50_000), ("2026-11-06", "QRIS KOPI KENANGAN", -50_000))
+        rows = {r["merchant"]: r for r in self.conn.execute("SELECT id, merchant, category FROM transactions WHERE source='mutation'")}
+        self.assertEqual(self.merged(rid), rows["QRIS KOPI KENANGAN"]["id"])     # the old rule gave it to the first row
+        self.assertEqual((rows["QRIS KOPI KENANGAN"]["category"], rows["TRSF KE ANDI"]["category"]), ("makan", None))
+
+    def test_cash_is_never_a_bank_debit(self):
+        """No account and no card is cash (2026-10-30): it took any bank's debit of that size; the receipt of the row's
+        own account only went first."""
+        cash = spend(self.conn, 80_000, "WARUNG")["id"]
+        own = spend(self.conn, 80_000, "WARUNG BU SRI", account_alias="mandiri-utama")["id"]
+        self.upload("mandiri-utama", "g", ("2026-11-05", "QRIS WARUNG BU SRI", -80_000), ("2026-11-06", "TRSF KE ANDI", -80_000))
+        self.assertEqual((self.merged(cash), self.merged(own) is None), (None, False))    # the free row did not take it
+        late = spend(self.conn, 80_000, "BAKSO", day="2026-11-06")                         # nor a record made after it
+        self.assertEqual(("merged_into" in late, self.merged(late["id"])), (False, None))
+        self.assertEqual(self.pace(), (240_000, 1, 80_000))     # the transfer to Andi waits for its category
+
+    def test_a_row_a_rule_sorted_keeps_its_category_and_status(self):
+        """The record's category only fills a row that has none; the status was overwritten anyway, so a rule's row turned
+        'unverified' (or a guess turned 'verified')."""
+        mu.set_category_rule(self.conn, "TOKO ABC 123456", "belanja")
+        first = spend(self.conn, 60_000, "TOKO ABC", category="makan", account_alias="bca-utama")["id"]
+        self.upload("bca-utama", "h", ("2026-11-05", "TOKO ABC 654321", -60_000), ("2026-11-06", "TOKO ABC 654322", -60_000))
+        late = spend(self.conn, 60_000, "TOKO ABC", day="2026-11-06", category="makan", account_alias="bca-utama")
+        rows = self.conn.execute("SELECT id, category, status FROM transactions WHERE source='mutation' ORDER BY txn_date").fetchall()
+        self.assertEqual([(r["category"], r["status"]) for r in rows], [("belanja", "verified")] * 2)
+        self.assertEqual((self.merged(first), self.merged(late["id"])), (rows[0]["id"], rows[1]["id"]))
+        self.assertIn("kategori yang dihitung belanja (dari mutasi), bukan makan", late["alerts"][0])
+
+
+class LateRecordsAndResentScreenshots(_Banks, unittest.TestCase):
+    """2026-10-30, owner: "ya betulkan juga". Matching ran only on upload and on ubah_belanja, so a purchase recorded after
+    its statement counted twice; and the duplicate check skipped merged records, so the same screenshot sent again was
+    stored a second time or hit the unique key."""
+
+    def test_a_record_made_after_its_statement_merges_at_once_and_says_so(self):
+        self.upload("bca-utama", "a", ("2026-11-05", "QRIS WARUNG BU SRI", -80_000), ("2026-11-06", "QRIS GRAB", -75_000))
+        r = spend(self.conn, 80_000, "WARUNG BU SRI", category="makan", account_alias="bca-utama")
+        mut = self.conn.execute("SELECT id FROM transactions WHERE merchant='QRIS WARUNG BU SRI'").fetchone()[0]
+        self.assertEqual((r["status"], r.get("merged_into"), self.merged(r["id"])), ("stored", mut, mut))
+        self.assertIn(f"sudah ada di mutasi bank #{mut} (QRIS WARUNG BU SRI, 2026-11-05, Rp 80.000, rekening bca-utama)",
+                      r["alerts"][0])
+        self.assertEqual(self.pace(), (80_000, 1, 75_000))     # the two statement rows, nothing twice; GRAB not sorted yet
+        card = spend(self.conn, 75_000, "GRAB", day="2026-11-06", category="transport", card_alias="cimb-1")
+        self.assertEqual(("merged_into" in card, self.merged(card["id"])), (False, None))   # it is on the card statement
+
+    def test_a_record_past_its_banks_statements_waits_for_the_next_one(self):
+        """The statement ends the day before: the record's own row is not in yet, and the window would hand it to another
+        payment of the same size."""
+        self.upload("bca-utama", "b", ("2026-11-04", "QRIS TOKO LAIN", -80_000), period=("2026-11-01", "2026-11-04"))
+        r = spend(self.conn, 80_000, "WARUNG BU SRI", category="makan", account_alias="bca-utama")
+        self.assertEqual(("merged_into" in r, self.merged(r["id"])), (False, None))
+        self.upload("bca-utama", "c", ("2026-11-05", "QRIS WARUNG BU SRI", -80_000), period=("2026-11-05", "2026-11-30"))
+        own = self.conn.execute("SELECT id FROM transactions WHERE merchant='QRIS WARUNG BU SRI'").fetchone()[0]
+        self.assertEqual(self.merged(r["id"]), own)
+        self.assertEqual(self.pace(), (80_000, 1, 80_000))     # two payments, each once; the other one not sorted yet
+
+    def test_a_resent_screenshot_of_a_merged_purchase_is_flagged_not_stored_again(self):
+        """Live shape (PHO STREET #2440): recorded, corrected (its key is then id-based), merged on upload, the screenshot
+        sent again in a new chat."""
+        rid = spend(self.conn, 156_541, "PHO STREET", category="makan", account_alias="bca-utama")["id"]
+        hl.edit_expense(self.conn, TODAY, rid, 156_541, "salah sumber, dari Jago harian", account_alias="jago-harian")
+        self.upload("jago-utama", "d", ("2026-11-05", "Monthly spending: PHO STREET POS Transaction", -156_541))
+        mut, n = self.merged(rid), self.count()
+        self.assertIsNotNone(mut)
+        dup = spend(self.conn, 156_541, "PHO STREET", category="makan", account_alias="jago-harian")
+        self.assertEqual((dup["status"], dup.get("existing_id"), self.count()), ("possible_duplicate", rid, n))
+        self.assertIn(f"sudah digabung dengan mutasi bank #{mut}", dup["message"])
+        self.assertEqual(self.spent(), 156_541)
+
+    def test_a_second_purchase_after_its_merged_twin_gets_its_own_key(self):
+        first = spend(self.conn, 50_000, "KOPI KENANGAN", category="makan", account_alias="mandiri-utama")["id"]
+        self.upload("mandiri-utama", "e", ("2026-11-05", "QRIS KOPI KENANGAN", -50_000))
+        self.assertIsNotNone(self.merged(first))
+        self.assertEqual(spend(self.conn, 50_000, "Kopi Kenangan", account_alias="mandiri-utama")["status"], "possible_duplicate")
+        again = spend(self.conn, 50_000, "KOPI KENANGAN", category="makan", account_alias="mandiri-utama", allow_duplicate=True)
+        self.assertEqual((again["status"], self.merged(again["id"])), ("stored", None))   # that row is the first purchase's
+
+    def test_a_deleted_twin_leaves_no_key_clash(self):
+        a = spend(self.conn, 50_000, "KOPI KENANGAN")["id"]
+        spend(self.conn, 50_000, "KOPI KENANGAN", allow_duplicate=True)
+        hl.delete_expense(self.conn, a, 50_000, "tercatat dua kali")
+        self.assertEqual(spend(self.conn, 50_000, "KOPI KENANGAN", allow_duplicate=True)["status"], "stored")
+
+
+class Pace(unittest.TestCase):
+    def test_status_thresholds_against_the_daily_allowance(self):
+        # no comparison with the days gone by: the daily money also pays the month's electricity, phone and water, so 55%
+        # used in the first 38% of the month is normal (it was a warning until 2026-11-01)
+        for spent, status in ((3_000_000, "ok"), (5_500_000, "ok"), (7_999_999, "ok"), (8_000_000, "watch"), (10_000_000, "watch"),
+                              (10_000_001, "over")):
+            conn = planned()
+            spend(conn, spent)
+            p = hl.spending_pace(conn, TODAY)
+            self.assertEqual((p["allowance"], p["status"]), (10_000_000, status), spent)
+
+    def test_obligations_pot_and_internal_moves_are_not_daily_spending(self):
+        conn = planned()
+        spend(conn, 3_000_000, "SEKOLAH", category="wajib:sekolah")
+        spend(conn, 9_000_000, "SETOR POT", category="sinking:hutang-teman")
+        spend(conn, 2_000_000, "KE TABUNGAN", category="transfer_internal")
+        spend(conn, 100_000, "MAKAN", category="makan")
+        self.assertEqual(hl.spending_pace(conn, TODAY)["spent"], 100_000)
+
+    def test_no_plan_or_plan_for_another_window_gives_none(self):
+        conn = connect(":memory:")
+        self.assertIsNone(hl.spending_pace(conn, TODAY))
+        self.assertIsNone(hl.spending_pace(planned(), date(2026, 12, 15)))
+        self.assertIsNone(hl.spending_pace(planned(), date(2026, 10, 29)))
+
+    def test_alert_comes_back_right_after_the_purchase(self):
+        conn = planned()
+        self.assertEqual(spend(conn, 6_000_000, "TV", category="elektronik")["alerts"], [])
+        r = spend(conn, 2_000_000, "KULKAS", category="elektronik", day="2026-11-06")
+        self.assertEqual(r["alerts"], ["Waspada: 80% uang harian bulan ini terpakai (Rp 8.000.000 dari Rp 10.000.000). "
+                                       "Sisa Rp 2.000.000 sampai gajian 2026-11-30."])          # no per-day figure, no time clause
+        r = spend(conn, 5_000_000, "LAPTOP", category="elektronik", day="2026-11-07")
+        self.assertTrue(any("MELEBIHI UANG HARIAN" in a for a in r["alerts"]), r["alerts"])
+
+
+class LivingMoneyPace(unittest.TestCase):
+    """Regression 2026-10-31: right after a purchase the pace said 22% of the daily money was used, counting only the
+    2.827.889 top-up from the salary. The owner's month was that plus the 4.718.116 leftover already held: 7.546.005."""
+    PAYDAY, DAY2 = date(2026, 10, 30), date(2026, 10, 31)
+
+    def world(self, card=False, early=False, payee=False):
+        conn = connect(":memory:")
+        conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('jago-harian','Jago','main')")
+        conn.commit()
+        if payee:                        # the daily account registered with /rekening: the plan then transfers the top-up there
+            PayeeVault(conn, bytes(range(32))).store("uang-harian", "account", "Jago", "9" * 10)
+        tools.upsert_card(conn, "cimb-1", "CIMB", "2222", 5, 5, 10_000_000)
+        tools.set_threshold(conn, "net_salary", 2_827_889)                   # no bills: the whole salary is the top-up
+        tools.set_threshold(conn, "living_reserve", 7_546_005)
+        if early:
+            tools.set_leftover_living_cash(conn, 4_894_157, date(2026, 10, 28))   # an estimate two days before the payday
+        hl.record_expense(conn, self.PAYDAY, 17_000, "WARKOP DANI", "2026-10-30", "makan", "jago-harian")  # before the reading
+        if card:
+            hl.record_expense(conn, self.PAYDAY, 90_000, "GRAB", "2026-10-30", "transport", card_alias="cimb-1")
+        self.msg = tools.set_leftover_living_cash(conn, 4_718_116, self.PAYDAY)
+        tools.generate_payday_plan(conn, self.PAYDAY, payday=self.PAYDAY)
+        for amount, merchant, day in ((150_000, "PARKIR", "2026-10-30"), (51_000, "WARTEG", "2026-10-30"),
+                                      (174_075, "YONNY", "2026-10-31")):
+            hl.record_expense(conn, self.DAY2, amount, merchant, day, "makan", "jago-harian")
+        return conn
+
+    def test_the_top_up_plus_the_leftover_is_the_allowance(self):
+        conn = self.world()
+        self.assertIn("(Rp 17.000) sudah keluar dari sisa ini", self.msg)
+        r = hl.record_expense(conn, self.DAY2, 249_000, "ANKER", "2026-10-31", "belanja", "jago-harian")
+        self.assertFalse(any("Waspada" in a or "MELEBIHI" in a for a in r["alerts"]), r["alerts"])   # was "22% terpakai"
+        p = hl.spending_pace(conn, self.DAY2)
+        self.assertEqual((p["allowance"], p["from_salary"], p["leftover"]), (7_546_005, 2_827_889, 4_718_116))
+        self.assertEqual((p["spent"], p["spent_before_leftover"], p["pct_used"], p["status"]),
+                         (624_075, 17_000, 8, "ok"))                        # the coffee is already out of the leftover
+        self.assertEqual((p["remaining"], p["correction"], p["reading"]), (6_921_930, 0, None))
+        self.assertIn("UANG HARIAN BULAN INI (sampai gajian 2026-11-30): terpakai Rp 624.075 dari Rp 7.546.005 (8%), sisa "
+                      "Rp 6.921.930. Jangan dibagi per hari", tools.data_overview(conn, self.DAY2))
+
+    def test_the_same_figure_given_again_keeps_the_first_reading(self):
+        conn = self.world()
+        tools.set_leftover_living_cash(conn, 4_718_116, self.DAY2)        # asked again a day later: nothing new in it
+        p = hl.spending_pace(conn, self.DAY2)
+        self.assertEqual((p["spent_before_leftover"], p["spent"]), (17_000, 375_075))
+        self.assertIn("SISA UANG HARIAN TERCATAT: Rp 4.718.116 untuk gajian 2026-10-30 (dicatat 2026-10-30); belanja tunai "
+                      "sejak gajian sebelum laporan itu Rp 17.000 sudah keluar", tools.data_overview(conn, self.DAY2))
+
+    def test_a_corrected_figure_days_later_keeps_the_payday_count(self):
+        conn = self.world()
+        msg = tools.set_leftover_living_cash(conn, 4_500_000, date(2026, 11, 2))
+        self.assertIn("sebelum laporan sisa pertama 2026-10-30 (Rp 17.000)", msg)
+        self.assertEqual((tools.get_threshold(conn, "living_leftover"), tools.get_threshold(conn, "living_leftover_at")),
+                         (4_500_000, 20261030))
+        p = hl.spending_pace(conn, date(2026, 11, 2))      # the purchases since the payday were not in the figure: still counted
+        self.assertEqual((p["spent_before_leftover"], p["spent"]), (17_000, 375_075))
+
+    def test_an_estimate_before_the_payday_is_counted_again_on_the_payday(self):
+        conn = self.world(early=True)
+        p = hl.spending_pace(conn, self.DAY2)
+        self.assertEqual((p["spent_before_leftover"], p["spent"], tools.get_threshold(conn, "living_leftover_at")),
+                         (17_000, 375_075, 20261030))
+
+    def test_a_card_purchase_was_never_in_the_leftover(self):
+        p = hl.spending_pace(self.world(card=True), self.DAY2)
+        self.assertEqual((p["spent_before_leftover"], p["spent"]), (17_000, 465_075))
+
+    def test_the_plan_and_the_reports_show_the_whole_month(self):
+        conn = self.world()
+        text = tools.summarize_plan(tools.generate_payday_plan(conn, self.DAY2))
+        self.assertIn("uang harian bulan ini Rp 7.546.005 = Rp 2.827.889 dari gaji + sisa Rp 4.718.116", text)
+        plan = reports._rencana(conn, self.DAY2)
+        self.assertIn("<b>Rp 7.546.005</b>\n    Rp 2.827.889 dari gaji + Rp 4.718.116 sisa yang sudah kamu pegang", plan)
+        budget = reports._anggaran(conn, self.DAY2)
+        self.assertIn("Terpakai <b>Rp 375.075</b> dari Rp 7.546.005 (Rp 2.827.889 dari gaji + sisa Rp 4.718.116)", budget)
+        self.assertIn("Sisa <b>Rp 7.170.930</b>", budget)
+        for out in (text, plan, budget):  # the daily money also pays electricity, phone and water: a per-day figure misleads
+            self.assertNotRegex(out, r"(?i)per hari|/hari|jatah harian")
+
+    # The owner's reading of the daily account (2026-11-01: 7.051.352 where the records said 6.921.930, after the wife's
+    # transfers bigger than the errands they paid for) corrects the month; what is recorded later counts once.
+    NOV1 = date(2026, 11, 1)
+
+    def left(self, conn, day=None):
+        return hl.spending_pace(conn, day or self.NOV1)["remaining"]
+
+    def test_the_pocket_balance_corrects_the_month(self):
+        conn = self.world()
+        hl.record_expense(conn, self.DAY2, 249_000, "ANKER", "2026-10-31", "belanja", "jago-harian")
+        msg = tools.record_account_balance(conn, self.NOV1, "jago-harian", 7_051_352)
+        p = hl.spending_pace(conn, self.NOV1)
+        self.assertEqual((p["remaining"], p["correction"], p["allowance"], p["spent"], p["pct_used"], p["status"]),
+                         (7_051_352, 129_422, 7_675_427, 624_075, 8, "ok"))
+        self.assertIn("Uang harian sampai gajian 2026-11-30 sekarang mengikuti saldo ini: sisa Rp 7.051.352 (menurut catatan "
+                      "sebelum laporan ini Rp 6.921.930; selisih +Rp 129.422: uang masuk yang tidak tercatat", msg)
+        self.assertIn("Terpakai Rp 624.075 dari Rp 7.675.427 (8%).", msg)
+        self.assertNotRegex(msg, r"(?i)autodebet|per hari|/hari|hanya benar bila")   # no auto-debit from it, no payday caveat
+        budget = reports._anggaran(conn, self.NOV1)
+        self.assertIn("Terpakai <b>Rp 624.075</b> dari Rp 7.675.427 (Rp 7.546.005 rencana + Rp 129.422 selisih saldo)\n"
+                      "Sisa <b>Rp 7.051.352</b>\n<i>mengikuti saldo jago-harian Rp 7.051.352 (1 Nov ", budget)
+        self.assertIn("selisih dengan catatan +Rp 129.422</i>", budget)
+        overview = tools.data_overview(conn, self.NOV1)              # what the bot reads when asked how much is left
+        self.assertIn("UANG HARIAN BULAN INI (sampai gajian 2026-11-30): terpakai Rp 624.075 dari Rp 7.675.427 (8%), sisa "
+                      "Rp 7.051.352; mengikuti saldo jago-harian Rp 7.051.352 yang dilaporkan 2026-11-01 pukul ", overview)
+        self.assertIn(", selisih dengan catatan +Rp 129.422. Jangan dibagi per hari", overview)
+        self.assertEqual(tools.get_threshold(conn, "living_balance_mark"),
+                         conn.execute("SELECT MAX(id) FROM transactions").fetchone()[0])
+
+    def test_card_purchases_are_not_out_of_the_account_yet(self):
+        conn = self.world(card=True)                                 # GRAB 90.000 on a card before the reading
+        msg = tools.record_account_balance(conn, self.NOV1, "jago-harian", 7_000_000)
+        self.assertEqual(self.left(conn), 6_910_000)
+        self.assertIn("Belanja kartu sejak gajian Rp 90.000 belum keluar dari rekening ini", msg)
+
+    def test_what_is_recorded_after_the_reading_counts_once(self):
+        conn = self.world()
+        tools.record_account_balance(conn, self.NOV1, "jago-harian", 7_000_000)
+        hl.record_expense(conn, self.NOV1, 100_000, "BENSIN", "2026-11-01", "transport", "jago-harian")   # after the reading
+        self.assertEqual(self.left(conn), 6_900_000)
+        hl.record_expense(conn, self.NOV1, 30_000, "KOPI", "2026-10-31", "makan", "jago-harian")   # late receipt: in the balance
+        self.assertEqual(self.left(conn), 6_900_000)
+        hl.record_expense(conn, self.NOV1, 90_000, "GRAB", "2026-10-31", "transport", card_alias="cimb-1")   # card: not out yet
+        self.assertEqual(self.left(conn), 6_810_000)
+        conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('mandiri-utama','Mandiri','main')")
+        hl.record_expense(conn, self.NOV1, 50_000, "PARKIR", "2026-10-31", "transport", "mandiri-utama")   # other account, earlier:
+        self.assertEqual(self.left(conn), 6_810_000)                    # daily money held there (the 30 Oct parking), not the pocket's
+        hl.record_expense(conn, self.NOV1, 2_000_000, "SEKOLAH", "2026-11-01", "wajib:sekolah", "jago-harian")  # not daily money
+        self.assertEqual(self.left(conn), 6_810_000)
+        nov2 = date(2026, 11, 2)
+        hl.record_expense(conn, nov2, 40_000, "TOL", "2026-11-02", "transport", "mandiri-utama")   # after the reading: any account
+        self.assertEqual(self.left(conn, nov2), 6_770_000)
+
+    def test_bank_rows_that_come_in_later(self):
+        conn = self.world()
+        conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('jago-utama','Jago','main')")   # Jago files every pocket here
+        acct = conn.execute("SELECT id FROM accounts WHERE alias='jago-utama'").fetchone()[0]
+        kopi = hl.record_expense(conn, self.NOV1, 30_000, "KOPI", "2026-11-01", "makan", "jago-harian")["id"]   # in the balance
+        tools.record_account_balance(conn, self.NOV1, "jago-harian", 7_000_000)
+
+        def row(day, amount):
+            return conn.execute("INSERT INTO transactions(account_id,txn_date,merchant,amount,category,status,source) "
+                                "VALUES (?,?,'POS',?,'makan','verified','mutation')", (acct, day, -amount)).lastrowid
+        conn.execute("UPDATE transactions SET merged_into=? WHERE id=?", (row("2026-11-01", 30_000), kopi))   # took the receipt in
+        row("2026-10-31", 45_000)                                  # spent before the reading day, never recorded: in the balance
+        self.assertEqual(self.left(conn), 7_000_000)
+        row("2026-11-01", 20_000)                                  # that day, recorded after the reading: counted
+        self.assertEqual(self.left(conn), 6_980_000)
+
+    def test_a_new_reading_replaces_the_last(self):
+        conn = self.world()
+        tools.record_account_balance(conn, self.NOV1, "jago-harian", 7_000_000)
+        hl.record_expense(conn, self.NOV1, 100_000, "BENSIN", "2026-11-01", "transport", "jago-harian")
+        msg = tools.record_account_balance(conn, date(2026, 11, 2), "jago-harian", 6_850_000)
+        self.assertIn("sisa Rp 6.850.000 (menurut catatan sebelum laporan ini Rp 6.900.000; selisih -Rp 50.000: keluar dari "
+                      "rekening ini tanpa tercatat, dihitung sebagai terpakai", msg)
+        p = hl.spending_pace(conn, date(2026, 11, 2))
+        self.assertEqual((p["remaining"], p["allowance"], p["spent"], p["correction"]), (6_850_000, 7_546_005, 696_005, -220_930))
+
+    def test_other_accounts_and_last_months_reading_do_not_anchor(self):
+        conn = self.world()
+        conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('mandiri-utama','Mandiri','main')")
+        self.assertIn("Tidak ada autodebet dari mandiri-utama", tools.record_account_balance(conn, self.NOV1, "mandiri-utama", 900_000))
+        self.assertIsNone(hl.spending_pace(conn, self.NOV1)["reading"])
+        tools.record_account_balance(conn, self.NOV1, "jago-harian", 7_000_000)
+        tools.generate_payday_plan(conn, date(2026, 11, 30), payday=date(2026, 11, 30))
+        p = hl.spending_pace(conn, date(2026, 12, 1))
+        self.assertEqual((p["payday"], p["reading"], p["correction"]), ("2026-11-30", None, 0))
+
+    def test_a_reading_before_the_top_up_waits_and_the_leftover_is_closed_after_it(self):
+        conn = self.world(payee=True)
+        msg = tools.record_account_balance(conn, self.NOV1, "jago-harian", 4_500_000)
+        self.assertIn("Transfer uang harian dari gaji 2026-10-30 (Rp 2.827.889) belum tercatat selesai", msg)
+        self.assertIsNone(hl.spending_pace(conn, self.NOV1)["reading"])
+        tools.mark_transfers_done(conn, self.NOV1, items=["uang-harian"])
+        tools.record_account_balance(conn, self.NOV1, "jago-harian", 7_051_352)
+        self.assertEqual(self.left(conn), 7_051_352)
+        # the trap: the balance now holds the top-up too; taken as the leftover it would make the month 2.827.889 + 7.051.352
+        with self.assertRaisesRegex(ValueError, r"sudah tercatat selesai.*saldo_rekening\(rekening='jago-harian'"):
+            tools.set_leftover_living_cash(conn, 7_051_352, self.NOV1)
+        self.assertEqual(tools.get_threshold(conn, "living_leftover"), 4_718_116)
+
+
+class PlanInForce(unittest.TestCase):
+    """Regression 2026-11-02 (found rehearsing the 30 Nov payday): the daily money, a balance correcting the month and the
+    open transfers read the NEWEST stored plan. A plan asked for the coming payday, and every plan call from 7 days after
+    a payday (the daily 06:30 Notion sync among them), stored a plan for 30 Nov: the October month went silent."""
+
+    def world(self):
+        conn = planned()
+        conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('jago-harian','Jago','main')")
+        tools.upsert_expense(conn, "les", "les-guru", 500_000, 1)     # a transfer of the 30 Oct plan, not marked done
+        tools.generate_payday_plan(conn, TODAY, payday=date(2026, 10, 30))
+        spend(conn, 100_000)
+        return conn
+
+    def test_a_plan_asked_for_the_coming_payday_leaves_the_month_alone(self):
+        conn = self.world()
+        day = date(2026, 11, 5)          # the day of the purchase, inside the payday's week
+        before = hl.spending_pace(conn, day)
+        tools.generate_payday_plan(conn, day, payday=date(2026, 11, 30))       # "rencana gajian 30 Nov gimana?"
+        p = hl.spending_pace(conn, day)
+        self.assertEqual((p["payday"], p["spent"], p["allowance"]), ("2026-10-30", 100_000, before["allowance"]))
+        msg = tools.record_account_balance(conn, day, "mandiri-utama", 2_000_000)
+        self.assertIn("Transfer gajian yang belum tercatat selesai: les-guru Rp 500.000", msg)
+        self.assertNotIn("Angka ini hanya benar bila", msg)
+
+    def test_plan_calls_a_week_after_the_payday_leave_the_month_alone(self):
+        conn = self.world()
+        tools.generate_payday_plan(conn, date(2026, 11, 7))     # the 06:30 sync on 7 Nov: current_payday is 30 Nov from then
+        p = hl.spending_pace(conn, TODAY)
+        self.assertEqual((p["payday"], p["spent"]), ("2026-10-30", 100_000))
+        self.assertEqual(tools.stored_plan(conn, date(2026, 11, 30))["payday"], "2026-11-30")     # the sync did store it
+        msg = tools.record_account_balance(conn, TODAY, "jago-harian", 9_000_000)
+        self.assertNotIn("Belum ada rencana gajian yang berjalan", msg)
+        p = hl.spending_pace(conn, TODAY)
+        self.assertEqual((p["payday"], p["remaining"]), ("2026-10-30", 9_000_000))
+        self.assertIsNotNone(p["reading"])
+        # on the payday the new month starts with the plan of that payday, never with the last one's
+        tools.generate_payday_plan(conn, date(2026, 11, 30))
+        self.assertEqual(hl.spending_pace(conn, date(2026, 11, 30))["payday"], "2026-11-30")
+
+    def test_without_a_plan_for_the_payday_there_is_no_month(self):
+        conn = self.world()
+        self.assertIsNone(hl.spending_pace(conn, date(2026, 11, 30)))      # the 30 Oct plan's month has ended
+        self.assertIsNone(hl.spending_pace(conn, date(2026, 10, 29)))      # before any stored payday
+        self.assertIsNone(tools.plan_in_force(conn, date(2026, 10, 29)))
+
+
+class UnsortedElsewhere(unittest.TestCase):
+    """Regression 2026-11-02: the 30 Oct payday's transfers and fees out of the salary account were uploaded uncategorized
+    and counted as daily spending, so most of the month read as spent ('watch' with the balance reading, 'over' without
+    one). A row of another bank than the daily account's waits for its category, and the pace reports it."""
+
+    def world(self):
+        conn = planned()
+        conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('jago-harian','Jago','main')")
+        conn.execute("INSERT INTO accounts(alias,bank,kind) VALUES ('jago-utama','jago','main')")
+        conn.commit()
+        spend(conn, 100_000, category="makan", account_alias="jago-harian")
+        return conn
+
+    def upload(self, conn, account, h, *rows):
+        mu.record_mutations(conn, account, h * 64, "2026-10-30", "2026-11-30", None, None,
+                            [{"date": d, "description": desc, "amount": a} for d, desc, a in rows])
+        return {r["merchant"]: r["id"] for r in conn.execute("SELECT id, merchant FROM transactions WHERE source='mutation'")}
+
+    def test_the_paydays_transfers_wait_for_their_category(self):
+        conn = self.world()
+        rows = self.upload(conn, "mandiri-utama", "a", ("2026-10-30", "TRSF BIFAST KE KARTU", -3_000_000),
+                           ("2026-10-30", "BIAYA TRSF BIFAST", -2_500), ("2026-10-30", "TRSF KE TOKO ABC", -800_000))
+        p = hl.spending_pace(conn, TODAY)
+        self.assertEqual((p["spent"], p["status"], p["unsorted"]), (100_000, "ok", {"rows": 3, "amount": 3_802_500}))
+        self.assertIn("; BELUM DIHITUNG: 3 mutasi keluar Rp 3.802.500 dari bank selain bank jago-harian yang belum "
+                      "dikategorikan", tools.data_overview(conn, TODAY))
+        self.assertIn("belum dihitung: 3 mutasi keluar Rp 3.802.500 dari bank lain yang belum dikategorikan",
+                      reports._anggaran(conn, TODAY))
+        self.assertIn(("info", "3 mutasi keluar Rp 3.802.500 dari bank selain bank jago-harian sejak gajian 2026-10-30 belum "
+                               "dikategorikan, jadi belum dihitung sebagai pengeluaran harian."), hl.health_check(conn, TODAY)["findings"])
+        mu.set_category(conn, rows["TRSF BIFAST KE KARTU"], "wajib:kartu")     # an obligation: neither counted nor waiting
+        mu.set_category(conn, rows["TRSF KE TOKO ABC"], "belanja")             # the owner says it was a purchase
+        p = hl.spending_pace(conn, TODAY)
+        self.assertEqual((p["spent"], p["unsorted"]), (900_000, {"rows": 1, "amount": 2_500}))
+
+    def test_without_a_daily_account_every_row_counts(self):
+        conn = planned()
+        self.upload(conn, "mandiri-utama", "b", ("2026-11-02", "TRSF KE TOKO ABC", -300_000))
+        p = hl.spending_pace(conn, TODAY)
+        self.assertEqual((p["spent"], p["unsorted"]["rows"]), (300_000, 0))
+        self.assertNotIn("BELUM DIHITUNG", tools.data_overview(conn, TODAY))
+
+    def test_a_row_of_the_daily_accounts_bank_still_counts(self):
+        """Jago files every pocket under one account: a row of jago-utama may be a purchase from the daily pocket."""
+        conn = self.world()
+        self.upload(conn, "jago-utama", "c", ("2026-11-03", "Monthly spending: TOKO ABC POS Transaction", -60_000))
+        self.upload(conn, "jago-harian", "d", ("2026-11-04", "QRIS TOKO XYZ", -40_000))
+        p = hl.spending_pace(conn, TODAY)
+        self.assertEqual((p["spent"], p["unsorted"]["rows"]), (200_000, 0))
+
+    def test_a_receipt_inside_another_banks_row_makes_it_a_purchase(self):
+        conn = self.world()
+        rid = spend(conn, 75_000, "PARKIR KANTOR", day="2026-11-06", account_alias="mandiri-utama")["id"]     # no category
+        rows = self.upload(conn, "mandiri-utama", "e", ("2026-11-06", "QRIS PARKIR KANTOR", -75_000))
+        self.assertEqual(conn.execute("SELECT merged_into FROM transactions WHERE id=?", (rid,)).fetchone()[0],
+                         rows["QRIS PARKIR KANTOR"])
+        p = hl.spending_pace(conn, TODAY)
+        self.assertEqual((p["spent"], p["unsorted"]["rows"]), (175_000, 0))
+
+    def test_a_balance_reading_is_not_moved_by_a_row_waiting_for_its_category(self):
+        conn = self.world()
+        tools.record_account_balance(conn, TODAY, "jago-harian", 5_000_000)
+        before = hl.spending_pace(conn, TODAY)
+        self.assertIsNotNone(before["reading"])
+        rows = self.upload(conn, "mandiri-utama", "f", (TODAY.isoformat(), "TRSF BIFAST KE KARTU", -3_000_000))   # after the reading
+        p = hl.spending_pace(conn, TODAY)
+        self.assertEqual((p["remaining"], p["spent"], p["unsorted"]["rows"]), (before["remaining"], before["spent"], 1))
+        mu.set_category(conn, rows["TRSF BIFAST KE KARTU"], "belanja")        # sorted as a purchase: spent after the reading
+        self.assertEqual(hl.spending_pace(conn, TODAY)["remaining"], before["remaining"] - 3_000_000)
+
+
+class Budgets(unittest.TestCase):
+    def test_thresholds_and_exact_100_percent(self):
+        for spent, status in ((790_000, "ok"), (800_000, "watch"), (1_000_000, "watch"), (1_000_001, "over")):
+            conn = planned(100_000_000)           # huge allowance so only the budget alert fires
+            hl.set_budget(conn, "Makan", 1_000_000)
+            spend(conn, spent, "RESTO", category="makan")
+            (b,) = hl.budget_status(conn, "2026-11")
+            self.assertEqual((b["category"], b["status"]), ("makan", status), spent)
+
+    def test_card_budget_counts_only_card_purchases_and_cash_never_eats_it(self):
+        """Regression: a Tokopedia payment from a bank account (electricity token) ate the card budget (3060%)."""
+        conn = planned(100_000_000)
+        tools.upsert_card(conn, "c-1", "CIMB", "1111", 5, 20, 5_000_000)
+        hl.set_budget(conn, "kartu:belanja-online", 300_000)
+        spend(conn, 900_000, "TOKOPEDIA TOKEN LISTRIK", category="belanja-online")             # cash
+        (b,) = hl.budget_status(conn, "2026-11")
+        self.assertEqual((b["category"], b["spent"], b["status"]), ("kartu:belanja-online", 0, "ok"))
+        r = spend(conn, 350_000, "SHOPEE", category="belanja-online", card_alias="c-1")
+        self.assertTrue(any("Anggaran kartu:belanja-online" in a and "SUDAH LEWAT" in a for a in r["alerts"]), r["alerts"])
+        hl.set_budget(conn, "belanja-online", 1_000_000)                                       # cash budget is separate
+        by = {x["category"]: x for x in hl.budget_status(conn, "2026-11")}
+        self.assertEqual((by["belanja-online"]["spent"], by["kartu:belanja-online"]["spent"]), (900_000, 350_000))
+
+    def test_a_small_refund_does_not_make_the_month_before_payday_look_like_a_deficit(self):
+        conn = planned(100_000_000)
+        spend(conn, 5_000_000, "BELANJA", category="makan")
+        conn.execute("INSERT INTO transactions(txn_date,merchant,amount,status,source) VALUES ('2026-11-03','REFUND TOKO',500000,'unverified','mutation')")
+        conn.commit()
+        h = hl.health_check(conn, TODAY, "2026-11")
+        self.assertFalse(any(sev == "bad" and "LEBIH BESAR dari pemasukan" in t for sev, t in h["findings"]), h["findings"])
+
+    def test_budget_alert_included_when_over(self):
+        conn = planned(100_000_000)
+        hl.set_budget(conn, "makan", 500_000)
+        r = spend(conn, 600_000, "RESTO", category="makan")
+        self.assertTrue(any("Anggaran makan" in a and "SUDAH LEWAT" in a for a in r["alerts"]))
+        with self.assertRaises(ValueError):
+            hl.set_budget(conn, "", 1)
+        with self.assertRaises(ValueError):
+            hl.set_budget(conn, "x", -1)
+
+
+def cash_month(conn, income, expense, h, alias="mandiri-utama", opening=None, closing=None, month="2026-11"):
+    rows = []
+    if income:
+        rows.append({"date": f"{month}-25", "description": "GAJI", "amount": income})
+    if expense:
+        rows.append({"date": f"{month}-10", "description": "BELANJA BULANAN", "amount": -expense})
+    mu.record_mutations(conn, alias, h * 64, f"{month}-01", f"{month}-28", opening, closing, rows)
+
+
+class Health(unittest.TestCase):
+    def verdict(self, conn, month="2026-11"):
+        return hl.health_check(conn, TODAY, month)
+
+    def test_deficit_month_is_bad(self):
+        conn = planned()
+        cash_month(conn, 5_000_000, 6_000_000, "a")
+        h = self.verdict(conn)
+        self.assertEqual(h["verdict"], "BURUK")
+        self.assertTrue(any("LEBIH BESAR" in t and "defisit Rp 1.000.000" in t for s, t in h["findings"]))
+
+    def test_month_in_progress_before_payday_is_not_judged_as_a_deficit(self):
+        conn = planned()
+        mu.record_mutations(conn, "mandiri-utama", "z" * 64, "2026-11-01", "2026-11-10", None, None,
+                            [{"date": "2026-11-05", "description": "BELANJA", "amount": -3_000_000}])    # no salary yet
+        h = hl.health_check(conn, TODAY, "2026-11")                                                     # today is 2026-11-10; payday 2026-11-30
+        self.assertFalse(any(s == "bad" for s, _ in h["findings"]))
+        self.assertTrue(any("belum lengkap: gaji baru masuk sekitar 2026-11-30" in t for _, t in h["findings"]))
+        self.assertEqual(h["verdict"], "SEHAT")
+        # the same numbers for a month that is over ARE a deficit
+        late = hl.health_check(conn, date(2026, 12, 5), "2026-11")
+        self.assertTrue(any("LEBIH BESAR" in t for _, t in late["findings"]))
+
+    def test_good_month_is_healthy_and_low_saving_is_a_warning(self):
+        conn = planned()
+        cash_month(conn, 10_000_000, 2_000_000, "a")
+        self.assertEqual(self.verdict(conn)["verdict"], "SEHAT")
+        conn2 = planned()
+        cash_month(conn2, 10_000_000, 9_500_000, "b")                    # saves 5%, floor is 10%
+        h = self.verdict(conn2)
+        self.assertEqual(h["verdict"], "WASPADA")
+        self.assertTrue(any("di bawah target 10.0%" in t for _, t in h["findings"]))
+
+    def test_owner_savings_target_and_floor_are_respected(self):
+        conn = planned()
+        cash_month(conn, 10_000_000, 7_000_000, "a")                      # saves 3M = 30%
+        tools.set_threshold(conn, "monthly_savings_target", 4_000_000)
+        self.assertTrue(any("target tabungan Rp 4.000.000" in t for _, t in self.verdict(conn)["findings"]))
+        tools.set_threshold(conn, "min_savings_rate_bp", 4000)
+        self.assertTrue(any("di bawah target 40.0%" in t for _, t in self.verdict(conn)["findings"]))
+
+    def test_debt_service_over_the_limit_is_bad(self):
+        conn = planned()
+        tools.upsert_debt(conn, "mobil", "MTF", 100_000_000, 4_000_000, 25, 2, 815)     # 40% of a 10M salary
+        d = hl.debt_load(conn)
+        self.assertEqual((d["monthly_payments"], d["dsr_bp"], d["dsr_max_bp"]), (4_000_000, 4000, 3000))
+        h = self.verdict(conn)
+        self.assertEqual(h["verdict"], "BURUK")
+        self.assertTrue(any("Beban utang 40.0%" in t for _, t in h["findings"]))
+
+    def test_growing_total_debt_vs_last_month_is_flagged(self):
+        conn = planned()
+        tools.upsert_debt(conn, "mobil", "MTF", 100_000_000, 1_000_000, 25, 2, 815)
+        hl.snapshot(conn, date(2026, 10, 15))
+        tools.upsert_debt(conn, "pinjaman-baru", "Bank", 20_000_000, 500_000, 40, 5, 1200)
+        h = self.verdict(conn)
+        self.assertTrue(any("Total utang naik dari Rp 100.000.000 (2026-10) menjadi Rp 120.000.000" in t for _, t in h["findings"]))
+        self.assertEqual(h["verdict"], "BURUK")
+        conn2 = planned()
+        tools.upsert_debt(conn2, "mobil", "MTF", 100_000_000, 1_000_000, 25, 2, 815)
+        hl.snapshot(conn2, date(2026, 10, 15))
+        tools.upsert_debt(conn2, "mobil", "MTF", 95_000_000, 1_000_000, 24, 2, 815)       # paid down
+        self.assertFalse(any("Total utang naik" in t for _, t in self.verdict(conn2)["findings"]))
+
+    def test_balance_trend_and_buffer(self):
+        conn = planned()
+        for i, (month, closing) in enumerate((("2026-08", 9_000_000), ("2026-09", 7_000_000), ("2026-10", 5_000_000))):
+            cash_month(conn, 1_000_000, 500_000, str(i + 1), month=month, opening=closing - 500_000, closing=closing)
+        h = self.verdict(conn, "2026-10")
+        self.assertTrue(any("Saldo mandiri-utama turun 2 periode berturut-turut" in t for _, t in h["findings"]))
+        tools.set_threshold(conn, "cash_buffer", 6_000_000)
+        self.assertTrue(any("di bawah buffer Rp 6.000.000" in t for s, t in self.verdict(conn, "2026-10")["findings"] if s == "bad"))
+
+    def test_pace_findings_and_text_report(self):
+        conn = planned()
+        spend(conn, 11_000_000, "BELANJA BESAR", category="elektronik")
+        h = self.verdict(conn)
+        self.assertTrue(any("Pengeluaran harian" in t for _, t in h["findings"]))
+        text = hl.format_health(h)
+        self.assertTrue(text.startswith("Penilaian keuangan 2026-11: BURUK"))
+        self.assertIn("!! Pengeluaran harian", text)
+        self.assertIn("Total utang Rp 0", text)
+
+    def test_empty_ledger_is_not_a_crash(self):
+        h = hl.health_check(connect(":memory:"), TODAY)
+        self.assertEqual(h["verdict"], "SEHAT")
+        self.assertTrue(any("Belum ada mutasi" in t for _, t in h["findings"]))
+
+
+try:
+    from starlette.testclient import TestClient  # noqa: F401
+    from vault_tools.server import MCP_TOOL_NAMES, create_app
+    HAVE_SERVER = True
+except ImportError:
+    HAVE_SERVER = False
+
+
+@unittest.skipUnless(HAVE_SERVER, "mcp/starlette not installed")
+class ThroughTheTools(unittest.TestCase):
+    def test_screenshot_flow_budget_alert_and_health_report(self):
+        with tempfile.TemporaryDirectory() as d:
+            app = create_app(os.path.join(d, "l.db"), bytes(range(32)), "m" * 40, "i" * 40, allowed_hosts=["testserver"],
+                             today=lambda: TODAY, ingest_dir=d, passwords_path=None)
+            call = lambda n, a=None: json.loads(json.dumps(asyncio.run(app.state.mcp.call_tool(n, a or {})), default=str))  # noqa: E731
+            self.assertTrue({"record_expense", "set_budget", "budget_status", "health_check", "list_statements"} <= set(MCP_TOOL_NAMES))
+            call("set_threshold", {"key": "net_salary", "value": 10_000_000})
+            call("generate_payday_plan", {"payday": "2026-10-30"})
+            call("set_budget", {"category": "makan", "monthly_amount": 500_000})
+            res = json.dumps(call("record_expense", {"amount": 600_000, "merchant": "RESTO", "txn_date": "2026-11-05", "category": "makan",
+                                                     "tunai": True}))
+            self.assertIn("SUDAH LEWAT", res)
+            self.assertIn("makan: Rp 600.000 dari Rp 500.000 (120%) over", json.dumps(call("budget_status")))
+            self.assertIn("Penilaian keuangan 2026-11:", json.dumps(call("health_check")))
+            self.assertIn("Belum ada tagihan tersimpan", json.dumps(call("list_statements")))
+            call("upsert_card", {"alias": "hsbc-1", "bank": "HSBC", "last4": "5915", "statement_day": 19, "due_day": 5, "credit_limit": 10_000_000})
+            h = "e" * 64
+            call("record_statement", {"card_alias": "hsbc-1", "file_hash": h, "statement_date": "2026-10-19", "due_date": "2026-11-05",
+                                      "previous_balance": 0, "payments": 0, "charges": 1000, "fees": 0, "total_due": 1000, "minimum_due": 100})
+            self.assertNotIn("file_ref", json.dumps(call("list_statements")))              # the file is gone: no dangling reference
+            open(os.path.join(d, h + ".pdf"), "wb").close()
+            self.assertIn(f"file_ref {h}.pdf", json.dumps(call("list_statements", {"card_alias": "hsbc-1"})))
+            self.assertIn("Belum ada tagihan tersimpan", json.dumps(call("list_statements", {"card_alias": "none"})))
+
+
+if __name__ == "__main__":
+    unittest.main()

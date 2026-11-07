@@ -1,0 +1,7 @@
+[Unit]
+Description=Start the applier when control writes an approval
+[Path]
+PathChanged=/opt/personal-agent-data/control-state/approved
+Unit=pa-applier.service
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,87 @@
+# Hermes front profile (v0.22.5): the owner's general assistant on the open web (squid-front). Mounted read-only; a
+# change goes through change-proposals -> control -> the owner's tap, then git + deploy. No finance data lives here.
+# Keys as in services/hermes/vault/config.yaml (verified there) and the v0.22.5 source.
+model:
+  provider: anthropic
+  default: claude-haiku-5-5     # front budget: USD 40/month on its own workspace key; a Sonnet "deep" route is a follow-up
+
+agent:
+  max_turns: 20
+  image_input_mode: native  # photos go to the main model as images (auto would pick text: auxiliary.vision is set)
+  disabled_toolsets:        # v1 keeps web, memory, clarify, vision and the change-proposals MCP; no shell, code or files
+    - terminal              # (a terminal comes later, inside a separate sandbox container, never in this one)
+    - code_execution
+    - browser               # later: needs the agent-browser CLI and Chromium in the image, or a CDP/cloud provider
+    - x_search              # off by default, but turns itself on when xAI credentials exist
+    - delegation
+    - file
+    - cronjob
+    - kanban
+    - computer_use
+    - image_gen
+    - tts
+    - skills                # skills arrive through change-proposals (services/hermes/front/skills/), not written by the agent
+    - todo
+    - session_search
+    - connections
+
+auxiliary:
+  compression:
+    provider: anthropic
+    model: claude-haiku-5-5
+  title_generation:
+    provider: anthropic
+    model: claude-haiku-5-5
+  vision:
+    provider: anthropic
+    model: claude-haiku-5-5
+
+compression:
+  threshold_tokens: 60000
+  min_tail_user_messages: 3
+
+memory:
+  memory_enabled: true       # general facts the owner asks it to remember; never finance data (SOUL.md)
+  user_profile_enabled: false
+  write_approval: true       # on Telegram a write is staged: /memory pending, /memory approve <id>, /memory reject <id>
+  nudge_interval: 0          # no background memory review every 10 turns (a forked agent run each time)
+
+skills:
+  write_approval: true
+
+tools:
+  tool_search:
+    enabled: "off"   # quoted: bare off is a YAML boolean; one MCP tool and a few built-ins stay visible
+
+security:
+  allow_lazy_installs: false
+
+sessions:
+  retention_days: 30
+
+unauthorized_dm_behavior: ignore
+
+plugins:
+  enabled:
+    - cardblock   # drops a message holding a card-like number before the model sees it (plugins/cardblock)
+
+gateway:
+  platforms:
+    telegram:
+      extra:
+        disable_link_previews: true
+        allowed_chats: "none"    # no group id matches: every group is dropped; DMs are never filtered by this
+
+mcp_servers:
+  change_proposals:
+    url: "http://change-proposals:8000/mcp"
+    headers:
+      Authorization: "Bearer ${env:CHANGE_PROPOSALS_MCP_TOKEN}"
+    timeout: 30
+    connect_timeout: 20
+    tools:
+      resources: false
+      prompts: false
+
+approvals:
+  destructive_slash_confirm: false

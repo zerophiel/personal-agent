@@ -1,0 +1,11 @@
+# Installed by services/applier/install.sh after the owner's go-ahead, never from host/ (install-timers.sh enables all of
+# those). Root: it writes /opt/personal-agent and runs docker compose, which is root-equivalent anyway.
+[Unit]
+Description=Apply the front changes the owner approved in control
+After=docker.service
+Requires=docker.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /opt/personal-agent/services/applier/applier.py
+TimeoutStartSec=45min
+UMask=0077
