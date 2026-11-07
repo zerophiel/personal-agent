@@ -89,8 +89,15 @@
       "output_tokens": 233031,
       "files": 8,
       "note": "Round 14: M4 comms, 8 docs as a delta from f7f45c8 (two new: the comms SOUL and the brokers' requirements), every community named"
+    },
+    {
+      "date": "2026-11-07T03:45:04.720564+00:00",
+      "input_tokens": 14621950,
+      "output_tokens": 736921,
+      "files": 22,
+      "note": "Round 15: the rebuild work, 22 docs as a delta from 585126b (new: docs/REBUILD.md, docs/LAPTOP.md, ops/datafix/README.md, ops/graphify/README.md, config/host-packages.txt), every community named"
     }
   ],
-  "total_input_tokens": 61851302,
-  "total_output_tokens": 5327452
+  "total_input_tokens": 76473252,
+  "total_output_tokens": 6064373
 }
