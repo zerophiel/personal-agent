@@ -6,9 +6,15 @@ This page is what a new laptop needs. `docs/REBUILD.md` holds what to do when on
 ## Tools
 
 - `git`, `make`, `python3`, `rsync`, `flock`, `ssh` and `uv`. Docker and restic run on the VPS only.
+- A git identity, once: `git config --global user.name "<name>"` and `git config --global user.email "<email>"`. Without one every
+  commit fails, those of `make applied-pull` too.
 - `make venv`, once: `~/.venv-personal-agent`, the Python of `make test` and `make mirror`. It stays outside the repo, so it never
   reaches the VPS.
 - graphify, for the project map in `CLAUDE.md`: `uv tool install graphifyy==0.9.99`, then `graphify install --platform claude`.
+  The read guard `CLAUDE.md` names does not come with that. Add it once by hand to `~/.claude/settings.json`, under
+  `hooks.PreToolUse`: `<path of graphify> hook-guard search` for the matcher `Bash|Grep` and `<path of graphify> hook-guard read` for
+  `Read|Glob`, each with `"timeout": 10`. `graphify claude install` would write those entries into the tracked `.claude/settings.json`
+  and rewrite the graphify section of `CLAUDE.md`, so it is not the way here.
 - The Gmail tool, once: `python3 -m venv ~/.venv-gmail && ~/.venv-gmail/bin/pip install google-auth-oauthlib`. It runs
   `scripts/gmail-renew.sh`, which needs the client secret below. WSL cannot start a browser: open the printed link in Windows.
 - `gh auth login`, for pull requests.

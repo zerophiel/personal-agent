@@ -28,7 +28,8 @@ the model or the data drifted.
   decides what is recurring, ended, one-off, or `wajib`.
 
 ## 4. Change and verify
-- Worktree only; tests: `cd services/vault-tools && python -W ignore -I -m unittest discover -s tests` (plus
+- In the repo on a branch, never by hand on the VPS. Tests:
+  `cd services/vault-tools && python -W ignore -I -m unittest discover -s tests` (plus
   `services/hermes/vault/tests`, `services/ingest-gmail/tests`, root `tests`).
 - `ops/calibration/dry_run.py` on a copy of the live ledger: every statement must re-read as `cocok`; read the audit and the
   plan for the coming 1st.

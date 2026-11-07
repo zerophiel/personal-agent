@@ -143,7 +143,7 @@ case "$mode" in
     new_upload_folder
     send_tools "$here/scripts/backup.sh" "$vps/secrets/restic.env"
     listing=$(as_root "ENV_FILE=$(q "$staging/tools/restic.env") RESTIC_CACHE_DIR=$(q "$staging/cache") bash $(q "$staging/tools/backup.sh") snapshots --json" 2>>"$log") \
-      || refuse "restic could not list the snapshots (details in private/restore.log)"
+      || refuse "restic could not list the snapshots; an R2 token with an IP limit needs this host's address (details in private/restore.log)"
     printf '%s' "$listing" | "$PY" -I "$here/scripts/restore-facts.py" snapshots "$vps/MIRROR.json"
     ;;
   restic)

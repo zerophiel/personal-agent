@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -110,6 +111,18 @@ class AppliedPull(unittest.TestCase):
             self.assertEqual(((self.repo / SOUL_PATH).read_text(), self.git("rev-parse", "HEAD")), before, why)
             self.assertFalse((self.repo / "ops").exists(), why)
             self.git("reset", "-q", "--hard", base)
+
+    def test_without_a_git_identity_nothing_is_written(self):
+        self.git("config", "--unset", "user.name")
+        self.git("config", "--unset", "user.email")
+        self.git("config", "user.useConfigOnly", "true")
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_AUTHOR", "GIT_COMMITTER"))}
+        env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+        with mock.patch.dict(os.environ, env, clear=True), self.assertRaises(SystemExit) as e:
+            self.pull([self.record()])
+        self.assertIn("#3 not pulled: git has no identity", str(e.exception.code))
+        self.assertEqual((self.repo / SOUL_PATH).read_text(), SOUL)
+        self.assertFalse((self.repo / "ops").exists())
 
     def test_the_pull_stops_at_the_first_record_that_does_not_fit(self):
         bad = dict(self.record(5, before=NEW, content=NEW + "x\n"), status="rolled_back")

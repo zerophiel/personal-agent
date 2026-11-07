@@ -90,6 +90,9 @@ def pull(records: list, root: Path = ROOT) -> list[int]:
         why = problem(rec, control, root)
         if why:
             sys.exit(f"applied-pull: #{pid} not pulled: {why}. The ones after it wait too.")
+        if subprocess.run(["git", "-C", str(root), "var", "GIT_COMMITTER_IDENT"], capture_output=True).returncode != 0:
+            # Checked before anything is written: a record written without its commit reads as pulled on the next run.
+            sys.exit(f"applied-pull: #{pid} not pulled: git has no identity to commit with (docs/LAPTOP.md).")
         paths = [f["path"] for f in rec["proposal"]["files"]]
         for f in rec["proposal"]["files"]:
             (root / f["path"]).write_bytes(f["content"].encode())

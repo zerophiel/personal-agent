@@ -119,6 +119,21 @@ class OtherWays(unittest.TestCase):
             if line.strip().startswith("make "):
                 self.assertIn("VPS_HOST=<old address> VPS_USER=<old login>", line)
 
+    def test_going_back_says_how_to_try_again(self):
+        back = section("Going back")
+        self.assertIn("A new try starts again at step 1", back)
+        self.assertIn("reinstall the instance at the provider", back)
+
+    def test_the_console_repair_reloads_sshd_and_the_script_says_the_same(self):
+        repair = "rm -f /etc/ssh/sshd_config.d/00-hardening.conf && ufw disable && systemctl reload-or-restart ssh"
+        self.assertIn(repair, DOC)
+        self.assertIn(repair, read("scripts/bootstrap.sh"))
+
+    def test_the_r2_limit_is_due_before_restic_first_runs_on_the_new_host(self):
+        row = next(line for line in DOC.splitlines() if line.startswith("| Cloudflare R2 |"))
+        self.assertIn("before `make timers`", row)
+        self.assertIn("in the disaster path before `make snapshots`", row)
+
     def test_the_disaster_path_decides_by_the_snapshots_and_reports_only(self):
         disaster = section("Disaster: the old host is gone")
         self.assertTrue(in_order(["snapshots", "restore-restic"], targets(disaster)))

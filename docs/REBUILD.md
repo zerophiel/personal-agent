@@ -57,7 +57,7 @@ The folder is only as fresh as the last `make mirror`; its age shows in the cont
 | Telegram (BotFather) | Nothing: same tokens, and long polling needs no address | Revoke only in the disaster path |
 | Anthropic | Nothing: same keys, workspaces and limits | A key with an IP limit needs the new address before step 11. Some countries are refused: `make preflight` shows it |
 | Google | Nothing: same OAuth client, token, Gmail label and filter | The token lasts 7 days in Testing mode: step 15 |
-| Cloudflare R2 | Nothing until step 18 | A token with an IP limit needs the new address before `make timers` |
+| Cloudflare R2 | Nothing until step 18 | A token with an IP limit needs the new address before `make timers`, and in the disaster path before `make snapshots` |
 | Notion | Nothing: same token | Revoke only in the disaster path |
 | GitHub | Nothing: the VPS never pulls; `make sync` copies from the laptop | |
 | Docker Hub | Images are pulled by digest, anonymously | A shared address can hit the anonymous pull limit: wait and run `make images` again |
@@ -72,7 +72,8 @@ The folder is only as fresh as the last `make mirror`; its age shows in the cont
    - It installs the packages and Docker at the pinned versions, makes the account of `config/vps.env` with
      `~/.ssh/id_ed25519.pub` (`BOOTSTRAP_KEY=` for another), and only after a proof from the laptop closes ssh and the firewall.
    - A reused address with a new host key: `ssh-keygen -R <new address>` first.
-   - If the last proof fails, the provider's console opens it again: `rm /etc/ssh/sshd_config.d/00-hardening.conf && ufw disable`.
+   - If the last proof fails, the provider's console opens it again:
+     `rm -f /etc/ssh/sshd_config.d/00-hardening.conf && ufw disable && systemctl reload-or-restart ssh`.
    - After a full run root and passwords are closed, so a second run is `make bootstrap BOOTSTRAP_USER=<login>`.
    - The apt log is `/var/log/personal-agent-bootstrap.log` on the host.
 3. `make preflight` must exit 0. If it cannot be made to, take another provider; the old bot has not been touched.
@@ -154,6 +155,9 @@ If something fails between steps 5 and 16:
 The old host's data did not change while it was frozen. Whatever a bot wrote on the new host meanwhile stays there only: tell the
 owner. The timers are persistent, so the runs missed during the freeze start at once.
 
+A new try starts again at step 1. If step 7 has already placed the ledger, `make bootstrap` and `make restore` refuse that host:
+ask the owner whether anything a bot wrote there is still needed, then reinstall the instance at the provider first.
+
 ## Disaster: the old host is gone
 
 Skip steps 4 to 6 and keep the rest of the order, with these changes:
@@ -187,8 +191,8 @@ After a move the old host's disk may outlive the instance, so the key it held is
   for R2. `docs/GMAIL_OAUTH.md` has Google.
 - Tell the owner what cannot be revoked: the ledger's stored account numbers are encrypted with `vault_tools_key`, which the copy
   holds, and nothing re-encrypts them under a new key yet.
-- On a new laptop: clone the repo, make an ssh key, add it through the provider's console (passwords are closed), `make venv`, then
-  `make mirror`. That brings back `private/vps/` from the VPS. `private/laptop/` and `private/knowledge/` come back only from the
+- On a new laptop: clone the repo, set it up by `docs/LAPTOP.md` (the tools, a git identity, `make venv`), make an ssh key, add it
+  through the provider's console (passwords are closed), then `make mirror`. That brings back `private/vps/` from the VPS. `private/laptop/` and `private/knowledge/` come back only from the
   owner's own copies: the Google client from its console, and the memory and transcripts not at all.
 - If the laptop and the VPS are lost together, R2 stays locked unless `restic.env` was also kept elsewhere, for instance in a password
   manager.

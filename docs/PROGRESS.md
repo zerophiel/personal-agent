@@ -1,7 +1,8 @@
 # Progress and resume point (finance / vault)
 
-Last updated: 2026-11-06. Branch `worktree-m1-skeleton`, which merges into `main` as the last step of the rebuild work. PR #1 was
-merged on 2026-10-27; notes calling it a draft were wrong. 1061 tests pass (480 in vault-tools, 64 in the comms brokers).
+Last updated: 2026-11-07. Branch `main` in `~/personal-agent`, since the rebuild work merged from `worktree-m1-skeleton` on
+2026-11-07. PR #1 was merged on 2026-10-27; notes calling it a draft were wrong. 1071 tests pass (480 in vault-tools, 64 in the
+comms brokers).
 No secrets or personal amounts are recorded here; the numbers live in the ledger on the VPS and its copy in the git-ignored
 `private/`.
 
@@ -733,6 +734,14 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
 - Learned writing `docs/REBUILD.md`: `make snapshots` opens R2 with the copy's `restic.env`, so a new R2 key goes into the copy
   before that check; Hermes discards Telegram messages queued while it was offline, so what is sent to vault and front during a
   move is lost.
+- The independent review of 7 Nov: one agent walked `docs/REBUILD.md` with only this folder, one looked for what the folder lacks and
+  found nothing in 16 areas, one ran the whole last step of the merge on a throwaway copy and it passed, and other agents tried to
+  refute each finding. Fixed from it: the R2 IP limit is also due before `make snapshots` in the disaster path; the recipe's swap has
+  its own name, so a smaller `/swapfile` of the provider only counts and stays, and 4 GB shown one page short no longer asks for a tiny
+  file; the console repair also reloads sshd; going back says how to try again; a git identity is named in `docs/LAPTOP.md`,
+  `scripts/finish-merge.sh` and `make applied-pull`, which now stops before writing anything; `docs/LAPTOP.md` names the read guard's
+  entries; `origin/HEAD` follows `main`. Read in the source of Compose v5.6.1: `pull` and `build` do not read `env_file`, so
+  `make images` needs no `vault.env`.
 
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
@@ -794,8 +803,9 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
     payday, or leave the salary account out of the trend? A manual calibration for the owner; nothing changed.
 
 ## Next steps
-- Rebuild work: the close and the merge to `main`. Then the owner, in `~/personal-agent`: `git pull --ff-only origin main` and
-  `bash scripts/finish-merge.sh`. Not before the merge: `origin/main` is still the M1 tree, and its deploy would not leave `private/` out.
+- Rebuild work: merged to `main` on 2026-11-07, with a merge commit (not squash or rebase: `scripts/finish-merge.sh` checks that the
+  branch tip is an ancestor of `main`). The owner's last step, once, in `~/personal-agent`: `git pull --ff-only origin main` and
+  `bash scripts/finish-merge.sh`.
 - Open, only when the owner wants the VPS side, each with the owner's OK: `make sync`; then a ledger backup, `make up`, `make front`,
   `make verify` for the pins (four squid containers recreated, `vault-tools`, `control` and `change-proposals` rebuilt, no `/new`).
 - (done 2 Nov morning) Owner `/new` to vault after the 2 Nov 01:23 WIB deploy (`transfer_selesai` has `gajian`). The

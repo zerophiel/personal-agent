@@ -1,6 +1,7 @@
 """make bootstrap (scripts/bootstrap.sh, scripts/bootstrap-host.sh) and make preflight (scripts/preflight.sh) against a fake host:
 fake commands note their arguments, and the host's paths live under a temp folder. A real run happens only at a real move."""
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -241,29 +242,49 @@ class Swap(Base):
     def test_a_host_without_swap_gets_four_gigabytes(self):
         self.good()
         self.at(f"fallocate -l {GB4} ")
-        self.assertIn("/swapfile none swap sw 0 0\n", read(self.host_path("etc/fstab")))
-        self.assertEqual(stat.S_IMODE(os.stat(self.host_path("swapfile")).st_mode), 0o600)
+        self.assertIn("/swapfile-personal-agent none swap sw 0 0\n", read(self.host_path("etc/fstab")))
+        self.assertEqual(stat.S_IMODE(os.stat(self.host_path("swapfile-personal-agent")).st_mode), 0o600)
         self.assertLess(self.at("mkswap"), self.at("swapon "))
 
     def test_the_providers_swap_counts(self):
         self.good(SWAP_SIZES="2084564992\n")
         self.at(f"fallocate -l {GB4 - 2084564992} ")
 
+    def test_a_swapfile_the_provider_listed_counts_and_stays(self):
+        write(self.host_path("etc/fstab"), "/swapfile none swap sw 0 0\n")
+        write(self.host_path("swapfile"), "milik provider")
+        self.good(SWAP_SIZES="2084564992\n")
+        self.at(f"fallocate -l {GB4 - 2084564992} ")
+        self.assertFalse(any(c.startswith("swapoff") for c in self.calls()))
+        self.assertEqual(read(self.host_path("swapfile")), "milik provider")
+        self.assertEqual(read(self.host_path("etc/fstab")), "/swapfile none swap sw 0 0\n/swapfile-personal-agent none swap sw 0 0\n")
+
+    def test_four_gigabytes_as_swapon_shows_them_add_nothing(self):
+        # The kernel keeps one page of a swap area for itself, and mkswap would refuse a file of what is missing.
+        self.good(SWAP_SIZES=f"{GB4 - 4096}\n")
+        self.assertFalse(any(c.startswith(("fallocate", "mkswap")) for c in self.calls()))
+
+    def test_what_is_enough_also_passes_preflight(self):
+        body = read(os.path.join(ROOT, "scripts", "bootstrap-host.sh"))
+        enough = int(re.search(r"^SWAP_ENOUGH=\$\(\((\d+) \* 1024 \* 1024\)\)", body, re.M).group(1))
+        minimum = int(re.search(r"^MIN_SWAP_MB=(\d+)$", read(os.path.join(ROOT, "scripts", "preflight.sh")), re.M).group(1))
+        self.assertGreaterEqual(enough, minimum)
+
     def test_enough_swap_adds_nothing(self):
         self.good(SWAP_SIZES=f"{GB4}\n")
         self.assertFalse(any(c.startswith("fallocate") for c in self.calls()))
         self.assertNotIn("swapfile", read(self.host_path("etc/fstab")))
 
-    def test_a_listed_swapfile_is_left_alone(self):
-        write(self.host_path("etc/fstab"), "/swapfile none swap sw 0 0\n")
+    def test_the_recipes_own_listed_swapfile_is_left_alone(self):
+        write(self.host_path("etc/fstab"), "/swapfile-personal-agent none swap sw 0 0\n")
         self.good()
         self.assertFalse(any(c.startswith(("fallocate", "swapoff")) for c in self.calls()))
 
     def test_a_file_left_by_a_stopped_run_is_made_again(self):
-        write(self.host_path("swapfile"), "potongan")
+        write(self.host_path("swapfile-personal-agent"), "potongan")
         self.good()
         self.assertLess(self.at("swapoff"), self.at("fallocate"))
-        self.assertEqual(os.path.getsize(self.host_path("swapfile")), 0)
+        self.assertEqual(os.path.getsize(self.host_path("swapfile-personal-agent")), 0)
 
 
 class Account(Base):

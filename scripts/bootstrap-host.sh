@@ -15,6 +15,8 @@ up=${2:-}
 login=${3:-}
 ROOTFS=${BOOTSTRAP_ROOT:-}
 SWAP_TOTAL=$((4 * 1024 * 1024 * 1024))
+SWAP_ENOUGH=$((3950 * 1024 * 1024))   # 4 GB shows as one page less, mkswap refuses a tiny file, and make preflight asks for 3900 MB
+SWAP_NAME=/swapfile-personal-agent    # no provider's name: what a provider set up only counts, and stays
 DROP_IN=etc/ssh/sshd_config.d/00-hardening.conf
 SUDOERS=etc/sudoers.d/90-personal-agent-login
 LOG=$ROOTFS/var/log/personal-agent-bootstrap.log
@@ -74,8 +76,8 @@ packages() {  # only Docker at an exact version: Ubuntu's index drops old versio
 }
 
 swap() {  # up to 4 GB in total, counting what the provider set up
-  local file=$ROOTFS/swapfile have=0 size
-  if grep -q '^/swapfile[[:space:]]' "$ROOTFS/etc/fstab"; then
+  local file=$ROOTFS$SWAP_NAME have=0 size
+  if grep -q "^$SWAP_NAME[[:space:]]" "$ROOTFS/etc/fstab"; then
     return 0
   fi
   if [ -e "$file" ]; then   # a run that stopped halfway
@@ -85,12 +87,12 @@ swap() {  # up to 4 GB in total, counting what the provider set up
   while read -r size; do
     have=$((have + size))
   done < <(swapon --show=SIZE --bytes --noheadings)
-  [ "$have" -lt "$SWAP_TOTAL" ] || return 0
+  [ "$have" -lt "$SWAP_ENOUGH" ] || return 0
   fallocate -l "$((SWAP_TOTAL - have))" "$file"
   chmod 0600 "$file"
   mkswap "$file" >/dev/null
   swapon "$file"
-  printf '/swapfile none swap sw 0 0\n' >> "$ROOTFS/etc/fstab"
+  printf '%s none swap sw 0 0\n' "$SWAP_NAME" >> "$ROOTFS/etc/fstab"
 }
 
 account() {  # the login of config/vps.env: existing keys stay, and sudo comes from a file visudo has accepted

@@ -64,7 +64,7 @@ fi
 echo "bootstrap: login proved, second part"
 send second "$login@$host" "${AFTER[@]}"
 if ! proof; then
-  echo "bootstrap: the login stopped working after sshd and the firewall changed. From the provider's console: rm /etc/ssh/sshd_config.d/00-hardening.conf && ufw disable" >&2
+  echo "bootstrap: the login stopped working after sshd and the firewall changed. From the provider's console: rm -f /etc/ssh/sshd_config.d/00-hardening.conf && ufw disable && systemctl reload-or-restart ssh" >&2
   exit 1
 fi
 echo "bootstrap: done; next: make preflight (docs/REBUILD.md)"

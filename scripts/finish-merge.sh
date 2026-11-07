@@ -26,4 +26,7 @@ if [ -d "$old" ]; then
   git worktree remove "$old"
 fi
 git worktree prune
+# A pull leaves this local pointer where it was, and a worktree made from it would start from the frozen branch.
+git remote set-head origin main 2>/dev/null || true
+git var GIT_COMMITTER_IDENT >/dev/null 2>&1 || echo "finish-merge: git belum punya identitas, jadi commit berikutnya akan gagal. Sekali saja: git config --global user.name \"<nama>\" dan git config --global user.email \"<email>\""
 echo "finish-merge: selesai. Mulai sekarang kerja di ~/personal-agent, cabang main."

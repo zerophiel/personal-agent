@@ -9,6 +9,7 @@ import unittest
 sys.dont_write_bytecode = True
 ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
 SCRIPT = os.path.join(ROOT, "scripts", "finish-merge.sh")
+SCRIPT_IN = lambda folder: os.path.join(folder, "scripts", "finish-merge.sh")
 ENV = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
        "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
 
@@ -96,6 +97,28 @@ class Finish(Base):
         done = self.run_it()
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.git("worktree", "list", "--porcelain").count("worktree "), 1)
+
+    def test_the_remote_default_follows_main(self):
+        bare = os.path.join(self.top, "origin.git")
+        self.git("init", "-q", "--bare", "-b", "main", bare)
+        self.git("remote", "add", "origin", bare)
+        self.git("push", "-q", "origin", "main", "work")
+        self.git("fetch", "-q", "origin")
+        self.git("remote", "set-head", "origin", "work")
+        done = self.run_it()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.git("symbolic-ref", "refs/remotes/origin/HEAD").strip(), "refs/remotes/origin/main")
+
+    def test_a_git_without_an_identity_is_named_and_stops_nothing(self):
+        env = {k: v for k, v in ENV.items() if not k.startswith(("GIT_AUTHOR", "GIT_COMMITTER"))}
+        env.update(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="user.useConfigOnly", GIT_CONFIG_VALUE_0="true")
+        done = subprocess.run(["bash", SCRIPT_IN(self.main)], env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("git config --global user.name", done.stdout)
+        self.assertIn("selesai", done.stdout)
+
+    def test_a_git_with_an_identity_hears_nothing_about_it(self):
+        self.assertNotIn("user.name", self.run_it().stdout)
 
     def test_it_never_touches_the_copy(self):
         self.write(self.main, "private/vps/data/ledger.db", "isi")
