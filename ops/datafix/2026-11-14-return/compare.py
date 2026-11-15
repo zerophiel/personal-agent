@@ -29,7 +29,7 @@ KIMI_INGEST = probe.LAYOUTS["kimi"]["ingest_dir"].rstrip("/")
 HEALING_DIRS = {"/ingest", "/ingest/telegram"}
 KIMI_DIRS = {KIMI_INGEST, KIMI_INGEST + "/telegram"}   # their counterparts on kimi; stage.py brings these files into them
 SCANNED = {".", "telegram"}                            # the same two, as the ingest report names a file's folder
-KIMI_PATHS = ("/opt/vault-tools", "/opt/ingest-gmail", "/root/")   # probe.py needles that point into kimiclaw's layout
+FIND_EXT = (".pdf", ".csv", ".txt")                    # and only files with these extensions, directly in them
 # Codes the old code switches on. Most are CHECK-bound, so equal schemas already rule out a new one; lines_status and
 # processed.status are not. A value that the code of this repo never writes is a stop.
 GATE_CODES = {("transactions", "status"), ("transactions", "source"), ("card_lines", "kind"),
@@ -39,6 +39,8 @@ GATE_CODES = {("transactions", "status"), ("transactions", "source"), ("card_lin
               ("processed", "status")}
 # Codes the old code only reads by name or shows: a new one is data that comes home without the feature behind it.
 SOFT_CODES = {("thresholds", "key"), ("change_log", "tbl")}
+# Columns where the code itself leaves NULL and reads it: a statement whose lines were not read yet (card_lines.py).
+NULL_KNOWN = {("statements", "lines_status")}
 
 
 def hx(v):
@@ -226,6 +228,10 @@ def tables_diff(name, od, kd, known, gate, attn):
             if lost:
                 attn.append(f"statements: {lost} statement jadi 'tanpa-berkas' di kimi (berkasnya tidak ketemu di sana); "
                             f"kalau berkasnya ada di VPS lama atau ikut pulang, statement itu dibaca ulang setelah pindah")
+            unread = sum(1 for x in added if kt["tags"].get(x) == "-")
+            if unread:
+                attn.append(f"statements: {unread} statement baru di kimi barisnya belum dibaca (lines_status kosong); "
+                            f"kode lama menampilkannya sebagai 'baris belum dibaca'")
     for t, kt in sorted(kd["tables"].items()):
         ot = od["tables"].get(t)
         if ot is None:
@@ -242,7 +248,8 @@ def tables_diff(name, od, kd, known, gate, attn):
                   + (f", {hidden} tidak ditampilkan" if hidden else ""))
             if shown:
                 wrap("      yang tampil", shown, per=6)
-            unknown = {h: v for h, v in new.items() if h not in known}
+            unknown = {h: v for h, v in new.items()
+                       if h not in known and not (h == NULL_KEY and (t, c) in NULL_KNOWN)}
             if not unknown or (t, c) not in GATE_CODES | SOFT_CODES:
                 continue
             u_shown = sorted((short(v["v"]) if h != NULL_KEY else "NULL" for h, v in unknown.items()
@@ -256,23 +263,19 @@ def tables_diff(name, od, kd, known, gate, attn):
                             f"pulang, fitur Kimi di baliknya tidak")
 
 
-def paths_diff(name, od, kd, gate, decide, attn):
+def paths_diff(name, od, kd, gate, decide, odd):
+    """path needles that grew; for the ledger, the folders doc_files points to. Returns how many doc_files paths point
+    into kimi's ingest folder (0 when none)."""
     kh = {f"{t}.{c}": n for t, v in kd["tables"].items() for c, n in v["needles"].items()}
     oh = {f"{t}.{c}": n for t, v in od["tables"].items() for c, n in v["needles"].items()}
     grew = {x: (oh.get(x, 0), n) for x, n in kh.items() if n > oh.get(x, 0)}
     wrap("  teks berisi path yang bertambah (orig, kimi)", (f"{x} {v}" for x, v in sorted(grew.items())), per=2)
-    text = [x.rsplit("|", 1) for x in grew if not x.startswith("doc_files.path|")]
-    kimi_cols = sorted({c for c, n in text if n in KIMI_PATHS})
-    other_cols = sorted({c for c, n in text if n not in KIMI_PATHS})
-    if kimi_cols:
-        decide.append(f"{name}: path kimiclaw bertambah di kolom {', '.join(kimi_cols)}, padahal rencana meminta tidak ada "
-                      f"path kimiclaw. Kolom itu hanya teks, karena kode membaca path berkas hanya dari doc_files.path. "
-                      f"Usulku dibiarkan.")
-    if other_cols:
-        attn.append(f"{name}: path umum bertambah di kolom {', '.join(other_cols)}: hanya teks, karena kode membaca path "
-                    f"berkas hanya dari doc_files.path")
+    text = sorted(x for x in grew if not x.startswith("doc_files.path|"))
+    if text:
+        gate.append(f"{name}: path bertambah di kolom teks {', '.join(text)}. Perlu dicek di kode, kolom demi kolom, "
+                    f"apakah kolom itu dibuka sebagai berkas; yang sudah dicek baru doc_files.path (lewat find_file).")
     if kd.get("doc_dirs") is None:
-        return
+        return 0
     print(f"  folder di doc_files: orig {od.get('doc_dirs')}")
     print(f"                       kimi {kd.get('doc_dirs')}")
     on_kimi = {d: n for d, n in kd["doc_dirs"].items() if d in KIMI_DIRS}
@@ -280,19 +283,30 @@ def paths_diff(name, od, kd, gate, decide, attn):
            if d not in HEALING_DIRS | KIMI_DIRS | set(od.get("doc_dirs") or {})}
     if on_kimi:
         decide.append(f"doc_files: {sum(on_kimi.values())} path menunjuk ke folder ingest kimiclaw {on_kimi}, padahal "
-                      f"rencana meminta tidak ada path kimiclaw. Penanganannya sudah ada di kode: find_file, satu-satunya "
-                      f"pembaca doc_files.path, tidak menemukan path itu di VPS lama, lalu mencari berkasnya lewat hash di "
-                      f"/ingest dan /ingest/telegram, tempat stage.py membawanya pulang, dan menulis path yang benar. "
-                      f"Pilihan: dibiarkan pulih sendiri, atau diganti di salinan staging sebelum dipasang.")
+                      f"rencana meminta tidak ada path kimiclaw. Penanganannya ada di kode: find_file, satu-satunya "
+                      f"pembaca doc_files.path, tidak menemukan path itu di VPS lama, lalu mencari berkasnya lewat hash, "
+                      f"tetapi hanya berkas .pdf, .csv dan .txt yang langsung berada di /ingest dan /ingest/telegram (ke "
+                      f"sanalah stage.py membawanya pulang), dan menulis path yang benar. Pilihan: dibiarkan pulih sendiri, "
+                      f"atau diganti di salinan staging sebelum dipasang."
+                      + (f" Catatan: ada berkas baru berjenis lain di folder itu, {dict(odd)}; kalau doc_files menunjuk "
+                         f"ke salah satunya, path-nya tidak pulih sendiri." if odd else ""))
     if far:
         gate.append(f"doc_files: {sum(far.values())} berkas di folder yang tidak ikut pulang dan tidak dicari find_file: "
                     f"{far}")
+    return sum(on_kimi.values())
 
 
 def diff(orig_path, kimi_path):
     o, k = load(orig_path), load(kimi_path)
     gate, decide, attn = [], [], []
     known = code_words()
+    oi, ki = o.get("ingest"), k.get("ingest")
+    odd = collections.Counter()   # new kimi files in the folders find_file scans, with an extension it does not read
+    if oi and ki:
+        for x, f in ki["files"].items():
+            if x not in oi["files"] and f["top"] in SCANNED and f["ext"] not in FIND_EXT and x != EVENTS_KEY:
+                odd[f"{f['top']} {f['ext']}"] += 1
+    healing = 0
     print("kimi: " + host_line(k))
     print("orig: " + host_line(o))
     for name in ("ledger", "ingest"):
@@ -313,8 +327,7 @@ def diff(orig_path, kimi_path):
             wrap("  objek hanya di kimi", sorted(ko - oo), per=3)
             wrap("  objek hanya di orig", sorted(oo - ko), per=3)
         tables_diff(name, od, kd, known, gate, attn)
-        paths_diff(name, od, kd, gate, decide, attn)
-    oi, ki = o.get("ingest"), k.get("ingest")
+        healing += paths_diff(name, od, kd, gate, decide, odd)
     print("== folder ingest")
     if oi and ki:
         of, kf = oi["files"], ki["files"]
@@ -331,6 +344,9 @@ def diff(orig_path, kimi_path):
         if far:
             attn.append(f"ingest: {sum(far.values())} berkas baru di folder yang tidak dicari find_file ({far}): ikut "
                         f"pulang, tetapi bot tidak menemukannya lewat hash")
+        if odd and not healing:
+            attn.append(f"ingest: berkas baru berjenis yang tidak dibaca find_file {dict(odd)}: ikut pulang; tidak ada "
+                        f"path doc_files kimiclaw yang bergantung padanya")
         if only_orig:
             attn.append(f"ingest: {len(only_orig)} berkas hanya ada di VPS lama; tetap di sana")
         if bad:
@@ -380,7 +396,8 @@ def diff(orig_path, kimi_path):
             print(f"  {root}/{rel}: {verdict}")
     print(f"  sama dengan repo: {sum(1 for r in rows if r[2] == 'sama dengan repo')} berkas; "
           f"berkas .py repo yang tidak ada di kimi: {len(missing)}")
-    verdict = "TIDAK lolos" if gate else ("lolos hanya dengan keputusanmu (bagian berikut)" if decide else "lolos")
+    verdict = "TIDAK lolos" if gate else ("belum lolos: ada syarat rencana yang tidak terpenuhi, penanganannya menunggu "
+                                          "keputusanmu (bagian berikut)" if decide else "lolos")
     print("== gerbang data (rencana Tahap A): " + verdict)
     for g in gate:
         para(g)

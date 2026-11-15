@@ -49,7 +49,8 @@ stand-ins for ssh, sudo, docker and systemctl. The harness stayed in the session
   - a running container;
   - an active data unit.
 
-`compare.py` was checked on reports changed by hand, one change for each gate, decision and attention branch.
+`compare.py` was checked on reports changed by hand: one change for each gate, decision and attention branch, and the
+kimi-only parts of a report (units, menu files, cron jobs, listings). Its `summary` ran in full on orig's real report.
 
 ## Status
 
