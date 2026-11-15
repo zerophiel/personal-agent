@@ -1,24 +1,65 @@
 #!/usr/bin/env python3
 """Reads the reports of probe.py and prints what the return from kimiclaw would bring home: counts, hashes compared,
 short codes. Nothing in a report is a value of the data except short codes, and those are printed only when probe.py
-marked them showable; payee-like values are shortened here once more. Lists are wrapped so that nothing is cut by the
-width of ops/privacy/mask.py, which the output is piped through.
+marked them showable; payee-like values are shortened here once more. Lists and long lines are wrapped so that nothing
+is cut by the width of ops/privacy/mask.py, which the output is piped through.
 
 Usage: compare.py summary report.json            one host (Tahap A2)
-       compare.py diff orig.json kimi.json       what kimi has that orig has not (Tahap A4): the gate of the plan, and
-                                                 what needs the owner's eye before the OK for Tahap B
+       compare.py diff orig.json kimi.json       what kimi has that orig has not (Tahap A4): the plan's data gate, the
+                                                 plan conditions that have a known handling and wait for the owner's
+                                                 decision, and what needs the owner's eye before the OK for Tahap B
 """
 import collections
 import hashlib
+import importlib.util
 import json
 import re
 import sys
+import textwrap
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent.parent.parent
-EVENTS_KEY = hashlib.sha256(repr("_events.jsonl").encode()).hexdigest()[:24]   # probe.py's hx() of that name
-KIMI_PATHS = ("/opt/vault-tools", "/opt/ingest-gmail", "/root/")
-SCANNED = {".", "telegram"}   # the folders card_lines.find_file searches by hash: /ingest and /ingest/telegram
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent.parent.parent
+_spec = importlib.util.spec_from_file_location("return_probe", HERE / "probe.py")
+probe = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(probe)
+
+KIMI_INGEST = probe.LAYOUTS["kimi"]["ingest_dir"].rstrip("/")
+# card_lines.find_file, the only reader of doc_files.path, looks for a missing file by hash in these two folders.
+HEALING_DIRS = {"/ingest", "/ingest/telegram"}
+KIMI_DIRS = {KIMI_INGEST, KIMI_INGEST + "/telegram"}   # their counterparts on kimi; stage.py brings these files into them
+SCANNED = {".", "telegram"}                            # the same two, as the ingest report names a file's folder
+KIMI_PATHS = ("/opt/vault-tools", "/opt/ingest-gmail", "/root/")   # probe.py needles that point into kimiclaw's layout
+# Codes the old code switches on. Most are CHECK-bound, so equal schemas already rule out a new one; lines_status and
+# processed.status are not. A value that the code of this repo never writes is a stop.
+GATE_CODES = {("transactions", "status"), ("transactions", "source"), ("card_lines", "kind"),
+              ("statements", "lines_status"), ("accounts", "kind"), ("cards", "pay_method"), ("payee_secrets", "kind"),
+              ("debt_payments", "how"), ("subscriptions", "status"), ("feature_requests", "status"),
+              ("one_off_bills", "status"), ("one_off_bills", "method"), ("change_log", "action"),
+              ("processed", "status")}
+# Codes the old code only reads by name or shows: a new one is data that comes home without the feature behind it.
+SOFT_CODES = {("thresholds", "key"), ("change_log", "tbl")}
+
+
+def hx(v):
+    """probe.py's hash of a value (the same function runs on the hosts)"""
+    b = v if isinstance(v, bytes) else repr(v).encode("utf-8", "surrogatepass")
+    return hashlib.sha256(b).hexdigest()[:24]
+
+
+EVENTS_KEY = hx("_events.jsonl")
+NULL_KEY = hx(None)   # probe.py never shows a NULL; its hash is known all the same
+
+
+def code_words():
+    """hx() of every quoted word in the services' code, tests left out: the codes the code of this repo can write. A word
+    quoted anywhere counts, so this is a loose check; for the CHECK-bound columns the equal schemas are the strict one."""
+    words = set()
+    for p in (ROOT / "services").rglob("*.py"):
+        if "tests" not in p.parts and "__pycache__" not in p.parts:
+            words.update(re.findall(r"""["']([a-z][a-z0-9_.:-]{1,60})["']""",
+                                    p.read_text(encoding="utf-8", errors="replace")))
+    return {hx(w) for w in words}
 
 
 def short(v):
@@ -32,17 +73,14 @@ def load(p):
 
 def wrap(label, items, per=6):
     items = list(items)
+    pad = " " * (len(label) - len(label.lstrip()) + 4)
     print(f"{label} ({len(items)}):" if items else f"{label}: tidak ada")
     for i in range(0, len(items), per):
-        print("    " + ", ".join(str(x) for x in items[i:i + per]))
+        print(pad + ", ".join(str(x) for x in items[i:i + per]))
 
 
-def code_literals():
-    """Every quoted lower-case word in vault-tools' code: a threshold key the old code reads is one of them."""
-    out = set()
-    for p in (ROOT / "services/vault-tools/vault_tools").glob("*.py"):
-        out.update(re.findall(r"""["']([a-z][a-z0-9_]{2,40})["']""", p.read_text(encoding="utf-8")))
-    return out
+def para(text, indent="  - ", more="    "):
+    print(textwrap.fill(text, width=150, initial_indent=indent, subsequent_indent=more))
 
 
 def host_line(r):
@@ -114,7 +152,7 @@ def summary(path):
             items = r[k].items() if isinstance(r[k], dict) else enumerate(r[k])
             print(f"{k}:")
             for key, val in items:
-                print(f"    {key}: {json.dumps(val, ensure_ascii=False)[:600]}")
+                para(f"{key}: {json.dumps(val, ensure_ascii=False)}", "    ", "      ")
     if "root_crontab_lines" in r:
         print(f"baris crontab root: {r['root_crontab_lines']}")
 
@@ -153,10 +191,108 @@ def code_compare(kimi_code):
     return rows, missing
 
 
+def tables_diff(name, od, kd, known, gate, attn):
+    for t in sorted(set(od["tables"]) | set(kd["tables"])):
+        ot, kt = od["tables"].get(t), kd["tables"].get(t)
+        if ot is None or kt is None:
+            print(f"  {t}: hanya di {'kimi' if ot is None else 'orig'}")
+            continue
+        okeys, kkeys = set(ot["rows"]), set(kt["rows"])
+        added, removed = kkeys - okeys, okeys - kkeys
+        changed = {x for x in okeys & kkeys if ot["rows"][x] != kt["rows"][x]}
+        if kt["count"] < ot["count"]:
+            gate.append(f"{name}.{t}: berkurang {ot['count']} -> {kt['count']}")
+        if t == "payee_secrets":
+            if added or removed or changed:
+                attn.append(f"payee_secrets berubah di kimi (tambah {len(added)}, ubah {len(changed)}, hilang "
+                            f"{len(removed)}): nomor yang ditulis di sana harus terbuka dengan kunci VPS lama; buktinya "
+                            f"mirror-check di Tahap C1 dan /rincian di B7")
+            else:
+                print("  payee_secrets: tidak berubah di kimi, jadi tidak ada nomor yang ditulis dengan kunci lain")
+        if not (added or removed or changed):
+            continue
+        print(f"  {t}: orig {ot['count']}, kimi {kt['count']}: tambah {len(added)}, ubah {len(changed)}, "
+              f"hilang {len(removed)}")
+        if kt["tags"]:
+            for label, keys in (("tambah", added), ("ubah", changed)):
+                if keys:
+                    print(f"      {label} per jenis: {dict(collections.Counter(kt['tags'].get(x, '?') for x in keys))}")
+        if removed:
+            per = dict(collections.Counter(ot["tags"].get(x, "?") for x in removed)) if ot["tags"] else ""
+            attn.append(f"{name}.{t}: {len(removed)} baris dari 9 Nov tidak ada lagi di kimi {per}".rstrip())
+        if t == "statements":
+            lost = sum(1 for x in added | changed
+                       if kt["tags"].get(x) == "tanpa-berkas" and ot["tags"].get(x) != "tanpa-berkas")
+            if lost:
+                attn.append(f"statements: {lost} statement jadi 'tanpa-berkas' di kimi (berkasnya tidak ketemu di sana); "
+                            f"kalau berkasnya ada di VPS lama atau ikut pulang, statement itu dibaca ulang setelah pindah")
+    for t, kt in sorted(kd["tables"].items()):
+        ot = od["tables"].get(t)
+        if ot is None:
+            continue
+        for c, kv in sorted(kt["enum"].items()):
+            ov = ot["enum"].get(c, {})
+            new = {h: v for h, v in kv.items() if h not in ov}
+            if not new:
+                continue
+            shown = sorted((short(v["v"]) if h != NULL_KEY else "NULL" for h, v in new.items()
+                            if v["v"] is not None or h == NULL_KEY), key=str)
+            hidden = sum(1 for h, v in new.items() if v["v"] is None and h != NULL_KEY)
+            print(f"  nilai baru {t}.{c}: {len(new)} ({sum(v['n'] for v in new.values())} baris)"
+                  + (f", {hidden} tidak ditampilkan" if hidden else ""))
+            if shown:
+                wrap("      yang tampil", shown, per=6)
+            unknown = {h: v for h, v in new.items() if h not in known}
+            if not unknown or (t, c) not in GATE_CODES | SOFT_CODES:
+                continue
+            u_shown = sorted((short(v["v"]) if h != NULL_KEY else "NULL" for h, v in unknown.items()
+                              if v["v"] is not None or h == NULL_KEY), key=str)
+            u_hidden = sum(1 for h, v in unknown.items() if v["v"] is None and h != NULL_KEY)
+            what = (", ".join(u_shown) or "-") + (f"; {u_hidden} tidak ditampilkan" if u_hidden else "")
+            if (t, c) in GATE_CODES:
+                gate.append(f"{name}: kode baru di {t}.{c} yang tidak pernah ditulis kode repo: {what}")
+            else:
+                attn.append(f"{t}.{c}: {len(unknown)} nilai baru yang tidak dikenal kode repo ({what}): datanya ikut "
+                            f"pulang, fitur Kimi di baliknya tidak")
+
+
+def paths_diff(name, od, kd, gate, decide, attn):
+    kh = {f"{t}.{c}": n for t, v in kd["tables"].items() for c, n in v["needles"].items()}
+    oh = {f"{t}.{c}": n for t, v in od["tables"].items() for c, n in v["needles"].items()}
+    grew = {x: (oh.get(x, 0), n) for x, n in kh.items() if n > oh.get(x, 0)}
+    wrap("  teks berisi path yang bertambah (orig, kimi)", (f"{x} {v}" for x, v in sorted(grew.items())), per=2)
+    text = [x.rsplit("|", 1) for x in grew if not x.startswith("doc_files.path|")]
+    kimi_cols = sorted({c for c, n in text if n in KIMI_PATHS})
+    other_cols = sorted({c for c, n in text if n not in KIMI_PATHS})
+    if kimi_cols:
+        decide.append(f"{name}: path kimiclaw bertambah di kolom {', '.join(kimi_cols)}, padahal rencana meminta tidak ada "
+                      f"path kimiclaw. Kolom itu hanya teks, karena kode membaca path berkas hanya dari doc_files.path. "
+                      f"Usulku dibiarkan.")
+    if other_cols:
+        attn.append(f"{name}: path umum bertambah di kolom {', '.join(other_cols)}: hanya teks, karena kode membaca path "
+                    f"berkas hanya dari doc_files.path")
+    if kd.get("doc_dirs") is None:
+        return
+    print(f"  folder di doc_files: orig {od.get('doc_dirs')}")
+    print(f"                       kimi {kd.get('doc_dirs')}")
+    on_kimi = {d: n for d, n in kd["doc_dirs"].items() if d in KIMI_DIRS}
+    far = {d: n for d, n in kd["doc_dirs"].items()
+           if d not in HEALING_DIRS | KIMI_DIRS | set(od.get("doc_dirs") or {})}
+    if on_kimi:
+        decide.append(f"doc_files: {sum(on_kimi.values())} path menunjuk ke folder ingest kimiclaw {on_kimi}, padahal "
+                      f"rencana meminta tidak ada path kimiclaw. Penanganannya sudah ada di kode: find_file, satu-satunya "
+                      f"pembaca doc_files.path, tidak menemukan path itu di VPS lama, lalu mencari berkasnya lewat hash di "
+                      f"/ingest dan /ingest/telegram, tempat stage.py membawanya pulang, dan menulis path yang benar. "
+                      f"Pilihan: dibiarkan pulih sendiri, atau diganti di salinan staging sebelum dipasang.")
+    if far:
+        gate.append(f"doc_files: {sum(far.values())} berkas di folder yang tidak ikut pulang dan tidak dicari find_file: "
+                    f"{far}")
+
+
 def diff(orig_path, kimi_path):
     o, k = load(orig_path), load(kimi_path)
-    gate, attn = [], []
-    literals = code_literals()
+    gate, decide, attn = [], [], []
+    known = code_words()
     print("kimi: " + host_line(k))
     print("orig: " + host_line(o))
     for name in ("ledger", "ingest"):
@@ -176,68 +312,8 @@ def diff(orig_path, kimi_path):
             oo, ko = {tuple(x) for x in od["objects"]}, {tuple(x) for x in kd["objects"]}
             wrap("  objek hanya di kimi", sorted(ko - oo), per=3)
             wrap("  objek hanya di orig", sorted(oo - ko), per=3)
-        for t in sorted(set(od["tables"]) | set(kd["tables"])):
-            ot, kt = od["tables"].get(t), kd["tables"].get(t)
-            if ot is None or kt is None:
-                print(f"  {t}: hanya di {'kimi' if ot is None else 'orig'}")
-                continue
-            okeys, kkeys = set(ot["rows"]), set(kt["rows"])
-            added, removed = kkeys - okeys, okeys - kkeys
-            changed = {x for x in okeys & kkeys if ot["rows"][x] != kt["rows"][x]}
-            if kt["count"] < ot["count"]:
-                gate.append(f"{name}.{t}: berkurang {ot['count']} -> {kt['count']}")
-            if not (added or removed or changed):
-                continue
-            print(f"  {t}: orig {ot['count']}, kimi {kt['count']}: tambah {len(added)}, ubah {len(changed)}, "
-                  f"hilang {len(removed)}")
-            if kt["tags"]:
-                for label, keys in (("tambah", added), ("ubah", changed)):
-                    if keys:
-                        print(f"      {label} per jenis: {dict(collections.Counter(kt['tags'].get(x, '?') for x in keys))}")
-            if removed:
-                per = dict(collections.Counter(ot["tags"].get(x, "?") for x in removed)) if ot["tags"] else ""
-                attn.append(f"{name}.{t}: {len(removed)} baris dari 9 Nov tidak ada lagi di kimi {per}".rstrip())
-            if t == "payee_secrets":
-                attn.append(f"payee_secrets berubah di kimi (tambah {len(added)}, ubah {len(changed)}, hilang "
-                            f"{len(removed)}): nomor yang ditulis di sana harus terbuka dengan kunci VPS lama; "
-                            f"buktinya mirror-check di Tahap C1 dan /rincian di B7")
-        for t, kt in sorted(kd["tables"].items()):
-            ot = od["tables"].get(t)
-            if ot is None:
-                continue
-            for c, kv in sorted(kt["enum"].items()):
-                ov = ot["enum"].get(c, {})
-                new = {h: v for h, v in kv.items() if h not in ov}
-                if not new:
-                    continue
-                shown = sorted(short(v["v"]) for v in new.values() if v["v"] is not None)
-                hidden = sum(1 for v in new.values() if v["v"] is None)
-                print(f"  nilai baru {t}.{c}: {len(new)} ({sum(v['n'] for v in new.values())} baris)"
-                      + (f", {hidden} tidak ditampilkan" if hidden else ""))
-                if shown:
-                    wrap("      yang tampil", shown, per=6)
-                if t == "thresholds" and c == "key":
-                    unread = [v for v in shown if v not in literals]
-                    if unread or hidden:
-                        attn.append(f"thresholds: {len(unread) + hidden} kunci baru dari kimi tidak dibaca kode lama "
-                                    f"({', '.join(unread) or '-'}; {hidden} tidak ditampilkan): datanya ikut pulang, "
-                                    f"fitur Kimi di baliknya tidak")
-        kh = {f"{t}.{c}": n for t, v in kd["tables"].items() for c, n in v["needles"].items()}
-        oh = {f"{t}.{c}": n for t, v in od["tables"].items() for c, n in v["needles"].items()}
-        grew = {x: (oh.get(x, 0), n) for x, n in kh.items() if n > oh.get(x, 0)}
-        wrap("  teks berisi path yang bertambah (orig, kimi)", (f"{x} {v}" for x, v in sorted(grew.items())), per=2)
-        kimi_hits = {x: v for x, v in grew.items() if any(p in x for p in KIMI_PATHS)}
-        if kimi_hits:
-            gate.append(f"{name}: {sum(v[1] - v[0] for v in kimi_hits.values())} teks berisi path kimiclaw "
-                        f"({', '.join(sorted(kimi_hits))}); find_file memulihkan path berkas statement lewat hash di "
-                        f"/ingest dan /ingest/telegram, jadi perlu keputusanmu: dibiarkan pulih sendiri atau diganti")
-        if kd.get("doc_dirs") is not None:
-            print(f"  folder di doc_files: orig {od.get('doc_dirs')}")
-            print(f"                       kimi {kd.get('doc_dirs')}")
-            far = {d: n for d, n in kd["doc_dirs"].items()
-                   if d not in ("/ingest", "/ingest/telegram", "/opt/vault-tools/ingest", "/opt/vault-tools/ingest/telegram")}
-            if far:
-                attn.append(f"doc_files: berkas di folder yang tidak dicari find_file: {far}")
+        tables_diff(name, od, kd, known, gate, attn)
+        paths_diff(name, od, kd, gate, decide, attn)
     oi, ki = o.get("ingest"), k.get("ingest")
     print("== folder ingest")
     if oi and ki:
@@ -246,16 +322,17 @@ def diff(orig_path, kimi_path):
         same = {x for x in set(kf) & set(of) if kf[x]["sha"] == of[x]["sha"]}
         conflict = {x for x in set(kf) & set(of) if kf[x]["sha"] != of[x]["sha"]}
         only_orig = set(of) - set(kf)
-        print(f"  orig {len(of)}, kimi {len(kf)}: baru {len(new)}, sama {len(same)}, nama sama isi beda {len(conflict)}, "
-              f"hanya di orig {len(only_orig)}")
+        bad = [x for x in conflict if x != EVENTS_KEY]
+        print(f"  orig {len(of)}, kimi {len(kf)}: baru {len(new)}, sama {len(same)}, nama sama isi beda {len(bad)} "
+              f"(_events.jsonl tidak dihitung), hanya di orig {len(only_orig)}")
         per_folder = collections.Counter(kf[x]["top"] + " " + kf[x]["ext"] for x in new)
         wrap("  yang baru per folder", (f"{f} {n}" for f, n in sorted(per_folder.items())), per=4)
         far = {f: n for f, n in per_folder.items() if f.split(" ")[0] not in SCANNED}
         if far:
-            attn.append(f"ingest: berkas baru di folder yang tidak dicari find_file: {far}")
+            attn.append(f"ingest: {sum(far.values())} berkas baru di folder yang tidak dicari find_file ({far}): ikut "
+                        f"pulang, tetapi bot tidak menemukannya lewat hash")
         if only_orig:
-            attn.append(f"ingest: {len(only_orig)} berkas hanya ada di VPS lama (tetap di sana)")
-        bad = [x for x in conflict if x != EVENTS_KEY]
+            attn.append(f"ingest: {len(only_orig)} berkas hanya ada di VPS lama; tetap di sana")
         if bad:
             gate.append(f"ingest: {len(bad)} berkas bernama sama dengan isi beda")
         oe, ke = oi["events"], ki["events"]
@@ -278,15 +355,18 @@ def diff(orig_path, kimi_path):
                  else f", berikutnya {s.get('NextElapseUSecRealtime') or '-'}")
         print(f"  {name}: {u['file']} / {u['active']}{extra}")
     print(f"  proses yang membuka database: {k['holders'] or 'tidak ada'}")
-    wrap("  nama rahasia", (s["name"] for s in (k.get("secret_names") or [])), per=4)
-    print("  berkas yang mendaftarkan menu:")
-    for c in k.get("command_files") or []:
-        print(f"    {c}")
+    names = [s["name"] for s in (k.get("secret_names") or [])]
+    wrap("  nama rahasia", names, per=4)
+    print(f"  vault_tools_key di kimi: {'ada' if 'vault_tools_key' in names else 'tidak ada'}")
+    cmds = k.get("command_files") or []
+    print("  berkas yang mendaftarkan menu:" + ("" if cmds else " tidak ada"))
+    for c in cmds:
+        para(json.dumps(c, ensure_ascii=False), "    ", "      ")
     cron = k.get("cron")
     print(f"  job cron OpenClaw: {len(cron) if cron is not None else 'folder tidak ada'}")
     for j in (cron or []):
         if j["hits"]:
-            print(f"    {j}")
+            para(json.dumps(j, ensure_ascii=False), "    ", "      ")
     print(f"  baris crontab root: {k.get('root_crontab_lines')}")
     for root, rows in (k.get("listing") or {}).items():
         if rows is None:
@@ -300,14 +380,16 @@ def diff(orig_path, kimi_path):
             print(f"  {root}/{rel}: {verdict}")
     print(f"  sama dengan repo: {sum(1 for r in rows if r[2] == 'sama dengan repo')} berkas; "
           f"berkas .py repo yang tidak ada di kimi: {len(missing)}")
-    print("== gerbang data (rencana Tahap A)")
-    print("  lolos" if not gate else "  TIDAK lolos:")
+    verdict = "TIDAK lolos" if gate else ("lolos hanya dengan keputusanmu (bagian berikut)" if decide else "lolos")
+    print("== gerbang data (rencana Tahap A): " + verdict)
     for g in gate:
-        print(f"  - {g}")
-    print("== perlu perhatianmu")
-    print("  tidak ada" if not attn else "", end="\n" if not attn else "")
+        para(g)
+    print("== syarat rencana yang punya penanganan, menunggu keputusanmu:" + ("" if decide else " tidak ada"))
+    for d in decide:
+        para(d)
+    print("== perlu perhatianmu:" + ("" if attn else " tidak ada"))
     for a in attn:
-        print(f"  - {a}")
+        para(a)
 
 
 if __name__ == "__main__":
