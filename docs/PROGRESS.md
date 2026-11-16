@@ -784,6 +784,26 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   `GET /v1/models` 200 from vault and front; the owner tested both bots. `make runtime-map` at the end: 279 of 279 deployed
   files identical to the repo, none missing.
 
+## Kimiclaw wiped; three receipts brought home (2026-11-16, owner: "masukkan 3 struk ke ledger VPS, lalu hapus A dan B")
+- Before deleting, a keyed-hash compare of every ledger copy on kimiclaw with the live ledger. `/opt/vault-tools` matched,
+  but OpenClaw's own copy (`/root/.openclaw/workspace/finance-vault`, with backups of 8-9 Nov) held three receipts the VPS
+  lacked: 8 Nov BAKE INC JAKARTA 121.000 and GION SUSHI LA VELA 469.260 (makan), 9 Nov MyRepublic 562.450 (internet), all
+  from `jago-harian`. The return's "kimi data identical" had covered `/opt/vault-tools` only.
+- Brought home with `health.record_expense` (the function behind the bot's tool) inside vault-tools, after
+  `ledger.db.bak-pre-kimi-receipts-20261116` (integrity ok, 1978 transactions) and a dry run on an in-memory copy: stored as
+  #2522-2524, the same ids they had there, none merged; 1981 transactions. Alert: the internet budget is at 104%
+  (562.450 of 540.000). Not brought: OpenClaw's `living_reserve` 7.500.000 (the VPS keeps 7.546.005).
+- Secrets compared the same way: 7 of 8 equal to the VPS's; `gmail_ingest_token` differed (refreshed there).
+- Deleted on kimiclaw (A): the five `pa-*`/`vault-tools` units (disabled, removed, daemon-reload), the secret files
+  (shredded), `/opt/vault-tools`, `/opt/ingest-gmail`, `/opt/personal-agent-secrets`, OpenClaw's `finance-vault` workspace,
+  `/tmp/personal-agent`, `/var/log/personal-agent-bootstrap.log`. (B): `openclaw-gateway` (root user unit) stopped and
+  disabled; 10 of 11 OpenClaw sessions (those mentioning the finance bot), `MEMORY.md`, `USER.md`, two memory notes,
+  `logs/config-audit.jsonl` and the `skills/finance-vault` skill. A search afterwards finds no project file; left: commit
+  messages in the OpenClaw workspace's `.git` and skill entry names in `openclaw.json` (no values), and OpenClaw's own
+  unrelated files (lark, dingtalk, memory_consolidation). Its Telegram bot token matches none of the VPS's.
+- Still open: rotate `telegram_control_token`, `notion_token` and Gmail access (revoke and `gmail-renew`), since the
+  copies were live for a week; `vault_tools_key` and `pdf_passwords` cannot be rotated. `make verify` passed afterwards.
+
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
 2. Closing the pot gap without the children's needs: games (owner's own), apps not marked `wajib`, or talking to the friend.
@@ -850,8 +870,8 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
     failed units. Vault's stopped life was logged UNCLEANLY again (idle, nothing to recover).
 
 ## Next steps
-- After the return from kimiclaw (section above): Kimiclaw still runs OpenClaw and still
-  holds live copies of eight secrets: `vault_tools_key` (opens the stored account numbers), `gmail_ingest_token` and
+- (done 16 Nov, section "Kimiclaw wiped": copies deleted; rotating control, Notion and Gmail still open) After the
+  return from kimiclaw (section above): Kimiclaw still runs OpenClaw and still holds live copies of eight secrets: `vault_tools_key` (opens the stored account numbers), `gmail_ingest_token` and
   `gmail_ingest_client` (read the bank statements), `telegram_control_token`, `notion_token`, `pdf_passwords`,
   `vault_tools_internal_token` and `vault_tools_mcp_token`. Only the vault bot's token was replaced. The owner decides:
   shut OpenClaw and wipe or decommission that host, and/or rotate what can be rotated (`vault_tools_key` cannot without
