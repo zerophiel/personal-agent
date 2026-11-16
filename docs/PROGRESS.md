@@ -827,12 +827,15 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
     closings depend on how much of the salary was still there when each bank file ends, and the payday empties it by
     design (October's closing comes after the 30 Oct transfers). Keep the warning, compare balances just before each
     payday, or leave the salary account out of the trend? A manual calibration for the owner; nothing changed.
-23. Front's Anthropic key is rejected (HTTP 401 since the return of 16 Nov; the secret, `front.env` and the container hold
-    the same value). The owner makes a new key in the front workspace of the Anthropic Console and runs
-    `make secret-set NAME=anthropic_front_key`; then `front.env` is rendered again and front recreated.
+23. (done 2026-11-16 09:01 WIB) Front's Anthropic key was rejected (HTTP 401 after the return; the secret, `front.env` and
+    the container held the same value, so the key had been revoked at Anthropic). The owner set new keys for front AND vault
+    (`make secret-set`, 08:59 WIB); both env files were rendered again with the host scripts (`stack.env` sourced), vault and
+    front recreated with `up -d --no-build --pull never --no-deps --force-recreate --wait` (a restart does not re-read
+    `env_file`). `GET /v1/models` from inside each container: 200; both connected to Telegram; `make verify` passed with 0
+    failed units. Vault's stopped life was logged UNCLEANLY again (idle, nothing to recover).
 
 ## Next steps
-- After the return from kimiclaw (section above): open question 23 (front's key). Kimiclaw still runs OpenClaw and still
+- After the return from kimiclaw (section above): Kimiclaw still runs OpenClaw and still
   holds live copies of eight secrets: `vault_tools_key` (opens the stored account numbers), `gmail_ingest_token` and
   `gmail_ingest_client` (read the bank statements), `telegram_control_token`, `notion_token`, `pdf_passwords`,
   `vault_tools_internal_token` and `vault_tools_mcp_token`. Only the vault bot's token was replaced. The owner decides:
