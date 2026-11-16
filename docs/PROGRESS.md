@@ -769,6 +769,21 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   re-clustered and dropped 30 of 259 community names, so it was set back; the return scripts and these docs go into the next
   naming round.
 
+## The VPS caught up with the repo (2026-11-16 morning, owner: "lanjut make sync", then "lanjut make up dan make front")
+- `make sync` from a checkout equal to `main` (bc5944e): a dry run first showed 0 deletions and 138 files (74 new);
+  `config/stack.env` held the same values, and `compose/docker-compose.yml` differed only by the squid digest pin, whose image
+  every squid container already ran. Afterwards `make render-envs` works on the host (the 4fcd607 script) and rendered both env
+  files byte for byte as before; `scripts/backup.sh` with `--retry-lock` runs from the 17 Nov 02:00 backup on.
+- `make up` and `make front` for the pins, after `ledger.db.bak-pre-pins-20261116` (SQLite API inside vault-tools, integrity
+  ok, 1978 transactions) with vault idle: the vault-tools, control, ingest-gmail and change-proposals images built from the
+  pinned Dockerfiles; the four squids, vault-tools, control and change-proposals recreated; vault and front kept running. No
+  `/new` (no SOUL, config or tool change).
+- Seen: while the squids were recreated (09:40:36 WIB) vault and front logged "Temporary failure in name resolution" for their
+  proxy and polled again on their own; no error after 09:41. Recreating a squid briefly cuts its bot off Telegram.
+- Checks: `make verify` passed (9/9 containers, ledger 4262 rows = the copy, packages = locks, 13/13 timers, 0 failed units);
+  `GET /v1/models` 200 from vault and front; the owner tested both bots. `make runtime-map` at the end: 279 of 279 deployed
+  files identical to the repo, none missing.
+
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
 2. Closing the pot gap without the children's needs: games (owner's own), apps not marked `wajib`, or talking to the friend.
@@ -840,13 +855,13 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   `gmail_ingest_client` (read the bank statements), `telegram_control_token`, `notion_token`, `pdf_passwords`,
   `vault_tools_internal_token` and `vault_tools_mcp_token`. Only the vault bot's token was replaced. The owner decides:
   shut OpenClaw and wipe or decommission that host, and/or rotate what can be rotated (`vault_tools_key` cannot without
-  re-entering the stored numbers). The host scripts older than 4fcd607 (`render-vault-env.sh`,
-  `backup.sh`) are fixed by the next `make sync`, with the owner's OK. Code only on kimiclaw (`run_server.py`,
+  re-entering the stored numbers). (done 16 Nov) The host scripts older than 4fcd607 were brought up to date by
+  `make sync` (section "The VPS caught up with the repo"). Code only on kimiclaw (`run_server.py`,
   `scripts/rincian_send.py`, `ingest-gmail/gmail-token-check.py`, tests) is not in the repo: keep or drop, the owner's call.
 - Rebuild work: merged to `main` on 2026-11-07, with a merge commit (not squash or rebase: `scripts/finish-merge.sh` checks that the
   branch tip is an ancestor of `main`). The owner's last step, once, in `~/personal-agent`: `git pull --ff-only origin main` and
   `bash scripts/finish-merge.sh`.
-- Open, only when the owner wants the VPS side, each with the owner's OK: `make sync`; then a ledger backup, `make up`, `make front`,
+- (done 2026-11-16, section "The VPS caught up with the repo") `make sync`; then a ledger backup, `make up`, `make front`,
   `make verify` for the pins (four squid containers recreated, `vault-tools`, `control` and `change-proposals` rebuilt, no `/new`).
 - (done 2 Nov morning) Owner `/new` to vault after the 2 Nov 01:23 WIB deploy (`transfer_selesai` has `gajian`). The
   30 Oct lesson fee is not paid yet, its money set aside outside the daily account (no correction): tell the bot once
