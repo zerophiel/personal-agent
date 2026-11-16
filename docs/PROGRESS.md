@@ -743,6 +743,32 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   entries; `origin/HEAD` follows `main`. Read in the source of Compose v5.6.1: `pull` and `build` do not read `env_file`, so
   `make images` needs no `vault.env`.
 
+## Back from kimiclaw (2026-11-09 to 2026-11-16)
+- On 9 Nov another assistant (Kimi) moved the vault bot to a second server running OpenClaw ("kimiclaw") and stopped the stack
+  here, leaving the data of 9 Nov 10:30 WIB frozen. Its uncommitted notes are kept on the laptop as
+  `~/catatan-kimi-2026-11-09.diff`; its commit `bae2167` (the other host's address) never reached `origin`.
+- The return plan (owner OK 14 Nov): Tahap 0 by the owner, Tahap A read-only, Tahap B the move, Tahap C close. Scripts:
+  `ops/datafix/2026-11-14-return/` (probe, compare, stage, install; README there).
+- Tahap A (16 Nov): `probe.py` on both hosts and `compare.py diff`: every ledger table (31 tables, 4262 rows) and `ingest.db`
+  (113 rows) identical row for row, the ingest folder 155 = 155 files, `_events.jsonl` 126 = 126. The bot wrote nothing on
+  kimiclaw; the owner confirmed recording nothing there. Nothing to bring home, so B2 (stage) and B4 (install) were skipped.
+- Tahap B (16 Nov, owner: "lanjut tahap B"):
+  - B1: on kimiclaw `pa-ingest.timer`, `pa-gmail-token.timer` and `vault-tools.service` disabled; OpenClaw left running.
+    A probe after the freeze was still identical.
+  - B3: the owner revoked the vault bot's token in BotFather and set the new one with `make secret-set`.
+  - B5: the host's `scripts/render-vault-env.sh` predates 4fcd607 and needs `MY_TELEGRAM_ID` in its environment, so
+    `make render-envs` failed; the host's own scripts ran with `set -a; . config/stack.env` instead. The stack started from
+    its images (`up -d --no-build --pull never --wait`, then the front profile: 9 containers). The ingest and gmail-token
+    timer stamps were cleared (`systemctl clean --what=state`) before the 11 timers were enabled, so neither caught up.
+  - B6: `make verify` passed. The catch-up runs of `pa-backup` and `pa-forget` started in the same second and locked each
+    other out (the host's `backup.sh` has no `--retry-lock` yet); one `pa-backup` run alone succeeded. All three bots
+    connected to Telegram, no 401 or 409 from Telegram.
+  - B7: the owner tested the bots. Front answers "HTTP 401: invalid x-api-key" from Anthropic: its key
+    (`anthropic_front_key`, unchanged since 1 Nov) is no longer valid at Anthropic; open question 23.
+- Tahap C: `make mirror` (every check passed, ledger 4262 rows), `make runtime-map`. The graph was not rebuilt: `make graph`
+  re-clustered and dropped 30 of 259 community names, so it was set back; the return scripts and these docs go into the next
+  naming round.
+
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
 2. Closing the pot gap without the children's needs: games (owner's own), apps not marked `wajib`, or talking to the friend.
@@ -801,8 +827,19 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
     closings depend on how much of the salary was still there when each bank file ends, and the payday empties it by
     design (October's closing comes after the 30 Oct transfers). Keep the warning, compare balances just before each
     payday, or leave the salary account out of the trend? A manual calibration for the owner; nothing changed.
+23. Front's Anthropic key is rejected (HTTP 401 since the return of 16 Nov; the secret, `front.env` and the container hold
+    the same value). The owner makes a new key in the front workspace of the Anthropic Console and runs
+    `make secret-set NAME=anthropic_front_key`; then `front.env` is rendered again and front recreated.
 
 ## Next steps
+- After the return from kimiclaw (section above): open question 23 (front's key). Kimiclaw still runs OpenClaw and still
+  holds live copies of eight secrets: `vault_tools_key` (opens the stored account numbers), `gmail_ingest_token` and
+  `gmail_ingest_client` (read the bank statements), `telegram_control_token`, `notion_token`, `pdf_passwords`,
+  `vault_tools_internal_token` and `vault_tools_mcp_token`. Only the vault bot's token was replaced. The owner decides:
+  shut OpenClaw and wipe or decommission that host, and/or rotate what can be rotated (`vault_tools_key` cannot without
+  re-entering the stored numbers). The host scripts older than 4fcd607 (`render-vault-env.sh`,
+  `backup.sh`) are fixed by the next `make sync`, with the owner's OK. Code only on kimiclaw (`run_server.py`,
+  `scripts/rincian_send.py`, `ingest-gmail/gmail-token-check.py`, tests) is not in the repo: keep or drop, the owner's call.
 - Rebuild work: merged to `main` on 2026-11-07, with a merge commit (not squash or rebase: `scripts/finish-merge.sh` checks that the
   branch tip is an ancestor of `main`). The owner's last step, once, in `~/personal-agent`: `git pull --ff-only origin main` and
   `bash scripts/finish-merge.sh`.
