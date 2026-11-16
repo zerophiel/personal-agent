@@ -801,8 +801,9 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
   `logs/config-audit.jsonl` and the `skills/finance-vault` skill. A search afterwards finds no project file; left: commit
   messages in the OpenClaw workspace's `.git` and skill entry names in `openclaw.json` (no values), and OpenClaw's own
   unrelated files (lark, dingtalk, memory_consolidation). Its Telegram bot token matches none of the VPS's.
-- Still open: rotate `telegram_control_token`, `notion_token` and Gmail access (revoke and `gmail-renew`), since the
-  copies were live for a week; `vault_tools_key` and `pdf_passwords` cannot be rotated. `make verify` passed afterwards.
+- Not rotated, by the owner's decision (16 Nov, "biarkan saja, tidak perlu ganti token"): `telegram_control_token`,
+  `notion_token` and Gmail access stay as they are; both tokens checked live on the VPS that day (control `getMe` ok,
+  Notion `users/me` 200). `vault_tools_key` and `pdf_passwords` cannot be rotated. `make verify` passed afterwards.
 
 ## Open questions for the owner (resume here)
 1. (decided 2026-10-28: the 31 Jan 2028 salary counts for the pot)
@@ -870,7 +871,7 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
     failed units. Vault's stopped life was logged UNCLEANLY again (idle, nothing to recover).
 
 ## Next steps
-- (done 16 Nov, section "Kimiclaw wiped": copies deleted; rotating control, Notion and Gmail still open) After the
+- (done 16 Nov, section "Kimiclaw wiped": copies deleted; the owner chose not to rotate) After the
   return from kimiclaw (section above): Kimiclaw still runs OpenClaw and still holds live copies of eight secrets: `vault_tools_key` (opens the stored account numbers), `gmail_ingest_token` and
   `gmail_ingest_client` (read the bank statements), `telegram_control_token`, `notion_token`, `pdf_passwords`,
   `vault_tools_internal_token` and `vault_tools_mcp_token`. Only the vault bot's token was replaced. The owner decides:
