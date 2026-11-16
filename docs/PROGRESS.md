@@ -832,8 +832,12 @@ Card budgets are `kartu:<category>` (count only rows paid by a card, via `record
     `make secret-set NAME=anthropic_front_key`; then `front.env` is rendered again and front recreated.
 
 ## Next steps
-- After the return from kimiclaw (section above): open question 23 (front's key). On kimiclaw OpenClaw still runs, with the
-  revoked vault token; what to do with that host is the owner's. The host scripts older than 4fcd607 (`render-vault-env.sh`,
+- After the return from kimiclaw (section above): open question 23 (front's key). Kimiclaw still runs OpenClaw and still
+  holds live copies of eight secrets: `vault_tools_key` (opens the stored account numbers), `gmail_ingest_token` and
+  `gmail_ingest_client` (read the bank statements), `telegram_control_token`, `notion_token`, `pdf_passwords`,
+  `vault_tools_internal_token` and `vault_tools_mcp_token`. Only the vault bot's token was replaced. The owner decides:
+  shut OpenClaw and wipe or decommission that host, and/or rotate what can be rotated (`vault_tools_key` cannot without
+  re-entering the stored numbers). The host scripts older than 4fcd607 (`render-vault-env.sh`,
   `backup.sh`) are fixed by the next `make sync`, with the owner's OK. Code only on kimiclaw (`run_server.py`,
   `scripts/rincian_send.py`, `ingest-gmail/gmail-token-check.py`, tests) is not in the repo: keep or drop, the owner's call.
 - Rebuild work: merged to `main` on 2026-11-07, with a merge commit (not squash or rebase: `scripts/finish-merge.sh` checks that the
